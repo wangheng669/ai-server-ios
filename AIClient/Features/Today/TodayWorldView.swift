@@ -315,7 +315,7 @@ struct TodayWorldView: View {
                 }
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: originalPostIDs != nil)
             }
-            .background(Color(uiColor: .systemBackground))
+            .background(TodayBriefStyle.surface)
             .toolbar(.hidden, for: .navigationBar)
         }
         .task(id: rootTabIsActive) {
@@ -345,12 +345,14 @@ struct TodayWorldView: View {
     }
 
     private func pageContent(viewport: CGSize) -> some View {
-        ScrollView {
-            Group {
+        let readingHeight = max(0, viewport.height - bottomChromeHeight - 8)
+        return ScrollView {
+            VStack(spacing: TodayBriefStyle.toolsSpacing) {
+                toolsButton
                 if let brief = store.brief {
                     TodayBriefOverviewView(
                         brief: brief,
-                        viewport: viewport,
+                        viewport: CGSize(width: viewport.width, height: readingHeight),
                         openSources: { originalPostIDs = $0 }
                     )
                     .id(brief.date)
@@ -358,31 +360,32 @@ struct TodayWorldView: View {
                     emptyReportView
                 }
             }
-            .padding(.top, TodayBriefStyle.toolsRowHeight)
             .frame(
                 maxWidth: .infinity,
-                minHeight: max(0, viewport.height - bottomChromeHeight - 8),
-                alignment: .top
+                minHeight: readingHeight,
+                alignment: store.brief == nil ? .top : .center
             )
         }
         .scrollIndicators(.hidden)
         .scrollBounceBehavior(.basedOnSize)
         .padding(.bottom, bottomChromeHeight + 8)
-        .overlay(alignment: .topTrailing) {
-            TodayToolsButton(
-                waitingForRechargeReturn: $waitingForRechargeReturn,
-                balance: store.balance,
-                dailyCosts: store.dailyCosts,
-                isLoading: store.isLoadingBalance,
-                needsRetry: store.balanceNeedsRetry,
-                retry: { await store.loadBalance(force: true) },
-                editionNotice: editionNotice,
-                isRefreshingReport: store.isLoading,
-                retryReport: { await store.loadReport(force: true) }
-            )
-            .padding(.horizontal, TodayBriefStyle.horizontalInset)
-            .padding(.top, 2)
-        }
+    }
+
+    private var toolsButton: some View {
+        TodayToolsButton(
+            waitingForRechargeReturn: $waitingForRechargeReturn,
+            balance: store.balance,
+            dailyCosts: store.dailyCosts,
+            isLoading: store.isLoadingBalance,
+            needsRetry: store.balanceNeedsRetry,
+            retry: { await store.loadBalance(force: true) },
+            editionNotice: editionNotice,
+            isRefreshingReport: store.isLoading,
+            retryReport: { await store.loadReport(force: true) }
+        )
+        .frame(maxWidth: TodayBriefStyle.maximumCardWidth, alignment: .trailing)
+        .frame(height: TodayBriefStyle.toolsRowHeight)
+        .padding(.horizontal, TodayBriefStyle.horizontalInset)
     }
 
     private func originalsOverlay(postIDs: [Int], brief: TodayBriefProjection, viewport: CGSize) -> some View {

@@ -4,6 +4,10 @@ import UIKit
 enum TodayBriefStyle {
     static let horizontalInset: CGFloat = 22
     static let toolsRowHeight: CGFloat = 48
+    static let toolsSpacing: CGFloat = 8
+    static let maximumCardWidth: CGFloat = 480
+    static let cardCornerRadius: CGFloat = 28
+    static let surface = Color(uiColor: .systemBackground)
     static let rule = Color(uiColor: .separator).opacity(0.28)
     static let secondary = Color(uiColor: .secondaryLabel)
     static var surfaceOutline: Color { accent.opacity(0.16) }
@@ -121,7 +125,7 @@ struct TodayBriefOverviewView: View {
     let openSources: ([Int]) -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
+        Group {
             if brief.cards.isEmpty {
                 Text("本期暂无可阅读的简报")
                     .font(.subheadline)
@@ -129,9 +133,7 @@ struct TodayBriefOverviewView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(TodayBriefStyle.horizontalInset)
             } else {
-                Spacer(minLength: 0)
                 TodayBriefDeck(brief: brief, viewport: viewport) { openSources($0.postIDs) }
-                Spacer(minLength: 0)
             }
         }
         .accessibilityIdentifier("today-overview")
@@ -153,7 +155,7 @@ struct TodayOriginalsPanel: View {
     }
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 24)
+        let shape = RoundedRectangle(cornerRadius: TodayBriefStyle.cardCornerRadius)
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 if let singleSource {
@@ -168,11 +170,11 @@ struct TodayOriginalsPanel: View {
                     .accessibilityIdentifier("today-originals-close")
                     .accessibilityFocused($closeFocused)
             }
-            .padding(.leading, 20)
+            .padding(.leading, TodayBriefStyle.horizontalInset)
             .padding(.trailing, 12)
             .padding(.vertical, 10)
             TodayBriefStyle.rule.frame(height: 1)
-                .padding(.horizontal, 20)
+                .padding(.horizontal, TodayBriefStyle.horizontalInset)
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
@@ -184,19 +186,19 @@ struct TodayOriginalsPanel: View {
                             TodaySourceAuthorView(source: source)
                                 .accessibilityAddTraits(.isHeader)
                         }
-                        TodayInlineSourceView(source: source, width: max(1, width - 40))
+                        TodayInlineSourceView(source: source, width: max(1, width - TodayBriefStyle.horizontalInset * 2))
                     }
                     sourceStatus
                 }
-                .padding(20)
+                .padding(TodayBriefStyle.horizontalInset)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollBounceBehavior(.basedOnSize)
         }
-        .background(Color(uiColor: .systemBackground), in: shape)
+        .background(TodayBriefStyle.surface, in: shape)
         .clipShape(shape)
         .overlay { shape.strokeBorder(TodayBriefStyle.surfaceOutline) }
-        .shadow(color: TodayBriefStyle.accent.opacity(0.13), radius: 20, x: 0, y: 8)
+        .shadow(color: TodayBriefStyle.accent.opacity(0.11), radius: 18, x: 0, y: 7)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("today-originals-panel")
         .accessibilityAction(.escape) { close() }
@@ -242,14 +244,14 @@ private struct TodayBriefDeck: View {
     let viewport: CGSize
     let open: (TodayBriefProjection.Card) -> Void
 
-    private let shape = RoundedRectangle(cornerRadius: 30)
+    private let shape = RoundedRectangle(cornerRadius: TodayBriefStyle.cardCornerRadius)
 
     var body: some View {
-        let deckPadding: CGFloat = 36
-        // Keep card height stable as banners and billing details come and go.
-        let cardHeight = min(495, max(0, viewport.height - TodayBriefStyle.toolsRowHeight - deckPadding))
+        let deckPadding: CGFloat = 24
+        let toolsHeight = TodayBriefStyle.toolsRowHeight + TodayBriefStyle.toolsSpacing
+        let cardHeight = min(495, max(0, viewport.height - toolsHeight - deckPadding))
         let deckHeight = cardHeight + deckPadding
-        let cardWidth = min(max(0, viewport.width - 44), 480)
+        let cardWidth = min(max(0, viewport.width - TodayBriefStyle.horizontalInset * 2), TodayBriefStyle.maximumCardWidth)
 
         cards(
             width: cardWidth,
@@ -271,33 +273,16 @@ private struct TodayBriefDeck: View {
                         )
                         .frame(width: width, height: height)
                         .background {
-                            shape.fill(.background)
-                                .shadow(color: TodayBriefStyle.accent.opacity(0.13), radius: 10, x: 0, y: 5)
+                            shape.fill(TodayBriefStyle.surface)
+                                .shadow(color: TodayBriefStyle.accent.opacity(0.08), radius: 12, x: 0, y: 5)
                         }
-                        .overlay { shape.strokeBorder(TodayBriefStyle.accent.opacity(0.12)) }
+                        .overlay { shape.strokeBorder(TodayBriefStyle.surfaceOutline) }
                         .contentShape(shape)
                     }
                     .buttonStyle(.plain)
                     .accessibilityHint("查看原文")
                     .accessibilityIdentifier("today-card-\(card.id)")
-                    .padding(.top, 14)
-                    .background(alignment: .top) {
-                        if brief.cards.count > 1 {
-                            ZStack(alignment: .top) {
-                                shape
-                                    .fill(Color(red: 0.91, green: 0.95, blue: 0.92))
-                                    .frame(width: width * 0.87, height: height)
-                                    .offset(y: 28)
-                                shape
-                                    .fill(Color(red: 0.95, green: 0.97, blue: 0.95))
-                                    .frame(width: width * 0.94, height: height)
-                                    .offset(y: 21)
-                            }
-                            .accessibilityHidden(true)
-                            .allowsHitTesting(false)
-                        }
-                    }
-                    .frame(width: viewport.width, height: viewport.height, alignment: .top)
+                    .frame(width: viewport.width, height: viewport.height)
                 }
             }
             .scrollTargetLayout()
@@ -316,34 +301,33 @@ private struct TodayBriefCardFace: View {
     let compact: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: compact ? 8 : 17) {
+        VStack(alignment: .leading, spacing: compact ? 10 : 20) {
             identity
 
             if let text = card.text {
                 Text(text)
                     .font(compact ? .body : .title3)
                     .foregroundStyle(.primary)
-                    .lineSpacing(5)
+                    .lineSpacing(compact ? 4 : 7)
                     .layoutPriority(1)
             }
         }
         .multilineTextAlignment(.leading)
-        .padding(compact ? 15 : 24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(alignment: .top) {
+        .padding(compact ? 16 : 26)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .background {
             LinearGradient(
-                colors: [Color(red: 0.91, green: 0.96, blue: 0.92), .clear],
-                startPoint: .top,
-                endPoint: .bottom
+                colors: [TodayBriefStyle.accent.opacity(0.07), .clear],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
             )
-            .frame(maxHeight: compact ? 150 : 270)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 30))
+        .clipShape(RoundedRectangle(cornerRadius: TodayBriefStyle.cardCornerRadius))
         .accessibilityElement(children: .combine)
     }
 
     private var identity: some View {
-        let size: CGFloat = compact ? 32 : 48
+        let size: CGFloat = compact ? 32 : 40
         return HStack(spacing: 10) {
             switch card.content {
             case let .event(event):
@@ -456,7 +440,7 @@ struct TodayToolsButton: View {
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(TodayBriefStyle.accent)
                 .frame(width: 44, height: 44)
-                .background(Color(uiColor: .systemBackground), in: Circle())
+                .background(TodayBriefStyle.surface, in: Circle())
                 .overlay { Circle().strokeBorder(TodayBriefStyle.surfaceOutline) }
                 .overlay(alignment: .topTrailing) {
                     if editionNotice != nil || availableUpdate != nil {
