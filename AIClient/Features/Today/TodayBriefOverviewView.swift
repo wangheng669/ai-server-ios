@@ -61,6 +61,20 @@ struct TodayBriefProjection: Sendable {
         let id: String
         let content: Content
 
+        var title: String {
+            switch content {
+            case let .event(event): event.title
+            case let .company(company): company.system.headline
+            }
+        }
+
+        var summary: String? {
+            switch content {
+            case let .event(event): event.summary.isEmpty ? event.details.first : event.summary
+            case let .company(company): company.paragraphs.first ?? company.watch
+            }
+        }
+
         var postIDs: [Int] {
             switch content {
             case let .event(event): event.postIDs
@@ -116,6 +130,8 @@ struct TodayBriefProjection: Sendable {
 }
 
 struct TodayBriefOverviewView: View {
+    @State private var selectedCard: TodayBriefProjection.Card?
+
     let brief: TodayBriefProjection
     let cachedEditionMessage: String?
     let reportError: String?
@@ -134,21 +150,21 @@ struct TodayBriefOverviewView: View {
                         .padding(TodayBriefStyle.horizontalInset)
                 }
             } else {
-                TabView {
-                    ForEach(brief.cards) { card in
-                        cardPage(card)
-                    }
-                }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .accessibilityIdentifier("today-card-pager")
+                TodayBriefDeck(brief: brief) { selectedCard = $0 }
             }
         }
         .scrollIndicators(.hidden)
         .clipped()
         .accessibilityIdentifier("today-overview")
+        .appSheet(item: $selectedCard) { card in
+            readingSheet(card)
+                .appPresentationDetents([.large])
+                .appPresentationCornerRadius(28)
+                .appPresentationDragIndicator()
+        }
     }
 
-    private func cardPage(_ card: TodayBriefProjection.Card) -> some View {
+    private func readingSheet(_ card: TodayBriefProjection.Card) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
                 if card.id == brief.cards.first?.id, let headline = brief.overviewHeadline {
@@ -173,7 +189,24 @@ struct TodayBriefOverviewView: View {
         }
         .scrollIndicators(.hidden)
         .scrollBounceBehavior(.basedOnSize)
-        .clipped()
+        .safeAreaInset(edge: .top, spacing: 0) {
+            Button {
+                selectedCard = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("关闭简报")
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .padding(.horizontal, 12)
+            .background(Color(uiColor: .systemBackground))
+        }
+        .background(Color(uiColor: .systemBackground))
+        .accessibilityIdentifier("today-brief-reading-sheet")
     }
 
     @ViewBuilder
@@ -245,6 +278,209 @@ struct TodayBriefOverviewView: View {
         case let .company(card):
             TodayBriefCompanyRow(card: card)
         }
+    }
+}
+
+private struct TodayBriefDeck: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var visibleCardID: String?
+
+    let brief: TodayBriefProjection
+    let open: (TodayBriefProjection.Card) -> Void
+
+    private let shape = RoundedRectangle(cornerRadius: 30)
+    private let backdrop = Color(red: 0.97, green: 0.98, blue: 0.97)
+
+    var body: some View {
+        GeometryReader { geometry in
+            let showsControls = brief.cards.count > 1 && geometry.size.height >= 320
+            let deckHeight = max(0, geometry.size.height - (showsControls ? 44 : 0))
+            let cardWidth = min(max(0, geometry.size.width - 44), 480)
+            let cardHeight = min(max(0, deckHeight - 36), 540)
+
+            VStack(spacing: 0) {
+                ZStack(alignment: .top) {
+                    if brief.cards.count > 1 {
+                        shape
+                            .fill(Color(red: 0.88, green: 0.93, blue: 0.89))
+                            .frame(width: cardWidth * 0.87, height: cardHeight)
+                            .offset(y: 28)
+                            .accessibilityHidden(true)
+                        shape
+                            .fill(Color(red: 0.93, green: 0.96, blue: 0.93))
+                            .frame(width: cardWidth * 0.94, height: cardHeight)
+                            .offset(y: 21)
+                            .accessibilityHidden(true)
+                    }
+
+                    cards(
+                        width: cardWidth,
+                        height: cardHeight,
+                        viewport: CGSize(width: geometry.size.width, height: deckHeight)
+                    )
+                }
+                .frame(height: deckHeight)
+
+                if showsControls {
+                    pageControls
+                }
+            }
+        }
+        .background(backdrop)
+    }
+
+    private func cards(width: CGFloat, height: CGFloat, viewport: CGSize) -> some View {
+        let animatesCards = !reduceMotion
+        return ScrollView(.horizontal) {
+            LazyHStack(spacing: 0) {
+                ForEach(brief.cards) { card in
+                    Button { open(card) } label: {
+                        TodayBriefCardFace(
+                            card: card,
+                            source: card.postIDs.lazy.compactMap { brief.sources[$0] }.first,
+                            compact: height < 350
+                        )
+                        .frame(width: width, height: height)
+                        .background {
+                            shape.fill(.background)
+                                .shadow(color: TodayBriefStyle.accent.opacity(0.13), radius: 10, x: 0, y: 5)
+                        }
+                        .overlay { shape.strokeBorder(TodayBriefStyle.accent.opacity(0.12)) }
+                        .contentShape(shape)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("打开完整简报及原文")
+                    .accessibilityIdentifier("today-card-\(card.id)")
+                    .scrollTransition(.interactive, axis: .horizontal) { content, phase in
+                        content
+                            .scaleEffect(animatesCards && !phase.isIdentity ? 0.95 : 1)
+                            .rotationEffect(.degrees(animatesCards ? phase.value * 4 : 0), anchor: .bottom)
+                    }
+                    .padding(.top, 14)
+                    .frame(width: viewport.width, height: viewport.height, alignment: .top)
+                }
+            }
+            .scrollTargetLayout()
+        }
+        .scrollIndicators(.hidden)
+        .scrollBounceBehavior(.basedOnSize)
+        .scrollTargetBehavior(.paging)
+        .scrollPosition(id: $visibleCardID)
+        .accessibilityIdentifier("today-card-pager")
+    }
+
+    private var pageControls: some View {
+        let index = brief.cards.firstIndex { $0.id == visibleCardID } ?? 0
+        return HStack(spacing: 12) {
+            pageButton("上一条", icon: "chevron.left", target: index - 1)
+            Text("\(index + 1) / \(brief.cards.count)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("第 \(index + 1) 张，共 \(brief.cards.count) 张")
+            pageButton("下一条", icon: "chevron.right", target: index + 1)
+        }
+    }
+
+    private func pageButton(_ title: String, icon: String, target: Int) -> some View {
+        let enabled = brief.cards.indices.contains(target)
+        return Button {
+            guard enabled else { return }
+            withAnimation(reduceMotion ? nil : .smooth(duration: 0.28)) {
+                visibleCardID = brief.cards[target].id
+            }
+        } label: {
+            Image(systemName: icon)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(enabled ? TodayBriefStyle.accent : Color.secondary.opacity(0.4))
+                .frame(width: 30, height: 30)
+                .background(.background, in: Circle())
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(title)
+    }
+}
+
+private struct TodayBriefCardFace: View {
+    let card: TodayBriefProjection.Card
+    let source: TodaySourcePresentation?
+    let compact: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 8 : 17) {
+            identity
+
+            Text(card.title)
+                .font(compact ? .title2.bold() : .largeTitle.bold())
+                .foregroundStyle(.primary)
+                .lineLimit(compact ? 2 : 3)
+                .minimumScaleFactor(0.78)
+                .layoutPriority(1)
+
+            if let summary = card.summary {
+                Text(summary)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(4)
+                    .lineLimit(compact ? 2 : 5)
+            }
+
+            Spacer(minLength: 0)
+
+            HStack {
+                Text("查看全文")
+                Spacer(minLength: 8)
+                Image(systemName: "arrow.up.right")
+                    .accessibilityHidden(true)
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(TodayBriefStyle.accent)
+            .padding(.top, 12)
+            .overlay(alignment: .top) { TodayBriefStyle.rule.frame(height: 1) }
+            .layoutPriority(2)
+        }
+        .multilineTextAlignment(.leading)
+        .padding(compact ? 15 : 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(alignment: .top) {
+            LinearGradient(
+                colors: [Color(red: 0.87, green: 0.94, blue: 0.88), .clear],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(maxHeight: compact ? 150 : 270)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 30))
+        .accessibilityElement(children: .combine)
+    }
+
+    private var identity: some View {
+        let size: CGFloat = compact ? 32 : 48
+        return HStack(spacing: 10) {
+            switch card.content {
+            case let .event(event):
+                if let source {
+                    AvatarView(url: source.avatarURL, name: source.author, size: size)
+                        .accessibilityHidden(true)
+                } else {
+                    Image(systemName: "newspaper")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(width: size, height: size)
+                        .background(.background, in: Circle())
+                        .accessibilityHidden(true)
+                }
+                Text(event.sourceLabel.isEmpty ? source?.author ?? "简报" : event.sourceLabel)
+            case let .company(company):
+                TodaySystemAvatar(source: company.avatar, name: company.name, size: size)
+                    .accessibilityHidden(true)
+                Text(company.name)
+            }
+        }
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(TodayBriefStyle.accent)
+        .lineLimit(1)
     }
 }
 
