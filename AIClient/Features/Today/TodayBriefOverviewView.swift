@@ -24,10 +24,10 @@ enum TodayOverviewSelection {
             }.map(\.item)
             guard !matches.isEmpty, !system.postIDs.isEmpty else { return true }
             let covered = Set(matches.flatMap(\.postIDs))
-            let displayed = matches.flatMap { [$0.title ?? "", $0.text] }
+            let displayed = matches.map(\.text)
             // Sharing one source does not mean the entire company report is covered.
             return !Set(system.postIDs).isSubset(of: covered)
-                || !TodayReadingEvent.additionalDetails([system.headline] + system.facts.map(\.text), excluding: displayed).isEmpty
+                || !TodayReadingEvent.additionalDetails(system.facts.map(\.text), excluding: displayed).isEmpty
                 || !(system.watchItem ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
@@ -46,7 +46,7 @@ struct TodayBriefProjection: Sendable {
             self.system = system
             name = todayBriefSystemName(system.systemName)
             avatar = TodaySystemAvatar.Source(system)
-            paragraphs = TodayReadingEvent.additionalDetails(system.facts.map(\.text), excluding: [system.headline])
+            paragraphs = TodayReadingEvent.additionalDetails(system.facts.map(\.text), excluding: [])
             watch = system.watchItem.flatMap { $0.isEmpty ? nil : "后续关注 · " + $0 }
             postIDs = Array(Set(system.postIDs.filter { $0 > 0 })).sorted()
         }
@@ -61,16 +61,9 @@ struct TodayBriefProjection: Sendable {
         let id: String
         let content: Content
 
-        var title: String {
+        var text: String? {
             switch content {
-            case let .event(event): event.title
-            case let .company(company): company.system.headline
-            }
-        }
-
-        var summary: String? {
-            switch content {
-            case let .event(event): event.summary.isEmpty ? event.details.first : event.summary
+            case let .event(event): event.text
             case let .company(company): company.paragraphs.first ?? company.watch
             }
         }
@@ -85,7 +78,6 @@ struct TodayBriefProjection: Sendable {
 
     let date: String
     let isPartial: Bool
-    let overviewHeadline: String?
     fileprivate let cards: [Card]
     let sourceIDs: [Int]
     private(set) var sources: [Int: TodaySourcePresentation] = [:]
@@ -121,11 +113,6 @@ struct TodayBriefProjection: Sendable {
             + companyCards
             + watchItems.map { Card(id: "watch-" + $0.id, content: .event($0)) }
         sourceIDs = Set(cards.flatMap(\.postIDs)).sorted()
-        let headline = overview.headline
-        let canonicalHeadline = TodayReadingEvent.canonical(headline)
-        overviewHeadline = headline.isEmpty || highlights.contains {
-            TodayReadingEvent.canonical($0.title) == canonicalHeadline
-        } ? nil : headline
     }
 }
 
@@ -143,7 +130,7 @@ struct TodayBriefOverviewView: View {
             editionStatus
             if brief.cards.isEmpty {
                 ScrollView {
-                    Text(brief.overviewHeadline ?? "本期暂无可阅读的简报")
+                    Text("本期暂无可阅读的简报")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -167,12 +154,6 @@ struct TodayBriefOverviewView: View {
     private func readingSheet(_ card: TodayBriefProjection.Card) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
-                if card.id == brief.cards.first?.id, let headline = brief.overviewHeadline {
-                    Text(headline)
-                        .font(.subheadline)
-                        .lineSpacing(4)
-                        .foregroundStyle(TodayBriefStyle.secondary)
-                }
                 cardContent(card.content)
                 if card.postIDs.isEmpty {
                     Text("暂无原文")
@@ -412,19 +393,12 @@ private struct TodayBriefCardFace: View {
         VStack(alignment: .leading, spacing: compact ? 8 : 17) {
             identity
 
-            Text(card.title)
-                .font(compact ? .title2.bold() : .largeTitle.bold())
-                .foregroundStyle(.primary)
-                .lineLimit(compact ? 2 : 3)
-                .minimumScaleFactor(0.78)
-                .layoutPriority(1)
-
-            if let summary = card.summary {
-                Text(summary)
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .lineSpacing(4)
-                    .lineLimit(compact ? 2 : 5)
+            if let text = card.text {
+                Text(text)
+                    .font(compact ? .body : .title3)
+                    .foregroundStyle(.primary)
+                    .lineSpacing(5)
+                    .layoutPriority(1)
             }
         }
         .multilineTextAlignment(.leading)
@@ -479,12 +453,7 @@ private struct TodayBriefEventContent: View {
                 Text(event.sourceLabel).font(.footnote.weight(.semibold))
                     .foregroundStyle(TodayBriefStyle.accent)
             }
-            Text(event.title)
-                .font(.title2.bold())
-                .accessibilityAddTraits(.isHeader)
-            if !event.summary.isEmpty {
-                Text(event.summary).font(.body).lineSpacing(5)
-            }
+            Text(event.text).font(.body).lineSpacing(5)
             if !event.details.isEmpty {
                 Text("具体进展").font(.subheadline.weight(.semibold))
                     .accessibilityAddTraits(.isHeader)
@@ -509,10 +478,8 @@ private struct TodayBriefCompanyRow: View {
                 TodaySystemAvatar(source: card.avatar, name: card.name, size: 24)
                 Text(card.name).font(.subheadline.weight(.semibold)).foregroundStyle(TodayBriefStyle.accent)
             }
-            Text(card.system.headline).font(.title2.bold()).lineSpacing(4)
-                .accessibilityAddTraits(.isHeader)
             ForEach(card.paragraphs, id: \.self) { fact in
-                Text(fact).font(.subheadline).foregroundStyle(.secondary).lineSpacing(4)
+                Text(fact).font(.body).lineSpacing(5)
             }
             if let watch = card.watch {
                 Text(watch).font(.subheadline).foregroundStyle(TodayBriefStyle.accent)

@@ -458,8 +458,7 @@ func todayWorldSourceAvatarURL(_ key: String) -> URL? {
 // Reading content stays tied to explicit report references; facts are not inferred to be separate events.
 struct TodayReadingEvent: Identifiable, Sendable {
     let id: String
-    let title: String
-    let summary: String
+    let text: String
     let sourceLabel: String
     let details: [String]
     let postIDs: [Int]
@@ -510,14 +509,13 @@ struct TodayReadingEvent: Identifiable, Sendable {
         }
         let ids = item.postIDs.isEmpty ? related.flatMap(\.postIDs) : item.postIDs
         let sourceIDs = Set(ids.filter { $0 > 0 })
-        let title = item.title.flatMap { $0.isEmpty ? nil : $0 } ?? item.text
-        let summary = additionalDetails([item.context, item.text].compactMap { $0 }, excluding: [title]).joined(separator: "\n")
         let facts = related.flatMap(\.facts).filter {
             !$0.postIDs.isEmpty && Set($0.postIDs).isSubset(of: sourceIDs)
         }
-        return Self(id: item.id, title: title, summary: summary,
+        let supportingText = [item.context].compactMap { $0 } + facts.map(\.text)
+        return Self(id: item.id, text: item.text,
                     sourceLabel: unique(related.map { todayBriefSystemName($0.systemName) }).joined(separator: " · "),
-                    details: additionalDetails(facts.map(\.text), excluding: [title, summary]),
+                    details: additionalDetails(supportingText, excluding: [item.text]),
                     postIDs: sourceIDs.sorted())
     }
 }
