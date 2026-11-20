@@ -289,13 +289,12 @@ private struct TodayBriefDeck: View {
     let open: (TodayBriefProjection.Card) -> Void
 
     private let shape = RoundedRectangle(cornerRadius: 30)
-    private let backdrop = Color(red: 0.97, green: 0.98, blue: 0.97)
 
     var body: some View {
         GeometryReader { geometry in
             let showsControls = brief.cards.count > 1 && geometry.size.height >= 320
             let deckPadding: CGFloat = 36
-            let maximumCardHeight: CGFloat = 540
+            let maximumCardHeight: CGFloat = 455
             let availableHeight = geometry.size.height - (showsControls ? 44 : 0)
             let deckHeight = min(max(0, availableHeight), maximumCardHeight + deckPadding)
             let cardWidth = min(max(0, geometry.size.width - 44), 480)
@@ -305,12 +304,12 @@ private struct TodayBriefDeck: View {
                 ZStack(alignment: .top) {
                     if brief.cards.count > 1 {
                         shape
-                            .fill(Color(red: 0.88, green: 0.93, blue: 0.89))
+                            .fill(Color(red: 0.91, green: 0.95, blue: 0.92))
                             .frame(width: cardWidth * 0.87, height: cardHeight)
                             .offset(y: 28)
                             .accessibilityHidden(true)
                         shape
-                            .fill(Color(red: 0.93, green: 0.96, blue: 0.93))
+                            .fill(Color(red: 0.95, green: 0.97, blue: 0.95))
                             .frame(width: cardWidth * 0.94, height: cardHeight)
                             .offset(y: 21)
                             .accessibilityHidden(true)
@@ -328,8 +327,8 @@ private struct TodayBriefDeck: View {
                     pageControls
                 }
             }
+            .frame(width: geometry.size.width, height: geometry.size.height)
         }
-        .background(backdrop)
     }
 
     private func cards(width: CGFloat, height: CGFloat, viewport: CGSize) -> some View {
@@ -395,8 +394,6 @@ private struct TodayBriefDeck: View {
             Image(systemName: icon)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(enabled ? TodayBriefStyle.accent : Color.secondary.opacity(0.4))
-                .frame(width: 30, height: 30)
-                .background(.background, in: Circle())
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
@@ -435,7 +432,7 @@ private struct TodayBriefCardFace: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(alignment: .top) {
             LinearGradient(
-                colors: [Color(red: 0.87, green: 0.94, blue: 0.88), .clear],
+                colors: [Color(red: 0.91, green: 0.96, blue: 0.92), .clear],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -591,6 +588,7 @@ struct TodayHeaderView: View {
     let isLoading: Bool
     let needsRetry: Bool
     let retry: () async -> Void
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             headerActions
@@ -601,7 +599,6 @@ struct TodayHeaderView: View {
         }
         .padding(.horizontal, TodayBriefStyle.horizontalInset)
         .padding(.bottom, 4)
-        .overlay(alignment: .bottom) { TodayBriefStyle.rule.frame(height: 1) }
         .alert("无法打开支付宝", isPresented: $rechargeUnavailable) {
             Button("知道了", role: .cancel) {}
         } message: {
