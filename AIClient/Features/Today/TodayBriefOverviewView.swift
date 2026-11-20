@@ -2,7 +2,8 @@ import SwiftUI
 import UIKit
 
 enum TodayBriefStyle {
-    static let ink = Color(red: 0.10, green: 0.23, blue: 0.19)
+    static let horizontalInset: CGFloat = 22
+    static let rule = Color(uiColor: .separator).opacity(0.28)
     static let secondary = Color(uiColor: .secondaryLabel)
     static let accent = Color(uiColor: UIColor { traits in
         traits.userInterfaceStyle == .dark
@@ -39,7 +40,6 @@ struct TodayBriefProjection: Sendable {
         let avatar: TodaySystemAvatar.Source
         let paragraphs: [String]
         let watch: String?
-        let sources: String
         let postIDs: [Int]
 
         init(_ system: TodayWorldFinalReportSystem) {
@@ -48,7 +48,6 @@ struct TodayBriefProjection: Sendable {
             avatar = TodaySystemAvatar.Source(system)
             paragraphs = TodayReadingEvent.additionalDetails(system.facts.map(\.text), excluding: [system.headline])
             watch = system.watchItem.flatMap { $0.isEmpty ? nil : "后续关注 · " + $0 }
-            sources = system.sourceNames.joined(separator: " · ")
             postIDs = Array(Set(system.postIDs.filter { $0 > 0 })).sorted()
         }
     }
@@ -62,11 +61,6 @@ struct TodayBriefProjection: Sendable {
         let id: String
         let content: Content
 
-        var sourceNames: String {
-            guard case let .company(company) = content else { return "" }
-            return company.sources
-        }
-
         var postIDs: [Int] {
             switch content {
             case let .event(event): event.postIDs
@@ -76,17 +70,11 @@ struct TodayBriefProjection: Sendable {
     }
 
     let date: String
-    let postCount: Int
-    let sourceCount: Int
     let isPartial: Bool
     let overviewHeadline: String?
     fileprivate let cards: [Card]
     let sourceIDs: [Int]
     private(set) var sources: [Int: TodaySourcePresentation] = [:]
-
-    var missingSourceCount: Int {
-        sourceIDs.count - sources.count
-    }
 
     mutating func addSources(_ posts: [Int: Post]) {
         for (id, post) in posts {
@@ -98,8 +86,6 @@ struct TodayBriefProjection: Sendable {
         let report = edition.report
         let systems = report.systems
         date = edition.date
-        postCount = edition.postCount
-        sourceCount = edition.sourceCount
         isPartial = report.completenessStatus == "partial"
         let overview = report.overview
         let highlights = overview.highlights.map { TodayReadingEvent.highlight($0, systems: systems) }
@@ -137,126 +123,117 @@ struct TodayBriefOverviewView: View {
     let retryReport: () async -> Void
 
     var body: some View {
-        Group {
+        VStack(spacing: 0) {
+            editionStatus
             if brief.cards.isEmpty {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        editionStatus
-                        if let headline = brief.overviewHeadline {
-                            Text(headline).font(.subheadline).lineSpacing(4)
-                        }
-                        editionCounts
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
+                    Text(brief.overviewHeadline ?? "本期暂无可阅读的简报")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(TodayBriefStyle.horizontalInset)
                 }
             } else {
-                cardPager
+                TabView {
+                    ForEach(brief.cards) { card in
+                        cardPage(card)
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .accessibilityIdentifier("today-card-pager")
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 8)
+        .scrollIndicators(.hidden)
+        .clipped()
         .accessibilityIdentifier("today-overview")
     }
 
-    private var cardPager: some View {
-        GeometryReader { geometry in
-            ScrollView(.horizontal) {
-                LazyHStack(spacing: 0) {
-                    ForEach(brief.cards) { card in
-                        ScrollView(.vertical) {
-                            LazyVStack(alignment: .leading, spacing: 12) {
-                                let isFirstCard = card.id == brief.cards.first?.id
-                                if isFirstCard {
-                                    editionStatus
-                                    if let headline = brief.overviewHeadline {
-                                        Text(headline).font(.subheadline).lineSpacing(4)
-                                            .foregroundStyle(TodayBriefStyle.secondary)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                        Divider()
-                                    }
-                                }
-                                cardContent(card.content)
-                                let sources = card.postIDs.compactMap { brief.sources[$0] }
-                                sourcesHeading(card, availableCount: sources.count)
-                                ForEach(sources) { source in
-                                    TodayInlineSourceView(source: source)
-                                }
-                                if isFirstCard { editionCounts }
-                            }
-                            .padding(16)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .scrollBounceBehavior(.basedOnSize, axes: .vertical)
-                        .frame(height: geometry.size.height)
-                        .containerRelativeFrame(.horizontal)
-                        .id(card.id)
-                    }
+    private func cardPage(_ card: TodayBriefProjection.Card) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 20) {
+                if card.id == brief.cards.first?.id, let headline = brief.overviewHeadline {
+                    Text(headline)
+                        .font(.subheadline)
+                        .lineSpacing(4)
+                        .foregroundStyle(TodayBriefStyle.secondary)
                 }
-                .scrollTargetLayout()
+                cardContent(card.content)
+                if card.postIDs.isEmpty {
+                    Text("暂无原文")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    cardSources(card.postIDs)
+                }
             }
-            .scrollIndicators(.hidden, axes: .horizontal)
-            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-            .scrollTargetBehavior(.paging)
-            .accessibilityIdentifier("today-card-pager")
+            .padding(.horizontal, TodayBriefStyle.horizontalInset)
+            .padding(.top, 18)
+            .padding(.bottom, 20)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .scrollIndicators(.hidden)
+        .scrollBounceBehavior(.basedOnSize)
+        .clipped()
     }
 
     @ViewBuilder
     private var editionStatus: some View {
-        if let reportError {
-            Label("已显示缓存日报 · \(reportError)", systemImage: "exclamationmark.circle")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        } else if let cachedEditionMessage {
-            Text(cachedEditionMessage)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("today-cached-edition")
-        }
-        if brief.isPartial {
-            Label("部分发布 · 本期内容尚不完整", systemImage: "exclamationmark.circle")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("today-partial-edition")
-        }
-        if brief.missingSourceCount > 0 {
-            Text("\(brief.missingSourceCount) 篇原文暂不可用")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-        if reportError != nil || brief.missingSourceCount > 0 {
-            if isRefreshing {
-                ProgressView().controlSize(.small)
-            } else {
-                Button("重试") { Task { await retryReport() } }
-                    .font(.subheadline)
+        let message = reportError ?? cachedEditionMessage
+        if message != nil || brief.isPartial {
+            VStack(alignment: .leading, spacing: 4) {
+                if let message {
+                    Label(message, systemImage: reportError == nil ? "clock" : "exclamationmark.circle")
+                        .accessibilityIdentifier("today-cached-edition")
+                }
+                if brief.isPartial {
+                    Label("本期内容尚不完整", systemImage: "info.circle")
+                        .accessibilityIdentifier("today-partial-edition")
+                }
+                if reportError != nil {
+                    retryButton
+                }
             }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, TodayBriefStyle.horizontalInset)
+            .padding(.vertical, 8)
         }
     }
 
-    private var editionCounts: some View {
-        Text("\(brief.postCount) 条动态 · \(brief.sourceCount) 个信息源")
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
-            .accessibilityIdentifier("today-report-metadata")
-    }
-
-    private func sourcesHeading(_ card: TodayBriefProjection.Card, availableCount: Int) -> some View {
-        let count = card.postIDs.count
-        return VStack(alignment: .leading, spacing: 5) {
-            Divider().padding(.bottom, 5)
-            Text(count == 0 ? "消息来源" : "消息来源 · \(count) 篇原文")
+    private func cardSources(_ ids: [Int]) -> some View {
+        let available = ids.compactMap { brief.sources[$0] }
+        let missing = ids.count - available.count
+        return LazyVStack(alignment: .leading, spacing: 0) {
+            Text("原文")
                 .font(.subheadline.weight(.semibold))
                 .accessibilityAddTraits(.isHeader)
-            if !card.sourceNames.isEmpty {
-                Text(card.sourceNames).font(.caption).foregroundStyle(.secondary)
+                .padding(.bottom, 4)
+            ForEach(available) { source in
+                TodayInlineSourceView(source: source)
+                    .padding(.vertical, 12)
+                    .overlay(alignment: .top) { TodayBriefStyle.rule.frame(height: 1) }
             }
-            if count == 0 {
-                Text("本条简报暂未提供原文引用").font(.caption).foregroundStyle(.secondary)
-            } else if availableCount < count {
-                Text("\(count - availableCount) 篇原文暂不可用").font(.caption).foregroundStyle(.secondary)
+            if missing > 0 {
+                HStack {
+                    Text("\(missing) 篇原文暂不可用").font(.footnote).foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    retryButton
+                }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var retryButton: some View {
+        if isRefreshing {
+            ProgressView().controlSize(.small)
+                .accessibilityLabel("正在刷新日报")
+        } else {
+            Button("重试") { Task { await retryReport() } }
+                .font(.footnote.weight(.medium))
+                .tint(TodayBriefStyle.accent)
+                .frame(minHeight: 36)
         }
     }
 
@@ -275,24 +252,23 @@ private struct TodayBriefEventContent: View {
     let event: TodayReadingEvent
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             if !event.sourceLabel.isEmpty {
-                Text(event.sourceLabel).font(.caption.weight(.semibold))
+                Text(event.sourceLabel).font(.footnote.weight(.semibold))
                     .foregroundStyle(TodayBriefStyle.accent)
             }
             Text(event.title)
-                .font(.title3.bold())
+                .font(.title2.bold())
                 .accessibilityAddTraits(.isHeader)
-                .textSelection(.enabled)
             if !event.summary.isEmpty {
-                Text(event.summary).font(.body).lineSpacing(4).textSelection(.enabled)
+                Text(event.summary).font(.body).lineSpacing(5)
             }
             if !event.details.isEmpty {
                 Text("具体进展").font(.subheadline.weight(.semibold))
                     .accessibilityAddTraits(.isHeader)
                     .padding(.top, 4)
                 ForEach(event.details, id: \.self) { paragraph in
-                    Text(paragraph).font(.subheadline).lineSpacing(4).textSelection(.enabled)
+                    Text(paragraph).font(.subheadline).lineSpacing(5)
                 }
             }
         }
@@ -311,7 +287,7 @@ private struct TodayBriefCompanyRow: View {
                 TodaySystemAvatar(source: card.avatar, name: card.name, size: 24)
                 Text(card.name).font(.subheadline.weight(.semibold)).foregroundStyle(TodayBriefStyle.accent)
             }
-            Text(card.system.headline).font(.headline).lineSpacing(4)
+            Text(card.system.headline).font(.title2.bold()).lineSpacing(4)
                 .accessibilityAddTraits(.isHeader)
             ForEach(card.paragraphs, id: \.self) { fact in
                 Text(fact).font(.subheadline).foregroundStyle(.secondary).lineSpacing(4)
@@ -390,17 +366,28 @@ struct TodayHeaderView: View {
     let isLoading: Bool
     let needsRetry: Bool
     let retry: () async -> Void
+    let reportDate: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("今日").font(.title.bold())
+                    .accessibilityAddTraits(.isHeader)
+                if let reportDate {
+                    Text("日报 · \(reportDate)")
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
             headerActions
             installStatus
             if showsBilling {
                 billingDetails
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 8)
+        .padding(.horizontal, TodayBriefStyle.horizontalInset)
+        .padding(.bottom, 4)
+        .overlay(alignment: .bottom) { TodayBriefStyle.rule.frame(height: 1) }
         .alert("无法打开支付宝", isPresented: $rechargeUnavailable) {
             Button("知道了", role: .cancel) {}
         } message: {
@@ -455,15 +442,10 @@ struct TodayHeaderView: View {
                 .accessibilityIdentifier("today-app-update-completed")
         } else if let update = availableUpdate, requestedUpdateRelease == update.releaseID,
                   installerPresentation != .requesting {
-            VStack(alignment: .leading, spacing: 4) {
-                Label("已向 iOS 发起 \(update.version) 安装", systemImage: "arrow.down.to.line")
-                    .font(.subheadline.weight(.medium))
-                Text("在系统弹窗确认安装后，可在主屏幕的焦点图标上查看进度。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityIdentifier("today-app-update-handed-off")
+            Label("已请求安装 \(update.version)", systemImage: "arrow.down.to.line")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("today-app-update-handed-off")
         }
     }
 
@@ -474,7 +456,7 @@ struct TodayHeaderView: View {
                 if let availableUpdate { updateButton(availableUpdate) }
                 if updateCheckFailed {
                     Button { showsUpdateCheckError = true } label: {
-                        Label("检查失败", systemImage: "exclamationmark.arrow.triangle.2.circlepath")
+                        Label("检查更新", systemImage: "exclamationmark.arrow.triangle.2.circlepath")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     .accessibilityIdentifier("today-update-check-failed")
@@ -607,11 +589,13 @@ struct TodayHeaderView: View {
                 showsBilling.toggle()
             } label: {
                 HStack(spacing: 5) {
-                    billingMetric(
-                        label: Text("阿里云余额"),
-                        value: Text(balance?.formattedAmount ?? (needsRetry ? "暂不可用" : "—"))
-                            .accessibilityIdentifier("today-aliyun-balance")
-                    )
+                    Text("阿里云余额")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Text(balance?.formattedAmount ?? (needsRetry ? "暂不可用" : "—"))
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
+                        .accessibilityIdentifier("today-aliyun-balance")
                     Image(systemName: showsBilling ? "chevron.up" : "chevron.down")
                         .font(.caption2.weight(.semibold)).accessibilityHidden(true)
                 }
@@ -709,7 +693,7 @@ struct TodayHeaderView: View {
     }
 }
 
-private func todayBriefSystemName(_ name: String) -> String {
+func todayBriefSystemName(_ name: String) -> String {
     name.hasSuffix(" 系") ? String(name.dropLast(2)) : name
 }
 

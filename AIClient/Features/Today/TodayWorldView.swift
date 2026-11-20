@@ -306,14 +306,15 @@ struct TodayWorldView: View {
                     waitingForRechargeReturn: $waitingForRechargeReturn,
                     balance: store.balance,
                     dailyCosts: store.dailyCosts, isLoading: store.isLoadingBalance,
-                    needsRetry: store.balanceNeedsRetry, retry: { await store.loadBalance(force: true) }
+                    needsRetry: store.balanceNeedsRetry, retry: { await store.loadBalance(force: true) },
+                    reportDate: store.brief?.date ?? store.report?.date
                 )
                 Group {
                     if let brief = store.brief {
                         TodayBriefOverviewView(
                             brief: brief,
                             cachedEditionMessage: store.isShowingCachedEdition ? cachedEditionStatus : nil,
-                            reportError: store.errorMessage,
+                            reportError: store.errorMessage.map { "\($0)。正在查看上次加载的日报。" },
                             isRefreshing: store.isLoading,
                             retryReport: { await store.loadReport(force: true) }
                         )
@@ -323,6 +324,9 @@ struct TodayWorldView: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+            .padding(.bottom, bottomChromeHeight + 8)
             .background(Color(uiColor: .systemBackground))
             .toolbar(.hidden, for: .navigationBar)
         }
@@ -356,24 +360,21 @@ struct TodayWorldView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 VStack(alignment: .leading, spacing: 12) {
-                    Label("本期日报", systemImage: "newspaper")
-                        .font(.subheadline.weight(.medium)).foregroundStyle(.white.opacity(0.82))
                     Text(reportStatusTitle)
-                        .font(.system(.title, design: .serif, weight: .bold))
+                        .font(.title2.bold())
+                        .accessibilityAddTraits(.isHeader)
                     if let reason = reportStatusReason, !reason.isEmpty {
-                        Text(reason).font(.subheadline).lineSpacing(3)
+                        Text(reason).font(.subheadline).foregroundStyle(.secondary).lineSpacing(3)
                     }
                     if let report = store.report {
-                        Divider().overlay(.white.opacity(0.3))
+                        TodayBriefStyle.rule.frame(height: 1)
                         HStack(spacing: 24) {
                             reportMetric(report.postCount, "条动态")
                             reportMetric(report.sourceCount, "个信息源")
                         }
                     }
                 }
-                .foregroundStyle(.white)
-                .padding(20).frame(maxWidth: .infinity, alignment: .leading)
-                .background(TodayBriefStyle.ink, in: RoundedRectangle(cornerRadius: 18))
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 if let sections = store.report?.report.sections, !sections.isEmpty {
                     VStack(alignment: .leading, spacing: 0) {
@@ -387,8 +388,6 @@ struct TodayWorldView: View {
                                     Text("\(section.postCount) 条").font(.subheadline.monospacedDigit())
                                         .foregroundStyle(TodayBriefStyle.accent)
                                 }
-                                Text(section.groups.map(\.group_name).joined(separator: " · "))
-                                    .font(.caption).foregroundStyle(.secondary)
                             }
                             .padding(.vertical, 12)
                             Divider()
@@ -404,9 +403,11 @@ struct TodayWorldView: View {
                 .disabled(store.isLoading)
                 .tint(TodayBriefStyle.accent)
             }
-            .padding(.horizontal, 20).padding(.top, 6)
-            .padding(.bottom, bottomChromeHeight + 12)
+            .padding(.horizontal, TodayBriefStyle.horizontalInset)
+            .padding(.vertical, 18)
         }
+        .scrollIndicators(.hidden)
+        .clipped()
         .accessibilityIdentifier("today-status-scroll")
     }
 
@@ -433,21 +434,20 @@ struct TodayWorldView: View {
             if admission.reason_codes.contains("edition_cost_limit") {
                 return "预计生成费用超出本期预算。"
             }
-            return admission.reason
+            return "生成暂时无法继续。"
         }
-        return store.report?.report.final?.error
+        return nil
     }
 
     private var cachedEditionStatus: String {
         guard let report = store.report else {
             return store.isLoading ? "已显示缓存日报，正在检查更新" : "已显示缓存日报"
         }
-        var parts = ["已显示上次日报", reportStatusTitle]
-        if let reason = reportStatusReason, !reason.isEmpty { parts.append(reason) }
-        if report.admission?.state == "paused" {
-            parts.append("本期已收录 \(report.postCount) 条动态")
+        if report.admission?.reason_codes.contains("edition_cost_limit") == true,
+           report.admission?.state == "paused" {
+            return "本期生成已达预算上限，正在查看上期日报"
         }
-        return parts.joined(separator: " · ")
+        return "\(reportStatusTitle)，正在查看上期日报"
     }
 }
 
@@ -517,7 +517,7 @@ struct TodayReadingEvent: Identifiable, Sendable {
             !$0.postIDs.isEmpty && Set($0.postIDs).isSubset(of: sourceIDs)
         }
         return Self(id: item.id, title: title, summary: summary,
-                    sourceLabel: unique(related.map(\.systemName)).joined(separator: " · "),
+                    sourceLabel: unique(related.map { todayBriefSystemName($0.systemName) }).joined(separator: " · "),
                     details: additionalDetails(facts.map(\.text), excluding: [title, summary]),
                     postIDs: sourceIDs.sorted())
     }
@@ -526,9 +526,10 @@ struct TodayReadingEvent: Identifiable, Sendable {
 struct TodaySourcePresentation: Identifiable, Sendable {
     let post: Post
     let text: String
+    let preview: String
     let reply: String?
-    let quote: String?
-    let quoteAuthor: String?
+    let quote: XQuotedPost?
+    let quoteText: String?
     let author: String
     let avatarURL: URL?
     let time: String?
@@ -540,14 +541,18 @@ struct TodaySourcePresentation: Identifiable, Sendable {
     init(post: Post) {
         self.post = post
         text = post.hasTranslation ? post.displayContent : post.xStoredOriginalContent
-        reply = post.meta?.replyContext?.displayText
-        quote = post.meta?.quotedTweet?.displayText
-        quoteAuthor = post.meta?.quotedTweet?.author?.name
+        preview = String(text.prefix(360))
+            .replacingOccurrences(of: #"https?://t\.co/[A-Za-z0-9]+"#, with: "链接", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        reply = post.xReplyContext?.displayText
+        quote = post.xQuotedPost
+        quoteText = quote?.displayText
         author = post.authorName
         avatarURL = post.avatarURL
         time = post.formattedTime
         hasMedia = post.previewURL != nil || !post.videoURLs.isEmpty
-        untranslatedTexts = TodayReadingEvent.unique([text, reply, quote].compactMap { $0 })
+        untranslatedTexts = TodayReadingEvent.unique([text, reply, quoteText].compactMap { $0 })
             .filter { !TodayChinesePreparation.isChinese($0) }
     }
 }
@@ -610,6 +615,7 @@ private actor TodayChineseTextCache {
 
 struct TodayInlineSourceView: View {
     let source: TodaySourcePresentation
+    @State private var isExpanded = false
     @State private var translations: [String: String] = [:]
     @State private var translating = false
     @State private var translationFailed = false
@@ -618,38 +624,82 @@ struct TodayInlineSourceView: View {
         source.untranslatedTexts.filter { translations[$0] == nil }
     }
 
+    private var displayedQuote: XQuotedPost? {
+        guard var quote = source.quote else { return nil }
+        if let text = source.quoteText, let translated = translations[text] {
+            quote.textZH = translated
+        }
+        return quote
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 10) {
-                AvatarView(url: source.avatarURL, name: source.author, size: 28)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(source.author).font(.subheadline.weight(.semibold))
-                    if let time = source.time {
-                        Text(time).font(.caption).foregroundStyle(.secondary)
+            Button {
+                isExpanded.toggle()
+            } label: {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .center, spacing: 10) {
+                        AvatarView(url: source.avatarURL, name: source.author, size: 28)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(source.author).font(.subheadline.weight(.semibold))
+                            if let time = source.time {
+                                Text(time).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer(minLength: 8)
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(TodayBriefStyle.accent)
+                            .accessibilityHidden(true)
+                    }
+                    if !isExpanded, !source.preview.isEmpty {
+                        Text(source.preview)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineSpacing(3)
+                            .lineLimit(3)
                     }
                 }
+                .frame(minHeight: 44)
+                .multilineTextAlignment(.leading)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityValue(isExpanded ? "已展开" : "已收起")
+            .accessibilityHint(isExpanded ? "收起原文" : "展开原文")
+
+            if isExpanded {
+                expandedSource
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("today-source-\(source.id)")
+    }
+
+    private var expandedSource: some View {
+        VStack(alignment: .leading, spacing: 12) {
             if !source.text.isEmpty {
                 Text(translations[source.text] ?? source.text)
                     .font(.subheadline).lineSpacing(4).textSelection(.enabled)
             }
             if let reply = source.reply {
                 Text("回复：\(translations[reply] ?? reply)")
-                    .font(.subheadline).foregroundStyle(.secondary).textSelection(.enabled)
+                    .font(.subheadline).lineSpacing(4).foregroundStyle(.secondary).textSelection(.enabled)
             }
-            if let original = source.quote {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(source.quoteAuthor ?? "引用内容").font(.caption.weight(.semibold))
-                    Text(translations[original] ?? original).font(.subheadline).textSelection(.enabled)
-                }
-                .padding(.leading, 12)
-                .overlay(alignment: .leading) { Rectangle().fill(TodayBriefStyle.accent.opacity(0.25)).frame(width: 2) }
+            if source.hasMedia {
+                XFeedMediaView(post: source.post, showsQuotedPost: false)
             }
-            if source.hasMedia { XFeedMediaView(post: source.post) }
+            if let quote = displayedQuote {
+                XFeedQuotedPostCard(
+                    quote: quote,
+                    availableWidth: max(UIScreen.main.bounds.width - 78, 1),
+                    isDetail: true
+                )
+            }
             if translating {
                 ProgressView("正在翻译").font(.caption)
             } else if !textsNeedingTranslation.isEmpty {
-                Button(translationFailed ? "翻译暂不可用 · 重试" : "译成中文") {
+                Button(translationFailed ? "重试翻译" : "译成中文") {
                     Task { await prepareChinese() }
                 }
                 .font(.subheadline)
@@ -657,8 +707,6 @@ struct TodayInlineSourceView: View {
                 .frame(minHeight: 44)
             }
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("today-source-\(source.id)")
     }
 
     @MainActor private func prepareChinese() async {

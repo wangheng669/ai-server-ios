@@ -1932,6 +1932,7 @@ enum XTimelineTextLayout {
 
 struct XFeedMediaView: View {
     let post: Post
+    var showsQuotedPost = true
     var onOpenQuote: (() -> Void)? = nil
 
     var body: some View {
@@ -1957,7 +1958,7 @@ struct XFeedMediaView: View {
                 )
             }
 
-            if let quote = post.xQuotedPost {
+            if showsQuotedPost, let quote = post.xQuotedPost {
                 XFeedQuotedPostCard(quote: quote, availableWidth: availableWidth)
                     .contentShape(Rectangle())
                     .onTapGesture { onOpenQuote?() }
