@@ -3,6 +3,7 @@ import UIKit
 
 enum TodayBriefStyle {
     static let horizontalInset: CGFloat = 22
+    static let toolsRowHeight: CGFloat = 48
     static let rule = Color(uiColor: .separator).opacity(0.28)
     static let secondary = Color(uiColor: .secondaryLabel)
     static var surfaceOutline: Color { accent.opacity(0.16) }
@@ -117,15 +118,10 @@ struct TodayBriefProjection: Sendable {
 struct TodayBriefOverviewView: View {
     let brief: TodayBriefProjection
     let viewport: CGSize
-    let cachedEditionMessage: String?
-    let reportError: String?
-    let isRefreshing: Bool
-    let retryReport: () async -> Void
     let openSources: ([Int]) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
-            editionStatus
             if brief.cards.isEmpty {
                 Text("本期暂无可阅读的简报")
                     .font(.subheadline)
@@ -139,31 +135,6 @@ struct TodayBriefOverviewView: View {
             }
         }
         .accessibilityIdentifier("today-overview")
-    }
-
-    @ViewBuilder
-    private var editionStatus: some View {
-        let message = reportError ?? cachedEditionMessage
-        if message != nil || brief.isPartial {
-            VStack(alignment: .leading, spacing: 4) {
-                if let message {
-                    Label(message, systemImage: reportError == nil ? "clock" : "exclamationmark.circle")
-                        .accessibilityIdentifier("today-cached-edition")
-                }
-                if brief.isPartial {
-                    Label("本期内容尚不完整", systemImage: "info.circle")
-                        .accessibilityIdentifier("today-partial-edition")
-                }
-                if reportError != nil {
-                    TodayReportRetryButton(isRefreshing: isRefreshing, retry: retryReport)
-                }
-            }
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, TodayBriefStyle.horizontalInset)
-            .padding(.vertical, 8)
-        }
     }
 }
 
@@ -275,9 +246,8 @@ private struct TodayBriefDeck: View {
 
     var body: some View {
         let deckPadding: CGFloat = 36
-        let headerRowHeight: CGFloat = 48
         // Keep card height stable as banners and billing details come and go.
-        let cardHeight = min(495, max(0, viewport.height - headerRowHeight - deckPadding))
+        let cardHeight = min(495, max(0, viewport.height - TodayBriefStyle.toolsRowHeight - deckPadding))
         let deckHeight = cardHeight + deckPadding
         let cardWidth = min(max(0, viewport.width - 44), 480)
 
@@ -411,20 +381,30 @@ enum AliyunRecharge {
     }()
 }
 
-struct TodayHeaderView: View {
+struct TodayEditionNotice {
+    let message: String?
+    let isPartial: Bool
+    let canRetry: Bool
+}
+
+struct TodayToolsButton: View {
     @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var showsTools = false
     @State private var rechargeUnavailable = false
     @State private var updateUnavailable = false
     @AppStorage("focus.requestedUpdateRelease") private var requestedUpdateRelease = ""
     @State private var installerPresentation: InstallerPresentation?
     @State private var showsInstallOptions = false
     @State private var completedUpdateVersion: String?
-    @Environment(\.scenePhase) private var scenePhase
     @State private var updateCheckAttempt = 0
-    @State private var updateCheckFailed = false
+    @State private var updateCheckState: UpdateCheckState = .idle
     @State private var availableUpdate: AvailableUpdate?
-    @State private var showsUpdateCheckError = false
     @State private var showsBilling = false
+
+    private enum UpdateCheckState {
+        case idle, checking, current, updateAvailable, failed
+    }
 
     private enum InstallerPresentation: Equatable {
         case requesting, waitingForConfirmation
@@ -464,17 +444,81 @@ struct TodayHeaderView: View {
     let isLoading: Bool
     let needsRetry: Bool
     let retry: () async -> Void
+    let editionNotice: TodayEditionNotice?
+    let isRefreshingReport: Bool
+    let retryReport: () async -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            headerActions
-            installStatus
-            if showsBilling {
-                billingDetails
+        Button {
+            showsTools.toggle()
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(TodayBriefStyle.accent)
+                .frame(width: 44, height: 44)
+                .background(Color(uiColor: .systemBackground), in: Circle())
+                .overlay { Circle().strokeBorder(TodayBriefStyle.surfaceOutline) }
+                .overlay(alignment: .topTrailing) {
+                    if editionNotice != nil || availableUpdate != nil {
+                        Circle()
+                            .fill(editionNotice != nil ? Color.orange : TodayBriefStyle.accent)
+                            .frame(width: 7, height: 7)
+                            .padding(4)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("今日选项")
+        .accessibilityValue(toolsStatus)
+        .accessibilityHint("查看余额、更新和日报状态")
+        .accessibilityIdentifier("today-tools")
+        .popover(isPresented: $showsTools, arrowEdge: .top) {
+            toolsPanel
+                .presentationCompactAdaptation(.popover)
+        }
+        .task(id: completedUpdateVersion) {
+            guard completedUpdateVersion != nil else { return }
+            do { try await Task.sleep(for: .seconds(6)) }
+            catch { return }
+            completedUpdateVersion = nil
+        }
+        .task(id: installerPresentation) {
+            guard installerPresentation == .waitingForConfirmation else { return }
+            do { try await Task.sleep(for: .seconds(15)) }
+            catch { return }
+            installerPresentation = nil
+        }
+        .task(id: scenePhase == .active ? updateCheckAttempt : nil, priority: .utility) {
+            guard scenePhase == .active else {
+                if updateCheckState == .checking { updateCheckState = .idle }
+                return
+            }
+            while !Task.isCancelled {
+                await checkForUpdate()
+                do { try await Task.sleep(for: .seconds(300)) }
+                catch { return }
             }
         }
-        .padding(.horizontal, TodayBriefStyle.horizontalInset)
-        .padding(.bottom, 4)
+    }
+
+    private var toolsStatus: String {
+        [editionNotice != nil ? "有日报状态提示" : nil, availableUpdate != nil ? "有可用更新" : nil]
+            .compactMap { $0 }
+            .joined(separator: "，")
+    }
+
+    private var toolsPanel: some View {
+        ViewThatFits(in: .vertical) {
+            toolsContent
+            ScrollView { toolsContent }
+                .scrollBounceBehavior(.basedOnSize)
+        }
+        .frame(width: 292)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("today-tools-panel")
+        .onAppear(perform: showCompletedUpdate)
         .alert("无法打开支付宝", isPresented: $rechargeUnavailable) {
             Button("知道了", role: .cancel) {}
         } message: {
@@ -491,33 +535,42 @@ struct TodayHeaderView: View {
         } message: { _ in
             Text("如果没有看到系统安装弹窗，可以重新发起。已确认安装时，请在主屏幕查看焦点图标的进度。")
         }
-        .alert("未能检查更新", isPresented: $showsUpdateCheckError) {
-            Button("重试") { updateCheckAttempt += 1 }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("无法确认是否有新版本，请检查网络后重试。已确认可用的更新入口会继续保留。")
-        }
-        .onAppear(perform: showCompletedUpdate)
-        .task(id: completedUpdateVersion) {
-            guard completedUpdateVersion != nil else { return }
-            do { try await Task.sleep(for: .seconds(6)) }
-            catch { return }
-            completedUpdateVersion = nil
-        }
-        .task(id: installerPresentation) {
-            guard installerPresentation == .waitingForConfirmation else { return }
-            do { try await Task.sleep(for: .seconds(15)) }
-            catch { return }
-            installerPresentation = nil
-        }
-        .task(id: scenePhase == .active ? updateCheckAttempt : nil, priority: .utility) {
-            guard scenePhase == .active else { return }
-            while !Task.isCancelled {
-                await checkForUpdate()
-                do { try await Task.sleep(for: .seconds(300)) }
-                catch { return }
+    }
+
+    private var toolsContent: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            balanceControl
+            if showsBilling {
+                billingDetails
+            }
+            Divider()
+            updateControl
+            if let editionNotice {
+                Divider().padding(.vertical, 6)
+                editionStatus(editionNotice)
             }
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
+    private func editionStatus(_ notice: TodayEditionNotice) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let message = notice.message {
+                Label(message, systemImage: notice.canRetry ? "exclamationmark.circle" : "clock")
+                    .accessibilityIdentifier("today-cached-edition")
+            }
+            if notice.isPartial {
+                Label("本期内容尚不完整", systemImage: "info.circle")
+                    .accessibilityIdentifier("today-partial-edition")
+            }
+            if notice.canRetry {
+                TodayReportRetryButton(isRefreshing: isRefreshingReport, retry: retryReport)
+            }
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .padding(.bottom, 4)
     }
 
     @ViewBuilder
@@ -536,20 +589,37 @@ struct TodayHeaderView: View {
         }
     }
 
-    @ViewBuilder
     private var updateControl: some View {
-        if availableUpdate != nil || updateCheckFailed {
-            HStack(spacing: 4) {
-                if let availableUpdate { updateButton(availableUpdate) }
-                if updateCheckFailed {
-                    Button { showsUpdateCheckError = true } label: {
+        VStack(alignment: .leading, spacing: 4) {
+            if let availableUpdate { updateButton(availableUpdate) }
+            Button { updateCheckAttempt += 1 } label: {
+                Group {
+                    if updateCheckState == .checking {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("正在检查更新…")
+                        }
+                    } else {
                         Label("检查更新", systemImage: "arrow.clockwise")
-                            .modifier(TodayHeaderActionLabel())
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("today-update-check-failed")
                 }
+                .modifier(TodayToolActionLabel())
             }
+            .buttonStyle(.plain)
+            .disabled(updateCheckState == .checking)
+            .accessibilityIdentifier("today-check-update")
+
+            if updateCheckState == .failed {
+                Text("暂时无法检查更新")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("today-update-check-failed")
+            } else if updateCheckState == .current && completedUpdateVersion == nil {
+                Text("已是最新版本")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            installStatus
         }
     }
 
@@ -587,6 +657,7 @@ struct TodayHeaderView: View {
 
     @MainActor
     private func checkForUpdate() async {
+        updateCheckState = .checking
         do {
             guard let entry = installEntryURL, let installed = installedRelease else {
                 throw URLError(.badURL)
@@ -611,14 +682,14 @@ struct TodayHeaderView: View {
             }
             if installed.order.lexicographicallyPrecedes(remote) {
                 availableUpdate = AvailableUpdate(version: published.version, build: published.build, installURL: installURL)
+                updateCheckState = .updateAvailable
             } else {
                 availableUpdate = nil
+                updateCheckState = .current
             }
-            updateCheckFailed = false
         } catch {
             guard !Task.isCancelled else { return }
-            // A failed request never turns a previously verified update into “up to date”.
-            updateCheckFailed = true
+            updateCheckState = .failed
         }
     }
 
@@ -655,7 +726,7 @@ struct TodayHeaderView: View {
                     Label("更新", systemImage: "arrow.down.circle")
                 }
             }
-            .modifier(TodayHeaderActionLabel())
+            .modifier(TodayToolActionLabel())
         }
         .buttonStyle(.plain)
         .disabled(installerPresentation != nil)
@@ -664,26 +735,13 @@ struct TodayHeaderView: View {
         .accessibilityHint(alreadyRequested ? "查看安装说明" : "向 iOS 发起安装请求")
     }
 
-    private var headerActions: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) {
-                balanceControl
-                Spacer(minLength: 0)
-                updateControl
-            }
-            VStack(alignment: .leading, spacing: 0) {
-                balanceControl
-                updateControl
-            }
-        }
-    }
-
     private var balanceControl: some View {
         Button {
             showsBilling.toggle()
         } label: {
             HStack(spacing: 5) {
                 Text("阿里云余额").foregroundStyle(TodayBriefStyle.secondary)
+                Spacer(minLength: 8)
                 Text(balance?.formattedAmount ?? (needsRetry ? "暂不可用" : "—"))
                     .fontWeight(.semibold)
                     .monospacedDigit()
@@ -692,7 +750,7 @@ struct TodayHeaderView: View {
                     .font(.caption2.weight(.semibold))
                     .accessibilityHidden(true)
             }
-            .modifier(TodayHeaderActionLabel())
+            .modifier(TodayToolActionLabel())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("today-billing-details")
@@ -787,18 +845,12 @@ func todayBriefSystemName(_ name: String) -> String {
     name.hasSuffix(" 系") ? String(name.dropLast(2)) : name
 }
 
-/// Company-group identity is independent of whichever author supplied its first post.
-private struct TodayHeaderActionLabel: ViewModifier {
+private struct TodayToolActionLabel: ViewModifier {
     func body(content: Content) -> some View {
         content
             .font(.subheadline.weight(.medium))
             .foregroundStyle(TodayBriefStyle.accent)
-            .fixedSize(horizontal: true, vertical: false)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(Color(uiColor: .systemBackground), in: Capsule())
-            .overlay { Capsule().strokeBorder(TodayBriefStyle.surfaceOutline) }
-            .frame(minHeight: 44)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
     }
 }

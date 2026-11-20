@@ -346,21 +346,11 @@ struct TodayWorldView: View {
 
     private func pageContent(viewport: CGSize) -> some View {
         ScrollView {
-            VStack(spacing: 0) {
-                TodayHeaderView(
-                    waitingForRechargeReturn: $waitingForRechargeReturn,
-                    balance: store.balance,
-                    dailyCosts: store.dailyCosts, isLoading: store.isLoadingBalance,
-                    needsRetry: store.balanceNeedsRetry, retry: { await store.loadBalance(force: true) }
-                )
+            Group {
                 if let brief = store.brief {
                     TodayBriefOverviewView(
                         brief: brief,
                         viewport: viewport,
-                        cachedEditionMessage: store.isShowingCachedEdition ? cachedEditionStatus : nil,
-                        reportError: store.errorMessage.map { "\($0)。正在查看上次加载的日报。" },
-                        isRefreshing: store.isLoading,
-                        retryReport: { await store.loadReport(force: true) },
                         openSources: { originalPostIDs = $0 }
                     )
                     .id(brief.date)
@@ -368,6 +358,7 @@ struct TodayWorldView: View {
                     emptyReportView
                 }
             }
+            .padding(.top, TodayBriefStyle.toolsRowHeight)
             .frame(
                 maxWidth: .infinity,
                 minHeight: max(0, viewport.height - bottomChromeHeight - 8),
@@ -377,6 +368,21 @@ struct TodayWorldView: View {
         .scrollIndicators(.hidden)
         .scrollBounceBehavior(.basedOnSize)
         .padding(.bottom, bottomChromeHeight + 8)
+        .overlay(alignment: .topTrailing) {
+            TodayToolsButton(
+                waitingForRechargeReturn: $waitingForRechargeReturn,
+                balance: store.balance,
+                dailyCosts: store.dailyCosts,
+                isLoading: store.isLoadingBalance,
+                needsRetry: store.balanceNeedsRetry,
+                retry: { await store.loadBalance(force: true) },
+                editionNotice: editionNotice,
+                isRefreshingReport: store.isLoading,
+                retryReport: { await store.loadReport(force: true) }
+            )
+            .padding(.horizontal, TodayBriefStyle.horizontalInset)
+            .padding(.top, 2)
+        }
     }
 
     private func originalsOverlay(postIDs: [Int], brief: TodayBriefProjection, viewport: CGSize) -> some View {
@@ -491,6 +497,14 @@ struct TodayWorldView: View {
             return "本期生成已达预算上限，正在查看上期日报"
         }
         return "\(reportStatusTitle)，正在查看上期日报"
+    }
+
+    private var editionNotice: TodayEditionNotice? {
+        guard let brief = store.brief else { return nil }
+        let error = store.errorMessage.map { "\($0)。正在查看上次加载的日报。" }
+        let message = error ?? (store.isShowingCachedEdition ? cachedEditionStatus : nil)
+        guard message != nil || brief.isPartial else { return nil }
+        return TodayEditionNotice(message: message, isPartial: brief.isPartial, canRetry: error != nil)
     }
 }
 
