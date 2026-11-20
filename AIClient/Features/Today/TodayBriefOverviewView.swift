@@ -120,6 +120,7 @@ struct TodayBriefOverviewView: View {
     let cachedEditionMessage: String?
     let reportError: String?
     let isRefreshing: Bool
+    let showsCards: Bool
     let retryReport: () async -> Void
     let openSources: ([Int]) -> Void
 
@@ -135,6 +136,7 @@ struct TodayBriefOverviewView: View {
             } else {
                 Spacer(minLength: 0)
                 TodayBriefDeck(brief: brief, viewport: viewport) { openSources($0.postIDs) }
+                    .opacity(showsCards ? 1 : 0)
                 Spacer(minLength: 0)
             }
         }
