@@ -466,7 +466,8 @@ func todayWorldSourceAvatarURL(_ key: String) -> URL? {
 }
 
 // Reading content stays tied to explicit report references; facts are not inferred to be separate events.
-struct TodayReadingEvent: Sendable {
+struct TodayReadingEvent: Identifiable, Sendable {
+    let id: String
     let title: String
     let summary: String
     let sourceLabel: String
@@ -524,7 +525,7 @@ struct TodayReadingEvent: Sendable {
         let facts = related.flatMap(\.facts).filter {
             !$0.postIDs.isEmpty && Set($0.postIDs).isSubset(of: sourceIDs)
         }
-        return Self(title: title, summary: summary,
+        return Self(id: item.id, title: title, summary: summary,
                     sourceLabel: unique(related.map(\.systemName)).joined(separator: " · "),
                     details: additionalDetails(facts.map(\.text), excluding: [title, summary]),
                     postIDs: sourceIDs.sorted())
@@ -533,13 +534,12 @@ struct TodayReadingEvent: Sendable {
 
 struct TodayEventSources: View {
     let postIDs: [Int]
-    var loadsSources = true
+    var sourceNames = ""
 
     @Environment(\.rootTabIsActive) private var rootTabIsActive
     @Environment(\.scenePhase) private var scenePhase
     @State private var posts: [Post] = []
     @State private var failedIDs: [Int] = []
-    @State private var expandedPostID: Int?
     @State private var retryAttempt = 0
 
     private struct Request: Equatable {
@@ -549,22 +549,27 @@ struct TodayEventSources: View {
     }
 
     var body: some View {
-        let request = loadsSources && rootTabIsActive && scenePhase == .active && !postIDs.isEmpty
+        let request = rootTabIsActive && scenePhase == .active && !postIDs.isEmpty
             ? Request(postIDs: postIDs, baseURL: ServerConfiguration.currentURL, retryAttempt: retryAttempt)
             : nil
         VStack(alignment: .leading, spacing: 0) {
             Text("消息来源" + (postIDs.isEmpty ? "" : " · \(postIDs.count) 篇原文"))
                 .font(.subheadline.weight(.semibold))
                 .accessibilityAddTraits(.isHeader)
+            if !sourceNames.isEmpty {
+                Text(sourceNames)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 4)
+            }
             if postIDs.isEmpty {
                 Text("本条简报暂未提供原文引用")
                     .font(.caption).foregroundStyle(.secondary).padding(.top, 6)
             }
             ForEach(posts) { post in
-                TodayInlineSourceView(post: post, isExpanded: expandedPostID == post.id) {
-                    expandedPostID = expandedPostID == post.id ? nil : post.id
-                }
-                Divider()
+                Divider().padding(.top, 12)
+                TodayInlineSourceView(post: post)
+                    .padding(.top, 12)
             }
             if request != nil && posts.count + failedIDs.count < postIDs.count {
                 ProgressView("正在载入来源").font(.caption).padding(.top, 10)
@@ -579,7 +584,9 @@ struct TodayEventSources: View {
                 .padding(.top, 6)
             }
         }
+        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(TodayBriefStyle.accent.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
         .task(id: request) {
             guard let request else { return }
             await loadSources(request)
@@ -620,7 +627,7 @@ struct TodayEventSources: View {
     }
 }
 
-enum TodayChinesePreparation {
+private enum TodayChinesePreparation {
     static func isChinese(_ text: String) -> Bool {
         text.range(of: "[\\p{Han}]", options: .regularExpression) != nil
             && !XPostTextFormatter.containsUntranslatedEnglishPassage(text)
@@ -685,65 +692,59 @@ private actor TodayChineseTextCache {
 
 private struct TodayInlineSourceView: View {
     let post: Post
-    let isExpanded: Bool
-    let toggle: () -> Void
     @State private var translations: [String: String] = [:]
     @State private var translating = false
     @State private var translationFailed = false
 
     private var sourceText: String { post.hasTranslation ? post.displayContent : post.xStoredOriginalContent }
-    private func chineseText(_ text: String) -> String? {
-        if let translated = translations[text] { return translated }
-        return TodayChinesePreparation.isChinese(text) ? text : nil
+
+    private var textsNeedingTranslation: [String] {
+        TodayChinesePreparation.texts(post).filter {
+            translations[$0] == nil && !TodayChinesePreparation.isChinese($0)
+        }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Button(action: toggle) {
-                HStack(alignment: .top, spacing: 10) {
-                    AvatarView(url: post.avatarURL, name: post.authorName, size: 28)
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(post.authorName).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
-                        if let time = post.formattedTime { Text(time).font(.caption).foregroundStyle(.secondary) }
-                        if !isExpanded {
-                            Text(chineseText(sourceText) ?? "展开阅读中文内容")
-                                .font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-                        }
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                AvatarView(url: post.avatarURL, name: post.authorName, size: 28)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(post.authorName).font(.subheadline.weight(.semibold))
+                    if let time = post.formattedTime {
+                        Text(time).font(.caption).foregroundStyle(.secondary)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                .multilineTextAlignment(.leading).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("today-source-\(post.id)")
-            .accessibilityValue(isExpanded ? "已展开" : "已收起")
-            if isExpanded {
-                if let text = chineseText(sourceText) {
-                    Text(text).font(.body).lineSpacing(5).textSelection(.enabled)
-                }
-                if let reply = post.meta?.replyContext?.displayText, let text = chineseText(reply) {
-                    Text("回复：\(text)").font(.subheadline).foregroundStyle(.secondary).textSelection(.enabled)
-                }
-                if let quote = post.meta?.quotedTweet, let original = quote.displayText, let text = chineseText(original) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(quote.author?.name ?? "引用内容").font(.caption.weight(.semibold))
-                        Text(text).font(.subheadline).textSelection(.enabled)
-                    }.padding(.leading, 12).overlay(alignment: .leading) { Rectangle().fill(Color.secondary.opacity(0.2)).frame(width: 2) }
-                }
-                if post.previewURL != nil || !post.videoURLs.isEmpty { XFeedMediaView(post: post) }
-                if translating { ProgressView("正在载入中文内容").font(.caption) }
-                if translationFailed {
-                    Text("部分中文内容暂不可用，请稍后重新展开")
-                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
+            if !sourceText.isEmpty {
+                Text(translations[sourceText] ?? sourceText)
+                    .font(.subheadline).lineSpacing(4).textSelection(.enabled)
+            }
+            if let reply = post.meta?.replyContext?.displayText {
+                Text("回复：\(translations[reply] ?? reply)")
+                    .font(.subheadline).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            if let quote = post.meta?.quotedTweet, let original = quote.displayText {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(quote.author?.name ?? "引用内容").font(.caption.weight(.semibold))
+                    Text(translations[original] ?? original).font(.subheadline).textSelection(.enabled)
+                }
+                .padding(.leading, 12)
+                .overlay(alignment: .leading) { Rectangle().fill(TodayBriefStyle.accent.opacity(0.25)).frame(width: 2) }
+            }
+            if post.previewURL != nil || !post.videoURLs.isEmpty { XFeedMediaView(post: post) }
+            if translating {
+                ProgressView("正在翻译").font(.caption)
+            } else if !textsNeedingTranslation.isEmpty {
+                Button(translationFailed ? "翻译暂不可用 · 重试" : "译成中文") {
+                    Task { await prepareChinese() }
+                }
+                .font(.subheadline)
+                .foregroundStyle(TodayBriefStyle.accent)
+                .frame(minHeight: 44)
+            }
         }
-        .padding(.vertical, 16)
-        .task(id: isExpanded) {
-            if isExpanded { await prepareChinese() }
-        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("today-source-\(post.id)")
     }
 
     @MainActor private func prepareChinese() async {
@@ -752,7 +753,7 @@ private struct TodayInlineSourceView: View {
         translating = true
         defer { translating = false }
         let baseURL = ServerConfiguration.currentURL
-        for text in TodayChinesePreparation.texts(post) where chineseText(text) == nil {
+        for text in textsNeedingTranslation {
             guard !Task.isCancelled else { return }
             do {
                 let translated = try await TodayChineseTextCache.shared.text(

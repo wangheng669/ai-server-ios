@@ -3,14 +3,12 @@ import UIKit
 
 enum TodayBriefStyle {
     static let ink = Color(red: 0.10, green: 0.23, blue: 0.19)
-    static let canvas = Color(uiColor: .systemBackground)
     static let secondary = Color(uiColor: .secondaryLabel)
     static let accent = Color(uiColor: UIColor { traits in
         traits.userInterfaceStyle == .dark
             ? UIColor(red: 0.67, green: 0.84, blue: 0.72, alpha: 1)
             : UIColor(red: 0.22, green: 0.36, blue: 0.27, alpha: 1)
     })
-    static let rule = Color(uiColor: .separator).opacity(0.25)
 }
 
 enum TodayOverviewSelection {
@@ -66,15 +64,11 @@ struct TodayBriefProjection: Sendable {
         let content: Content
     }
 
-    struct Section: Identifiable, Sendable {
-        let id: String
-        let name: String
+    private struct Section: Sendable {
         fileprivate let rows: [CompanyRow]
         fileprivate let avatarURLs: [URL]
 
         init(_ section: TodayWorldFinalReportSection, overview: TodayWorldFinalReportOverview) {
-            id = section.id
-            name = section.sectionName
             let eligibleIDs = Set(TodayOverviewSelection.supplementarySystems(in: section, overview: overview).map(\.id))
             var rows: [CompanyRow] = []
             var avatarURLs: [URL] = []
@@ -103,7 +97,6 @@ struct TodayBriefProjection: Sendable {
     let isPartial: Bool
     let highlights: [TodayReadingEvent]
     let watchItems: [TodayReadingEvent]
-    let sections: [Section]
     let avatarURLs: [URL]
     let overviewHeadline: String?
     fileprivate let companyRows: [CompanyRow]
@@ -120,7 +113,6 @@ struct TodayBriefProjection: Sendable {
         highlights = overview.highlights.map { TodayReadingEvent.highlight($0, systems: systems) }
         watchItems = overview.watchItems.map { TodayReadingEvent.highlight($0, systems: systems) }
         let sections = report.sections.map { Section($0, overview: overview) }
-        self.sections = sections
         companyRows = sections.flatMap(\.rows)
         avatarURLs = sections.flatMap(\.avatarURLs)
         let headline = overview.headline
@@ -135,89 +127,112 @@ struct TodayBriefOverviewView: View {
     let brief: TodayBriefProjection
     let bottomInset: CGFloat
 
-    @State private var selectedSectionKey: String?
-    @State private var showsSections = false
-    @State private var showsWatchItems = false
-
-    var body: some View {
-        GeometryReader { geometry in
-            // Leave room below the pager for the report's section links.
-            let readingHeight = min(480, max(208, geometry.size.height - bottomInset - 166))
-            reportScroll(readingHeight: readingHeight)
-        }
+    private enum Section: String {
+        case highlights = "今日要闻"
+        case companies = "全部栏目"
+        case watch = "持续观察"
     }
 
-    private func reportScroll(readingHeight: CGFloat) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 12) {
-                if brief.isPartial {
-                    Label("部分发布 · 本期内容尚不完整", systemImage: "exclamationmark.circle")
-                        .font(.subheadline)
-                        .foregroundStyle(Color(uiColor: .secondaryLabel))
-                        .accessibilityIdentifier("today-partial-edition")
-                }
-                if !brief.highlights.isEmpty {
-                    TodayBriefCarousel(events: brief.highlights, readingHeight: readingHeight)
-                        .id(brief.date)
-                }
-                if let headline = brief.overviewHeadline {
-                    Text(headline).font(.subheadline).lineSpacing(4)
-                        .foregroundStyle(TodayBriefStyle.secondary)
-                }
-                if !brief.sections.isEmpty {
-                    sectionToggle("全部栏目", isExpanded: $showsSections)
-                        .accessibilityIdentifier("today-all-sections")
-                    if showsSections {
-                        TodayBriefCategories(sections: brief.sections, selection: $selectedSectionKey)
-                        let rows = brief.sections.first { $0.id == selectedSectionKey }?.rows ?? brief.companyRows
-                        if rows.isEmpty {
-                            Text("暂无补充动态").font(.subheadline).foregroundStyle(.secondary)
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 20) {
+                    editionIntro
+                    sectionLinks { proxy.scrollTo($0, anchor: .top) }
+
+                    if !brief.highlights.isEmpty {
+                        sectionHeading(.highlights)
+                        ForEach(brief.highlights) { event in
+                            TodayBriefEventContent(event: event)
+                            Divider()
                         }
-                        ForEach(rows) { row in
+                    }
+                    if !brief.companyRows.isEmpty {
+                        sectionHeading(.companies)
+                        ForEach(brief.companyRows) { row in
                             companyRow(row.content)
                         }
                     }
-                }
-                if !brief.watchItems.isEmpty {
-                    sectionToggle("持续观察", isExpanded: $showsWatchItems)
-                        .accessibilityIdentifier("today-watch-items")
-                    if showsWatchItems {
-                        ForEach(Array(brief.watchItems.enumerated()), id: \.offset) { index, event in
+                    if !brief.watchItems.isEmpty {
+                        sectionHeading(.watch)
+                        ForEach(brief.watchItems) { event in
                             TodayBriefEventContent(event: event)
-                                .padding(16)
-                                .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(TodayBriefStyle.rule) }
-                                .accessibilityIdentifier("today-watch-\(index)")
+                            Divider()
                         }
                     }
                 }
-                Text("\(brief.postCount) 条动态 · \(brief.sourceCount) 个信息源")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .accessibilityIdentifier("today-report-metadata")
+                .padding(.horizontal, 20)
+                .padding(.top, 10)
+                .padding(.bottom, bottomInset + 20)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 8)
-            .padding(.bottom, bottomInset + 20)
+            .accessibilityIdentifier("today-overview")
         }
-        .scrollIndicators(.hidden)
-        .accessibilityIdentifier("today-overview")
+        .id(brief.date)
     }
 
-    private func sectionToggle(_ title: String, isExpanded: Binding<Bool>) -> some View {
-        Button { isExpanded.wrappedValue.toggle() } label: {
-            HStack {
-                Text(title).font(.headline)
-                Spacer()
-                Image(systemName: isExpanded.wrappedValue ? "chevron.down" : "chevron.right")
-                    .font(.caption.weight(.semibold))
+    private var editionIntro: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if brief.isPartial {
+                Label("部分发布 · 本期内容尚不完整", systemImage: "exclamationmark.circle")
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
+                    .accessibilityIdentifier("today-partial-edition")
             }
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
-            .overlay(alignment: .top) { TodayBriefStyle.rule.frame(height: 1) }
+            Text("\(brief.postCount) 条动态 · \(brief.sourceCount) 个信息源")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("today-report-metadata")
+            if let headline = brief.overviewHeadline {
+                Text(headline).font(.subheadline).lineSpacing(4)
+                    .foregroundStyle(TodayBriefStyle.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        .buttonStyle(.plain)
-        .accessibilityValue(isExpanded.wrappedValue ? "已展开" : "已收起")
+    }
+
+    @ViewBuilder
+    private func sectionLinks(jump: @escaping (Section) -> Void) -> some View {
+        let destinations: [Section] = [
+            brief.highlights.isEmpty ? nil : .highlights,
+            brief.companyRows.isEmpty ? nil : .companies,
+            brief.watchItems.isEmpty ? nil : .watch
+        ].compactMap { $0 }
+
+        if destinations.count > 1 {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    sectionButtons(destinations, jump: jump)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    sectionButtons(destinations, jump: jump)
+                }
+            }
+        }
+    }
+
+    private func sectionButtons(_ destinations: [Section], jump: @escaping (Section) -> Void) -> some View {
+        ForEach(destinations, id: \.self) { section in
+            Button { jump(section) } label: {
+                Text(section.rawValue)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(TodayBriefStyle.accent)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(TodayBriefStyle.accent.opacity(0.08), in: Capsule())
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("跳到本节")
+        }
+    }
+
+    private func sectionHeading(_ section: Section) -> some View {
+        Text(section.rawValue)
+            .font(.title2.bold())
+            .accessibilityAddTraits(.isHeader)
+            .id(section)
     }
 
     @ViewBuilder
@@ -226,7 +241,9 @@ struct TodayBriefOverviewView: View {
         case let .heading(title):
             Text(title).font(.headline).accessibilityAddTraits(.isHeader)
         case let .group(name):
-            Text(name).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+            Text(name).font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .accessibilityAddTraits(.isHeader)
         case let .company(card):
             TodayBriefCompanyRow(card: card)
             Divider()
@@ -234,98 +251,8 @@ struct TodayBriefOverviewView: View {
     }
 }
 
-private struct TodayBriefCarousel: View {
-    let events: [TodayReadingEvent]
-    let readingHeight: CGFloat
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var selectedIndex: Int?
-
-    private var index: Int { selectedIndex ?? 0 }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            ScrollView(.horizontal) {
-                LazyHStack(spacing: 0) {
-                    ForEach(Array(events.enumerated()), id: \.offset) { position, event in
-                        ScrollView(.vertical) {
-                            TodayBriefEventContent(event: event, loadsSources: position == index)
-                                .padding(16)
-                        }
-                        .scrollBounceBehavior(.basedOnSize, axes: .vertical)
-                        .frame(height: readingHeight)
-                        .containerRelativeFrame(.horizontal)
-                        .accessibilityIdentifier("today-highlight-\(position)")
-                        .id(position)
-                    }
-                }
-                .scrollTargetLayout()
-            }
-            .frame(height: readingHeight)
-            .scrollIndicators(.hidden, axes: .horizontal)
-            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-            .scrollTargetBehavior(.paging)
-            .scrollPosition(id: $selectedIndex, anchor: .leading)
-            .accessibilityIdentifier("today-highlight-carousel")
-
-            if events.count > 1 {
-                Text("\(index + 1) / \(events.count)")
-                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                    .padding(.vertical, 8)
-                    .accessibilityLabel("要闻页码")
-                    .accessibilityValue("第 \(index + 1) 条，共 \(events.count) 条")
-                    .accessibilityAdjustableAction { direction in
-                        let target = index + (direction == .increment ? 1 : -1)
-                        guard events.indices.contains(target) else { return }
-                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
-                            selectedIndex = target
-                        }
-                    }
-                    .accessibilityIdentifier("today-highlight-position")
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-        .overlay { RoundedRectangle(cornerRadius: 18).strokeBorder(TodayBriefStyle.rule).allowsHitTesting(false) }
-        .onChange(of: events.count) { _, count in
-            if index >= count { selectedIndex = 0 }
-        }
-    }
-}
-
-private struct TodayBriefCategories: View {
-    let sections: [TodayBriefProjection.Section]
-    @Binding var selection: String?
-
-    var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 6) {
-                category("全部", id: nil)
-                ForEach(sections) { section in
-                    category(section.name, id: section.id)
-                }
-            }
-        }
-        .scrollIndicators(.hidden)
-    }
-
-    private func category(_ title: String, id: String?) -> some View {
-        Button { selection = id } label: {
-            Text(title)
-                .font(.subheadline.weight(selection == id ? .semibold : .regular))
-                .foregroundStyle(selection == id ? TodayBriefStyle.canvas : TodayBriefStyle.secondary)
-                .padding(.horizontal, 14).padding(.vertical, 6)
-                .background(selection == id ? TodayBriefStyle.accent : Color(uiColor: .tertiarySystemFill), in: Capsule())
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("today-category-\(id ?? "all")")
-        .accessibilityAddTraits(selection == id ? .isSelected : [])
-    }
-}
-
 private struct TodayBriefEventContent: View {
     let event: TodayReadingEvent
-    var loadsSources = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -334,21 +261,22 @@ private struct TodayBriefEventContent: View {
                     .foregroundStyle(TodayBriefStyle.accent)
             }
             Text(event.title)
-                .font(.title2.weight(.bold))
+                .font(.title3.bold())
                 .accessibilityAddTraits(.isHeader)
                 .textSelection(.enabled)
             if !event.summary.isEmpty {
-                Text(event.summary).font(.subheadline).lineSpacing(4).textSelection(.enabled)
+                Text(event.summary).font(.body).lineSpacing(4).textSelection(.enabled)
             }
             if !event.details.isEmpty {
-                Divider()
                 Text("具体进展").font(.subheadline.weight(.semibold))
+                    .accessibilityAddTraits(.isHeader)
+                    .padding(.top, 4)
                 ForEach(event.details, id: \.self) { paragraph in
                     Text(paragraph).font(.subheadline).lineSpacing(4).textSelection(.enabled)
                 }
             }
-            Divider()
-            TodayEventSources(postIDs: event.postIDs, loadsSources: loadsSources)
+            TodayEventSources(postIDs: event.postIDs)
+                .padding(.top, 6)
         }
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -358,32 +286,23 @@ private struct TodayBriefEventContent: View {
 
 private struct TodayBriefCompanyRow: View {
     let card: TodayBriefProjection.CompanyCard
-    @State private var showsSources = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 9) {
                 TodaySystemAvatar(source: card.avatar, name: card.name, size: 24)
-                Text(card.name).font(.subheadline.weight(.medium)).foregroundStyle(TodayBriefStyle.accent)
+                Text(card.name).font(.subheadline.weight(.semibold)).foregroundStyle(TodayBriefStyle.accent)
             }
             Text(card.system.headline).font(.headline).lineSpacing(4)
+                .accessibilityAddTraits(.isHeader)
             ForEach(card.paragraphs, id: \.self) { fact in
                 Text(fact).font(.subheadline).foregroundStyle(.secondary).lineSpacing(4)
             }
             if let watch = card.watch {
                 Text(watch).font(.subheadline).foregroundStyle(TodayBriefStyle.accent)
             }
-            DisclosureGroup(isExpanded: $showsSources) {
-                if showsSources { TodayEventSources(postIDs: card.postIDs).padding(.top, 8) }
-            } label: {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("消息来源 · \(card.postIDs.count) 篇原文").font(.subheadline)
-                    if !card.sources.isEmpty {
-                        Text(card.sources).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                .frame(minHeight: 44)
-            }
+            TodayEventSources(postIDs: card.postIDs, sourceNames: card.sources)
+                .padding(.top, 6)
         }
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
