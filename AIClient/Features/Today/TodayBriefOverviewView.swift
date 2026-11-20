@@ -100,11 +100,16 @@ struct TodayBriefProjection: Sendable {
     let avatarURLs: [URL]
     let overviewHeadline: String?
     fileprivate let companyRows: [CompanyRow]
+    let sourceIDs: [Int]
+    var sourcePosts: [Int: Post] = [:]
 
-    init?(edition: TodayPublishedEdition) {
+    var missingSourceCount: Int {
+        sourceIDs.count - sourcePosts.count
+    }
+
+    init(edition: TodayPublishedEdition) {
         let report = edition.report
         let systems = report.systems
-        guard !systems.isEmpty else { return nil }
         date = edition.date
         postCount = edition.postCount
         sourceCount = edition.sourceCount
@@ -115,6 +120,11 @@ struct TodayBriefProjection: Sendable {
         let sections = report.sections.map { Section($0, overview: overview) }
         companyRows = sections.flatMap(\.rows)
         avatarURLs = sections.flatMap(\.avatarURLs)
+        let companySourceIDs = companyRows.flatMap { row -> [Int] in
+            guard case let .company(card) = row.content else { return [] }
+            return card.postIDs
+        }
+        sourceIDs = Set((highlights + watchItems).flatMap(\.postIDs) + companySourceIDs).sorted()
         let headline = overview.headline
         let canonicalHeadline = TodayReadingEvent.canonical(headline)
         overviewHeadline = headline.isEmpty || highlights.contains {
@@ -126,6 +136,8 @@ struct TodayBriefProjection: Sendable {
 struct TodayBriefOverviewView: View {
     let brief: TodayBriefProjection
     let bottomInset: CGFloat
+    let isRefreshing: Bool
+    let retrySources: () async -> Void
 
     private enum Section: String {
         case highlights = "今日要闻"
@@ -143,7 +155,7 @@ struct TodayBriefOverviewView: View {
                     if !brief.highlights.isEmpty {
                         sectionHeading(.highlights)
                         ForEach(brief.highlights) { event in
-                            TodayBriefEventContent(event: event)
+                            TodayBriefEventContent(event: event, sourcePosts: brief.sourcePosts)
                             Divider()
                         }
                     }
@@ -156,7 +168,7 @@ struct TodayBriefOverviewView: View {
                     if !brief.watchItems.isEmpty {
                         sectionHeading(.watch)
                         ForEach(brief.watchItems) { event in
-                            TodayBriefEventContent(event: event)
+                            TodayBriefEventContent(event: event, sourcePosts: brief.sourcePosts)
                             Divider()
                         }
                     }
@@ -182,6 +194,17 @@ struct TodayBriefOverviewView: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .accessibilityIdentifier("today-report-metadata")
+            if brief.missingSourceCount > 0 {
+                HStack(spacing: 8) {
+                    Text("\(brief.missingSourceCount) 篇原文暂不可用")
+                    if isRefreshing {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Button("重试") { Task { await retrySources() } }
+                    }
+                }
+                .font(.subheadline)
+            }
             if let headline = brief.overviewHeadline {
                 Text(headline).font(.subheadline).lineSpacing(4)
                     .foregroundStyle(TodayBriefStyle.secondary)
@@ -245,7 +268,7 @@ struct TodayBriefOverviewView: View {
                 .foregroundStyle(.secondary)
                 .accessibilityAddTraits(.isHeader)
         case let .company(card):
-            TodayBriefCompanyRow(card: card)
+            TodayBriefCompanyRow(card: card, sourcePosts: brief.sourcePosts)
             Divider()
         }
     }
@@ -253,6 +276,7 @@ struct TodayBriefOverviewView: View {
 
 private struct TodayBriefEventContent: View {
     let event: TodayReadingEvent
+    let sourcePosts: [Int: Post]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -275,7 +299,7 @@ private struct TodayBriefEventContent: View {
                     Text(paragraph).font(.subheadline).lineSpacing(4).textSelection(.enabled)
                 }
             }
-            TodayEventSources(postIDs: event.postIDs)
+            TodayEventSources(postIDs: event.postIDs, postsByID: sourcePosts)
                 .padding(.top, 6)
         }
         .fixedSize(horizontal: false, vertical: true)
@@ -286,6 +310,7 @@ private struct TodayBriefEventContent: View {
 
 private struct TodayBriefCompanyRow: View {
     let card: TodayBriefProjection.CompanyCard
+    let sourcePosts: [Int: Post]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -301,7 +326,7 @@ private struct TodayBriefCompanyRow: View {
             if let watch = card.watch {
                 Text(watch).font(.subheadline).foregroundStyle(TodayBriefStyle.accent)
             }
-            TodayEventSources(postIDs: card.postIDs, sourceNames: card.sources)
+            TodayEventSources(postIDs: card.postIDs, postsByID: sourcePosts, sourceNames: card.sources)
                 .padding(.top, 6)
         }
         .fixedSize(horizontal: false, vertical: true)

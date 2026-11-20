@@ -15,6 +15,11 @@ struct TodayPublishedEdition: Codable, Sendable, Equatable {
     }
 }
 
+private struct TodayEditionSnapshot: Codable, Sendable {
+    let edition: TodayPublishedEdition
+    let sourcePosts: [Int: Post]
+}
+
 @MainActor
 final class TodayWorldStore: ObservableObject {
     @Published private(set) var report: TodayWorldYesterdayReportPayload?
@@ -71,12 +76,14 @@ final class TodayWorldStore: ObservableObject {
     private func restoreEdition() {
         guard usesPublishedSnapshots,
               let saved = DisplaySnapshotCache.editions.read(
-                TodayPublishedEdition.self, key: ServerConfiguration.currentURL.absoluteString, maximumAge: 48 * 60 * 60
+                TodayEditionSnapshot.self, key: ServerConfiguration.currentURL.absoluteString, maximumAge: 48 * 60 * 60
               ),
-              (Self.billingDate(daysAgo: 2)...Self.billingDate(daysAgo: 1)).contains(saved.value.date),
-              let cachedBrief = TodayBriefProjection(edition: saved.value) else { return }
-        displayedEdition = saved.value
-        brief = cachedBrief
+              (Self.billingDate(daysAgo: 2)...Self.billingDate(daysAgo: 1)).contains(saved.value.edition.date) else { return }
+        let snapshot = saved.value
+        displayedEdition = snapshot.edition
+        var projection = TodayBriefProjection(edition: snapshot.edition)
+        projection.sourcePosts = snapshot.sourcePosts
+        brief = projection
         isShowingCachedEdition = true
     }
 
@@ -96,21 +103,14 @@ final class TodayWorldStore: ObservableObject {
         isLoading = true
         if errorMessage != nil { errorMessage = nil }
         defer { isLoading = false }
-        let snapshotKey = ServerConfiguration.currentURL.absoluteString
+        let baseURL = ServerConfiguration.currentURL
+        let snapshotKey = baseURL.absoluteString
 
         do {
             let loadedReport = try await fetchReport()
             guard !Task.isCancelled else { return }
-            let edition = TodayPublishedEdition(payload: loadedReport)
-            if let edition {
-                if displayedEdition != edition {
-                    let projection = await Task.detached(priority: .userInitiated) {
-                        TodayBriefProjection(edition: edition)
-                    }.value
-                    guard !Task.isCancelled else { return }
-                    displayedEdition = edition
-                    brief = projection
-                }
+            if let edition = TodayPublishedEdition(payload: loadedReport) {
+                try await prepareEdition(edition, baseURL: baseURL)
                 if isShowingCachedEdition { isShowingCachedEdition = false }
             } else if let brief, brief.date < loadedReport.date {
                 if !isShowingCachedEdition { isShowingCachedEdition = true }
@@ -121,12 +121,8 @@ final class TodayWorldStore: ObservableObject {
             }
             if loadedReport != report { report = loadedReport }
             checkedAt = Date()
-            if usesPublishedSnapshots {
-                if let edition {
-                    await DisplaySnapshotCache.editions.save(edition, key: snapshotKey, at: Date())
-                } else if !isShowingCachedEdition {
-                    await DisplaySnapshotCache.editions.remove(key: snapshotKey)
-                }
+            if usesPublishedSnapshots, displayedEdition == nil {
+                await DisplaySnapshotCache.editions.remove(key: snapshotKey)
             }
         } catch is CancellationError {
             return
@@ -134,6 +130,32 @@ final class TodayWorldStore: ObservableObject {
             guard !Task.isCancelled, (error as? URLError)?.code != .cancelled else { return }
             errorMessage = NetworkErrorPresentation.message(for: error)
             checkedAt = Date()
+        }
+    }
+
+    private func prepareEdition(_ edition: TodayPublishedEdition, baseURL: URL) async throws {
+        let current = displayedEdition == edition ? brief : nil
+        var projection: TodayBriefProjection
+        if let current {
+            projection = current
+        } else {
+            projection = await Task.detached(priority: .userInitiated) {
+                TodayBriefProjection(edition: edition)
+            }.value
+        }
+        try Task.checkCancellation()
+
+        let missingIDs = projection.sourceIDs.filter { projection.sourcePosts[$0] == nil }
+        let fetchedPosts = try await fetchTodayEditionSources(ids: missingIDs, baseURL: baseURL)
+        try Task.checkCancellation()
+        guard current == nil || !fetchedPosts.isEmpty else { return }
+        projection.sourcePosts.merge(fetchedPosts) { _, fetched in fetched }
+        displayedEdition = edition
+        brief = projection
+
+        if usesPublishedSnapshots {
+            let snapshot = TodayEditionSnapshot(edition: edition, sourcePosts: projection.sourcePosts)
+            await DisplaySnapshotCache.editions.save(snapshot, key: baseURL.absoluteString, at: Date())
         }
     }
 
@@ -210,46 +232,24 @@ final class TodayWorldStore: ObservableObject {
 
 }
 
-private actor TodayWorldPostCache {
-    static let shared = TodayWorldPostCache()
-
-    private struct Entry {
-        let post: Post
-        let loadedAt: Date
-    }
-
-    private let lifetime: TimeInterval = 6 * 60 * 60
-    private var entries: [String: Entry] = [:]
-
-    func cachedPosts(ids: [Int], baseURL: URL) async -> [Post] {
-        discardExpiredEntries()
-        for id in ids where entries[key(id: id, baseURL: baseURL)] == nil {
-            let cacheKey = key(id: id, baseURL: baseURL)
-            if let saved = await DisplaySnapshotCache.pages.load(Post.self, key: cacheKey, maximumAge: lifetime),
-               entries[cacheKey] == nil {
-                entries[cacheKey] = Entry(post: saved.value, loadedAt: saved.savedAt)
+private func fetchTodayEditionSources(ids: [Int], baseURL: URL) async throws -> [Int: Post] {
+    let batchSize = 50
+    var loaded: [Int: Post] = [:]
+    for start in stride(from: 0, to: ids.count, by: batchSize) {
+        try Task.checkCancellation()
+        let batch = ids[start..<min(start + batchSize, ids.count)]
+        let requestedIDs = Set(batch)
+        do {
+            let posts = try await fetchTodayWorldPostBatch(ids: batch, baseURL: baseURL)
+            for post in posts where requestedIDs.contains(post.id) {
+                loaded[post.id] = post
             }
-        }
-        return ids.compactMap { entries[key(id: $0, baseURL: baseURL)]?.post }
-    }
-
-    func store(posts: [Post], baseURL: URL) async {
-        let loadedAt = Date()
-        for post in posts {
-            let cacheKey = key(id: post.id, baseURL: baseURL)
-            entries[cacheKey] = Entry(post: post, loadedAt: loadedAt)
-            await DisplaySnapshotCache.pages.save(post, key: cacheKey, at: loadedAt)
+        } catch {
+            try Task.checkCancellation()
+            // Keep successful batches and let the reader retry the missing sources.
         }
     }
-
-    private func key(id: Int, baseURL: URL) -> String {
-        "\(baseURL.absoluteString)|\(id)"
-    }
-
-    private func discardExpiredEntries() {
-        let cutoff = Date().addingTimeInterval(-lifetime)
-        entries = entries.filter { $0.value.loadedAt >= cutoff }
-    }
+    return loaded
 }
 
 private struct TodayWorldPostBatchResponse: Decodable {
@@ -257,31 +257,24 @@ private struct TodayWorldPostBatchResponse: Decodable {
     let posts: [Post]
 }
 
-private func fetchTodayWorldPostBatch(ids: [Int], baseURL: URL) async throws -> [Post] {
-    var seen = Set<Int>()
-    let requestedIDs = ids.filter { $0 > 0 && seen.insert($0).inserted }.prefix(50)
-    guard !requestedIDs.isEmpty else { return [] }
-
+private func fetchTodayWorldPostBatch(ids: ArraySlice<Int>, baseURL: URL) async throws -> [Post] {
     var components = URLComponents(
         url: baseURL.appending(path: "api/ios/v1/post/batch"),
         resolvingAgainstBaseURL: false
     )
     components?.queryItems = [
-        .init(name: "ids", value: requestedIDs.map(String.init).joined(separator: ",")),
+        .init(name: "ids", value: ids.map(String.init).joined(separator: ",")),
         .init(name: "full", value: "1")
     ]
     guard let url = components?.url else { throw APIError.invalidURL }
 
-    let request = URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData)
+    let request = URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData, timeoutInterval: 8)
     let (data, response) = try await URLSession.shared.data(for: request)
     guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
     guard (200..<300).contains(http.statusCode) else { throw APIError.httpStatus(http.statusCode) }
     let decoded = try JSONDecoder().decode(TodayWorldPostBatchResponse.self, from: data)
     guard decoded.success else { throw APIError.invalidResponse }
-    guard decoded.posts.allSatisfy({ $0.content != nil || $0.text != nil || $0.summary != nil }) else {
-        throw APIError.invalidResponse
-    }
-    return decoded.posts
+    return decoded.posts.filter { $0.content != nil || $0.text != nil || $0.summary != nil }
 }
 
 struct TodayWorldView: View {
@@ -325,7 +318,12 @@ struct TodayWorldView: View {
                                 .padding(.bottom, 6)
                                 .accessibilityIdentifier("today-cached-edition")
                         }
-                        TodayBriefOverviewView(brief: brief, bottomInset: bottomChromeHeight)
+                        TodayBriefOverviewView(
+                            brief: brief,
+                            bottomInset: bottomChromeHeight,
+                            isRefreshing: store.isLoading,
+                            retrySources: { await store.loadReport(force: true) }
+                        )
                     } else {
                         emptyReportView
                     }
@@ -534,24 +532,12 @@ struct TodayReadingEvent: Identifiable, Sendable {
 
 struct TodayEventSources: View {
     let postIDs: [Int]
+    let postsByID: [Int: Post]
     var sourceNames = ""
 
-    @Environment(\.rootTabIsActive) private var rootTabIsActive
-    @Environment(\.scenePhase) private var scenePhase
-    @State private var posts: [Post] = []
-    @State private var failedIDs: [Int] = []
-    @State private var retryAttempt = 0
-
-    private struct Request: Equatable {
-        let postIDs: [Int]
-        let baseURL: URL
-        let retryAttempt: Int
-    }
-
     var body: some View {
-        let request = rootTabIsActive && scenePhase == .active && !postIDs.isEmpty
-            ? Request(postIDs: postIDs, baseURL: ServerConfiguration.currentURL, retryAttempt: retryAttempt)
-            : nil
+        let posts = postIDs.compactMap { postsByID[$0] }
+        let missing = postIDs.count - posts.count
         VStack(alignment: .leading, spacing: 0) {
             Text("消息来源" + (postIDs.isEmpty ? "" : " · \(postIDs.count) 篇原文"))
                 .font(.subheadline.weight(.semibold))
@@ -571,59 +557,16 @@ struct TodayEventSources: View {
                 TodayInlineSourceView(post: post)
                     .padding(.top, 12)
             }
-            if request != nil && posts.count + failedIDs.count < postIDs.count {
-                ProgressView("正在载入来源").font(.caption).padding(.top, 10)
-            } else if !failedIDs.isEmpty {
-                HStack {
-                    Text(posts.isEmpty ? "暂时无法载入来源" : "部分来源暂未载入")
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 8)
-                    Button("重试") { retryAttempt += 1 }
-                }
-                .font(.subheadline)
-                .padding(.top, 6)
+            if missing > 0 {
+                Text("\(missing) 篇原文暂不可用")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 8)
             }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(TodayBriefStyle.accent.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
-        .task(id: request) {
-            guard let request else { return }
-            await loadSources(request)
-        }
-    }
-
-    @MainActor private func loadSources(_ request: Request) async {
-        guard !Task.isCancelled else { return }
-        let url = request.baseURL
-        let postIDs = request.postIDs
-        failedIDs = []
-        var loaded = Dictionary(uniqueKeysWithValues: posts.map { ($0.id, $0) })
-        let cached = await TodayWorldPostCache.shared.cachedPosts(ids: postIDs, baseURL: url)
-        guard !Task.isCancelled else { return }
-        for post in cached { loaded[post.id] = post }
-        var orderedPosts = postIDs.compactMap { loaded[$0] }
-        if posts != orderedPosts { posts = orderedPosts }
-        let missing = postIDs.filter { loaded[$0] == nil }
-        for start in stride(from: 0, to: missing.count, by: 50) {
-            guard !Task.isCancelled else { return }
-            let ids = Array(missing[start..<min(start + 50, missing.count)])
-            let requestedIDs = Set(ids)
-            do {
-                let batch = try await fetchTodayWorldPostBatch(ids: ids, baseURL: url)
-                await TodayWorldPostCache.shared.store(posts: batch, baseURL: url)
-                guard !Task.isCancelled else { return }
-                for post in batch where requestedIDs.contains(post.id) { loaded[post.id] = post }
-                orderedPosts = postIDs.compactMap { loaded[$0] }
-                if posts != orderedPosts { posts = orderedPosts }
-            } catch is CancellationError {
-                return
-            } catch {
-                // Keep successful batches visible and let the user retry the missing sources.
-            }
-        }
-        guard !Task.isCancelled else { return }
-        failedIDs = postIDs.filter { loaded[$0] == nil }
     }
 }
 
