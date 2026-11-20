@@ -35,19 +35,16 @@ enum TodayOverviewSelection {
 
 struct TodayBriefProjection: Sendable {
     fileprivate struct CompanyCard: Sendable {
-        let system: TodayWorldFinalReportSystem
         let name: String
         let avatar: TodaySystemAvatar.Source
-        let paragraphs: [String]
-        let watch: String?
+        let text: String?
         let postIDs: [Int]
 
         init(_ system: TodayWorldFinalReportSystem) {
-            self.system = system
             name = todayBriefSystemName(system.systemName)
             avatar = TodaySystemAvatar.Source(system)
-            paragraphs = TodayReadingEvent.additionalDetails(system.facts.map(\.text), excluding: [])
-            watch = system.watchItem.flatMap { $0.isEmpty ? nil : "后续关注 · " + $0 }
+            text = TodayReadingEvent.additionalDetails(system.facts.map(\.text), excluding: []).first
+                ?? system.watchItem.flatMap { $0.isEmpty ? nil : "后续关注 · " + $0 }
             postIDs = Array(Set(system.postIDs.filter { $0 > 0 })).sorted()
         }
     }
@@ -64,7 +61,7 @@ struct TodayBriefProjection: Sendable {
         var text: String? {
             switch content {
             case let .event(event): event.text
-            case let .company(company): company.paragraphs.first ?? company.watch
+            case let .company(company): company.text
             }
         }
 
@@ -120,6 +117,7 @@ struct TodayBriefOverviewView: View {
     @State private var selectedCard: TodayBriefProjection.Card?
 
     let brief: TodayBriefProjection
+    let viewport: CGSize
     let cachedEditionMessage: String?
     let reportError: String?
     let isRefreshing: Bool
@@ -129,44 +127,40 @@ struct TodayBriefOverviewView: View {
         VStack(spacing: 0) {
             editionStatus
             if brief.cards.isEmpty {
-                ScrollView {
-                    Text("本期暂无可阅读的简报")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(TodayBriefStyle.horizontalInset)
-                }
+                Text("本期暂无可阅读的简报")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(TodayBriefStyle.horizontalInset)
             } else {
-                TodayBriefDeck(brief: brief) { selectedCard = $0 }
+                Spacer(minLength: 0)
+                TodayBriefDeck(brief: brief, viewport: viewport) { selectedCard = $0 }
+                Spacer(minLength: 0)
             }
         }
-        .scrollIndicators(.hidden)
-        .clipped()
         .accessibilityIdentifier("today-overview")
         .appSheet(item: $selectedCard) { card in
-            readingSheet(card)
+            sourceSheet(postIDs: card.postIDs)
                 .appPresentationDetents([.large])
                 .appPresentationCornerRadius(28)
                 .appPresentationDragIndicator()
         }
     }
 
-    private func readingSheet(_ card: TodayBriefProjection.Card) -> some View {
+    private func sourceSheet(postIDs: [Int]) -> some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 20) {
-                cardContent(card.content)
-                if card.postIDs.isEmpty {
+            Group {
+                if postIDs.isEmpty {
                     Text("暂无原文")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 } else {
-                    cardSources(card.postIDs)
+                    cardSources(postIDs)
                 }
             }
-            .padding(.horizontal, TodayBriefStyle.horizontalInset)
-            .padding(.top, 18)
-            .padding(.bottom, 20)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, TodayBriefStyle.horizontalInset)
+            .padding(.bottom, 20)
         }
         .scrollIndicators(.hidden)
         .scrollBounceBehavior(.basedOnSize)
@@ -181,7 +175,7 @@ struct TodayBriefOverviewView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .accessibilityLabel("关闭简报")
+            .accessibilityLabel("关闭原文")
             .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.horizontal, 12)
             .background(Color(uiColor: .systemBackground))
@@ -219,14 +213,12 @@ struct TodayBriefOverviewView: View {
         let available = ids.compactMap { brief.sources[$0] }
         let missing = ids.count - available.count
         return LazyVStack(alignment: .leading, spacing: 0) {
-            Text("原文")
-                .font(.subheadline.weight(.semibold))
-                .accessibilityAddTraits(.isHeader)
-                .padding(.bottom, 4)
             ForEach(available) { source in
+                if source.id != available.first?.id {
+                    Divider()
+                }
                 TodayInlineSourceView(source: source)
                     .padding(.vertical, 12)
-                    .overlay(alignment: .top) { TodayBriefStyle.rule.frame(height: 1) }
             }
             if missing > 0 {
                 HStack {
@@ -250,16 +242,6 @@ struct TodayBriefOverviewView: View {
                 .frame(minHeight: 36)
         }
     }
-
-    @ViewBuilder
-    private func cardContent(_ content: TodayBriefProjection.Card.Content) -> some View {
-        switch content {
-        case let .event(event):
-            TodayBriefEventContent(event: event)
-        case let .company(card):
-            TodayBriefCompanyRow(card: card)
-        }
-    }
 }
 
 private struct TodayBriefDeck: View {
@@ -267,48 +249,46 @@ private struct TodayBriefDeck: View {
     @State private var visibleCardID: String?
 
     let brief: TodayBriefProjection
+    let viewport: CGSize
     let open: (TodayBriefProjection.Card) -> Void
 
     private let shape = RoundedRectangle(cornerRadius: 30)
 
     var body: some View {
-        GeometryReader { geometry in
-            let showsControls = brief.cards.count > 1 && geometry.size.height >= 320
-            let deckPadding: CGFloat = 36
-            let maximumCardHeight: CGFloat = 455
-            let availableHeight = geometry.size.height - (showsControls ? 44 : 0)
-            let deckHeight = min(max(0, availableHeight), maximumCardHeight + deckPadding)
-            let cardWidth = min(max(0, geometry.size.width - 44), 480)
-            let cardHeight = max(0, deckHeight - deckPadding)
+        let deckPadding: CGFloat = 36
+        let headerRowHeight: CGFloat = 48
+        let controlsHeight: CGFloat = 44
+        // Reserve the header and controls from the viewport once, regardless of banners or billing.
+        let cardHeight = min(455, max(0, viewport.height - headerRowHeight - controlsHeight - deckPadding))
+        let deckHeight = cardHeight + deckPadding
+        let cardWidth = min(max(0, viewport.width - 44), 480)
 
-            VStack(spacing: 0) {
-                ZStack(alignment: .top) {
-                    if brief.cards.count > 1 {
-                        shape
-                            .fill(Color(red: 0.91, green: 0.95, blue: 0.92))
-                            .frame(width: cardWidth * 0.87, height: cardHeight)
-                            .offset(y: 28)
-                            .accessibilityHidden(true)
-                        shape
-                            .fill(Color(red: 0.95, green: 0.97, blue: 0.95))
-                            .frame(width: cardWidth * 0.94, height: cardHeight)
-                            .offset(y: 21)
-                            .accessibilityHidden(true)
-                    }
-
-                    cards(
-                        width: cardWidth,
-                        height: cardHeight,
-                        viewport: CGSize(width: geometry.size.width, height: deckHeight)
-                    )
+        VStack(spacing: 0) {
+            ZStack(alignment: .top) {
+                if brief.cards.count > 1 {
+                    shape
+                        .fill(Color(red: 0.91, green: 0.95, blue: 0.92))
+                        .frame(width: cardWidth * 0.87, height: cardHeight)
+                        .offset(y: 28)
+                        .accessibilityHidden(true)
+                    shape
+                        .fill(Color(red: 0.95, green: 0.97, blue: 0.95))
+                        .frame(width: cardWidth * 0.94, height: cardHeight)
+                        .offset(y: 21)
+                        .accessibilityHidden(true)
                 }
-                .frame(height: deckHeight)
 
-                if showsControls {
-                    pageControls
-                }
+                cards(
+                    width: cardWidth,
+                    height: cardHeight,
+                    viewport: CGSize(width: viewport.width, height: deckHeight)
+                )
             }
-            .frame(width: geometry.size.width, height: geometry.size.height)
+            .frame(height: deckHeight)
+
+            if brief.cards.count > 1 {
+                pageControls
+            }
         }
     }
 
@@ -332,7 +312,7 @@ private struct TodayBriefDeck: View {
                         .contentShape(shape)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityHint("打开完整简报及原文")
+                    .accessibilityHint("查看原文")
                     .accessibilityIdentifier("today-card-\(card.id)")
                     .scrollTransition(.interactive, axis: .horizontal) { content, phase in
                         content
@@ -441,53 +421,6 @@ private struct TodayBriefCardFace: View {
         .font(.subheadline.weight(.semibold))
         .foregroundStyle(TodayBriefStyle.accent)
         .lineLimit(1)
-    }
-}
-
-private struct TodayBriefEventContent: View {
-    let event: TodayReadingEvent
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if !event.sourceLabel.isEmpty {
-                Text(event.sourceLabel).font(.footnote.weight(.semibold))
-                    .foregroundStyle(TodayBriefStyle.accent)
-            }
-            Text(event.text).font(.body).lineSpacing(5)
-            if !event.details.isEmpty {
-                Text("具体进展").font(.subheadline.weight(.semibold))
-                    .accessibilityAddTraits(.isHeader)
-                    .padding(.top, 4)
-                ForEach(event.details, id: \.self) { paragraph in
-                    Text(paragraph).font(.subheadline).lineSpacing(5)
-                }
-            }
-        }
-        .fixedSize(horizontal: false, vertical: true)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .contain)
-    }
-}
-
-private struct TodayBriefCompanyRow: View {
-    let card: TodayBriefProjection.CompanyCard
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 9) {
-                TodaySystemAvatar(source: card.avatar, name: card.name, size: 24)
-                Text(card.name).font(.subheadline.weight(.semibold)).foregroundStyle(TodayBriefStyle.accent)
-            }
-            ForEach(card.paragraphs, id: \.self) { fact in
-                Text(fact).font(.body).lineSpacing(5)
-            }
-            if let watch = card.watch {
-                Text(watch).font(.subheadline).foregroundStyle(TodayBriefStyle.accent)
-            }
-        }
-        .fixedSize(horizontal: false, vertical: true)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityIdentifier("today-system-\(card.system.id)")
     }
 }
 
