@@ -442,10 +442,8 @@ struct TodayWorldView: View {
         return nil
     }
 
-    private var cachedEditionStatus: String {
-        guard let report = store.report else {
-            return store.isLoading ? "已显示缓存日报，正在检查更新" : "已显示缓存日报"
-        }
+    private var cachedEditionStatus: String? {
+        guard let report = store.report else { return nil }
         if report.admission?.reason_codes.contains("edition_cost_limit") == true,
            report.admission?.state == "paused" {
             return "本期生成已达预算上限，正在查看上期日报"
