@@ -285,7 +285,7 @@ private func fetchTodayWorldPostBatch(ids: ArraySlice<Int>, baseURL: URL) async 
     guard (200..<300).contains(http.statusCode) else { throw APIError.httpStatus(http.statusCode) }
     let decoded = try JSONDecoder().decode(TodayWorldPostBatchResponse.self, from: data)
     guard decoded.success else { throw APIError.invalidResponse }
-    return decoded.posts.filter { $0.content != nil || $0.text != nil || $0.summary != nil }
+    return decoded.posts.filter { $0.contentZH != nil || $0.content != nil || $0.text != nil || $0.summary != nil }
 }
 
 struct TodayWorldView: View {
@@ -387,11 +387,13 @@ struct TodayWorldView: View {
     }
 
     private func originalsOverlay(postIDs: [Int], brief: TodayBriefProjection, viewport: CGSize) -> some View {
-        let panelWidth = min(560, max(0, viewport.width - 28))
-        let bottomInset = viewport.height * 0.22
-        let panelHeight = min(660, max(0, viewport.height - 52 - bottomInset))
-        return ZStack(alignment: .bottom) {
+        let panelWidth = min(680, max(0, viewport.width - 24))
+        let readingHeight = max(0, viewport.height - bottomChromeHeight)
+        let verticalMargin = min(24, readingHeight * 0.045)
+        let panelHeight = min(840, max(0, readingHeight - verticalMargin * 2))
+        return ZStack {
             TodayBriefStyle.surface
+                .overlay(TodayBriefStyle.accent.opacity(0.055))
                 .contentShape(Rectangle())
                 .onTapGesture { originalPostIDs = nil }
                 .accessibilityHidden(true)
@@ -404,7 +406,7 @@ struct TodayWorldView: View {
                 close: { originalPostIDs = nil }
             )
             .frame(width: panelWidth, height: panelHeight)
-            .padding(.bottom, bottomInset)
+            .padding(.bottom, bottomChromeHeight)
         }
     }
 
@@ -589,11 +591,11 @@ struct TodaySourcePresentation: Identifiable, Sendable {
 
     init(post: Post) {
         self.post = post
-        text = post.xStoredOriginalContent
-        reply = post.xReplyContext?.text?.trimmingCharacters(in: .whitespacesAndNewlines)
-        var originalQuote = post.xQuotedPost
-        originalQuote?.textZH = nil
-        quote = originalQuote
+        text = XPostTextFormatter.simplifiedChinese(
+            post.hasTranslation ? post.displayContent : post.xStoredOriginalContent
+        )
+        reply = post.xReplyContext?.displayText
+        quote = post.xQuotedPost
         author = post.authorName
         avatarURL = post.avatarURL
         time = post.formattedTime

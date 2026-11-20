@@ -627,7 +627,6 @@ private struct EditorialRootView: View {
                     dynamicTarget: lastDynamicTab
                 )
             }
-            .padding(.bottom, 4)
             .background {
                 GeometryReader { proxy in
                     Color.clear.preference(
@@ -766,28 +765,21 @@ private struct RootNavigationBar: View {
             : Color(red: 0.22, green: 0.36, blue: 0.27)
     }
 
-    private var selectedForeground: Color {
-        colorScheme == .dark
-            ? Color(red: 0.09, green: 0.16, blue: 0.11)
-            : .white
-    }
-
     var body: some View {
-        HStack(spacing: 4) {
-            item(.world, title: "今日", icon: "list.bullet.rectangle")
+        HStack(spacing: 0) {
+            item(.world, title: "今日", icon: "newspaper")
             intelligenceItem
-            item(.investment, title: "研究", icon: "chart.bar.fill")
+            item(.investment, title: "研究", icon: "chart.bar")
             item(.learning, title: "知识", icon: "book")
         }
-        .padding(4)
-        .frame(maxWidth: 440)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: Capsule())
-        .overlay {
-            Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+        .frame(maxWidth: 560)
+        .frame(maxWidth: .infinity)
+        .background {
+            Color(uiColor: .systemBackground).ignoresSafeArea(edges: .bottom)
         }
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.22 : 0.08), radius: 8, y: 3)
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
+        .overlay(alignment: .top) {
+            Divider().allowsHitTesting(false)
+        }
     }
 
     private var intelligenceItem: some View {
@@ -846,34 +838,20 @@ private struct RootNavigationBar: View {
     }
 
     private func itemLabel(title: String, icon: String, isSelected: Bool) -> some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 5) {
-                Image(systemName: icon)
-                Text(title)
-            }
-            .fixedSize(horizontal: true, vertical: false)
-
-            VStack(spacing: 3) {
-                Image(systemName: icon)
-                Text(title)
-            }
-            .fixedSize(horizontal: false, vertical: true)
+        VStack(spacing: 4) {
+            Image(systemName: icon)
+                .symbolVariant(isSelected ? .fill : .none)
+                .font(.system(size: 19, weight: isSelected ? .semibold : .medium))
+            Text(title)
+                .font(.caption.weight(isSelected ? .semibold : .medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
-        .font(.subheadline.weight(isSelected ? .semibold : .medium))
         .symbolRenderingMode(.monochrome)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 6)
-        .foregroundStyle(
-            isSelected
-                ? selectedForeground
-                : Color.secondary
-        )
-        .frame(maxWidth: .infinity, minHeight: 44)
-        .background {
-            if isSelected {
-                Capsule().fill(accent)
-            }
-        }
-        .contentShape(Capsule())
+        .padding(.horizontal, 4)
+        .padding(.vertical, 5)
+        .foregroundStyle(isSelected ? accent : Color.secondary)
+        .frame(maxWidth: .infinity, minHeight: 50)
+        .contentShape(Rectangle())
     }
 }
