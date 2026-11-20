@@ -265,7 +265,6 @@ private struct TodayReportRetryButton: View {
 }
 
 private struct TodayBriefDeck: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var visibleCardID: String?
 
     let brief: TodayBriefProjection
@@ -277,24 +276,17 @@ private struct TodayBriefDeck: View {
     var body: some View {
         let deckPadding: CGFloat = 36
         let headerRowHeight: CGFloat = 48
-        let controlsHeight: CGFloat = 44
-        // Reserve the header and controls from the viewport once, regardless of banners or billing.
-        let cardHeight = min(495, max(0, viewport.height - headerRowHeight - controlsHeight - deckPadding))
+        // Keep card height stable as banners and billing details come and go.
+        let cardHeight = min(495, max(0, viewport.height - headerRowHeight - deckPadding))
         let deckHeight = cardHeight + deckPadding
         let cardWidth = min(max(0, viewport.width - 44), 480)
 
-        VStack(spacing: 0) {
-            cards(
-                width: cardWidth,
-                height: cardHeight,
-                viewport: CGSize(width: viewport.width, height: deckHeight)
-            )
-            .frame(height: deckHeight)
-
-            if brief.cards.count > 1 {
-                pageControls
-            }
-        }
+        cards(
+            width: cardWidth,
+            height: cardHeight,
+            viewport: CGSize(width: viewport.width, height: deckHeight)
+        )
+        .frame(height: deckHeight)
     }
 
     private func cards(width: CGFloat, height: CGFloat, viewport: CGSize) -> some View {
@@ -345,33 +337,6 @@ private struct TodayBriefDeck: View {
         .scrollTargetBehavior(.paging)
         .scrollPosition(id: $visibleCardID)
         .accessibilityIdentifier("today-card-pager")
-    }
-
-    private var pageControls: some View {
-        let index = brief.cards.firstIndex { $0.id == visibleCardID } ?? 0
-        return HStack(spacing: 12) {
-            pageButton("上一条", icon: "chevron.left", target: index - 1)
-            pageButton("下一条", icon: "chevron.right", target: index + 1)
-        }
-    }
-
-    private func pageButton(_ title: String, icon: String, target: Int) -> some View {
-        let enabled = brief.cards.indices.contains(target)
-        return Button {
-            guard enabled else { return }
-            withAnimation(reduceMotion ? nil : .smooth(duration: 0.28)) {
-                visibleCardID = brief.cards[target].id
-            }
-        } label: {
-            Image(systemName: icon)
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(Color.secondary.opacity(enabled ? 0.78 : 0.36))
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .accessibilityLabel(title)
     }
 }
 
