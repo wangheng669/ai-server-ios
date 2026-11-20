@@ -774,6 +774,14 @@ private struct RootNavigationBar: View {
         }
         .padding(5)
         .frame(maxWidth: 420)
+        .background {
+            Capsule()
+                .fill(.ultraThinMaterial)
+                .overlay {
+                    Capsule().fill(Color(uiColor: .systemBackground).opacity(0.24))
+                }
+                .shadow(color: .black.opacity(colorScheme == .dark ? 0.22 : 0.07), radius: 7, y: 3)
+        }
         .overlay {
             Capsule()
                 .strokeBorder(Color.primary.opacity(0.09), lineWidth: 0.5)
