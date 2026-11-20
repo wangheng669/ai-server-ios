@@ -301,27 +301,12 @@ struct TodayWorldView: View {
                 )
                 Group {
                     if let brief = store.brief {
-                        if let error = store.errorMessage {
-                            Button {
-                                Task { await store.load(force: true) }
-                            } label: {
-                                Label("已显示上次日报 · \(error) · 重试", systemImage: "arrow.clockwise")
-                            }
-                            .font(.caption2)
-                            .padding(.bottom, 5)
-                        } else if store.isShowingCachedEdition {
-                            Text(cachedEditionStatus)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 20)
-                                .padding(.bottom, 6)
-                                .accessibilityIdentifier("today-cached-edition")
-                        }
                         TodayBriefOverviewView(
                             brief: brief,
+                            cachedEditionMessage: store.isShowingCachedEdition ? cachedEditionStatus : nil,
+                            reportError: store.errorMessage,
                             isRefreshing: store.isLoading,
-                            retrySources: { await store.loadReport(force: true) }
+                            retryReport: { await store.loadReport(force: true) }
                         )
                         .id(brief.date)
                     } else {
