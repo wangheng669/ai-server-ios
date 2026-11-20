@@ -85,9 +85,14 @@ struct MarketService {
 
     func famousHoldings(managerKey: String? = nil) async throws -> FamousHoldings {
         var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/market/famous-holdings"), resolvingAgainstBaseURL: false)
-        if let managerKey { components?.queryItems = [.init(name: "manager", value: managerKey)] }
+        if let managerKey {
+            components?.queryItems = [
+                .init(name: "manager", value: managerKey),
+                .init(name: "view", value: "positions")
+            ]
+        }
         guard let url = components?.url else { throw MarketServiceError.invalidURL }
-        return try await request(url, as: FamousHoldingsResponse.self).data
+        return try await request(url, as: FamousHoldingsResponse.self, bypassCache: true).data
     }
 
     func investorMood(refresh: Bool = false) async throws -> InvestorMoodBoard {

@@ -30,6 +30,7 @@ private struct MarketDetailRoute: Identifiable, Equatable {
 private final class MarketDetailStores: ObservableObject {
     lazy var globalRanking = GlobalRankingStore()
     lazy var holdings = FamousHoldingsStore()
+    lazy var companies = CompanyResearchStore()
 }
 
 struct MarketView: View {
@@ -134,6 +135,7 @@ struct MarketView: View {
         ResearchHomeView(
             store: store,
             researchStore: institutionResearchStore,
+            companyStore: detailStores.companies,
             onOpenMacro: {
                 showsMacro = true
             },
@@ -247,6 +249,12 @@ struct MarketView: View {
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
             await store.runUpdates()
+        }
+        .task(id: rootTabIsActive && scenePhase == .active) {
+            guard rootTabIsActive, scenePhase == .active else { return }
+            async let companies: Void = detailStores.companies.loadIfNeeded()
+            async let holdings: Void = holdingsStore.load()
+            _ = await (companies, holdings)
         }
         .task(id: rootTabIsActive && scenePhase == .active) {
             guard rootTabIsActive, scenePhase == .active else { return }

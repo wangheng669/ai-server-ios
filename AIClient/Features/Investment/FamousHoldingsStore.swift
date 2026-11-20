@@ -12,17 +12,32 @@ final class FamousHoldingsStore {
     @ObservationIgnored private var detailTasks: [FamousHoldingsReportIdentity: Task<Void, Never>] = [:]
 
     private let service: MarketService
-    private var hasLoadedFromNetwork = false
+    private var lastLoadedAt: Date?
     private var hasLoadedCache = false
+    @ObservationIgnored private var overviewTask: Task<Void, Never>?
 
     init(baseURL: URL = ServerConfiguration.currentURL, session: URLSession? = nil) {
         service = MarketService(baseURL: baseURL, session: session)
     }
 
     func load(force: Bool = false) async {
-        guard !isLoading else { return }
+        if let overviewTask {
+            await overviewTask.value
+            return
+        }
+        if !force, holdings != nil,
+           let lastLoadedAt, Date().timeIntervalSince(lastLoadedAt) < 5 * 60 { return }
+        let task = Task { await refreshOverview() }
+        overviewTask = task
+        await task.value
+    }
+
+    private func refreshOverview() async {
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            overviewTask = nil
+        }
         if !hasLoadedCache {
             let cached = await Task.detached(priority: .userInitiated) {
                 FamousHoldingsCache.load()
@@ -31,13 +46,11 @@ final class FamousHoldingsStore {
             holdings = cached
             hasLoadedCache = true
         }
-        if !force, hasLoadedFromNetwork { return }
-        if !force, holdings != nil, FamousHoldingsCache.isFreshForNetworkRefresh() { return }
         do {
             let value = try await service.famousHoldings()
             guard !Task.isCancelled else { return }
             holdings = value
-            hasLoadedFromNetwork = true
+            lastLoadedAt = Date()
             await Task.detached(priority: .utility) { FamousHoldingsCache.save(value) }.value
             errorMessage = nil
         } catch is CancellationError {
@@ -93,15 +106,9 @@ final class FamousHoldingsStore {
 }
 
 private enum FamousHoldingsCache {
-    private static let payloadKey = "market.famous-holdings.cache.v2"
-    private static let savedAtKey = "market.famous-holdings.cache.saved-at.v2"
+    private static let payloadKey = "market.famous-holdings.cache.v3"
+    private static let savedAtKey = "market.famous-holdings.cache.saved-at.v3"
     private static let maxAge: TimeInterval = 7 * 24 * 60 * 60
-    private static let networkRefreshInterval: TimeInterval = 6 * 60 * 60
-
-    static func isFreshForNetworkRefresh() -> Bool {
-        let savedAt = UserDefaults.standard.double(forKey: savedAtKey)
-        return savedAt > 0 && Date().timeIntervalSince1970 - savedAt <= networkRefreshInterval
-    }
 
     static func load() -> FamousHoldings? {
         let defaults = UserDefaults.standard
