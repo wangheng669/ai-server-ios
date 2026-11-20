@@ -62,6 +62,11 @@ struct TodayBriefProjection: Sendable {
         let id: String
         let content: Content
 
+        var sourceNames: String {
+            guard case let .company(company) = content else { return "" }
+            return company.sources
+        }
+
         var postIDs: [Int] {
             switch content {
             case let .event(event): event.postIDs
@@ -74,14 +79,19 @@ struct TodayBriefProjection: Sendable {
     let postCount: Int
     let sourceCount: Int
     let isPartial: Bool
-    let avatarURLs: [URL]
     let overviewHeadline: String?
     fileprivate let cards: [Card]
     let sourceIDs: [Int]
-    var sourcePosts: [Int: Post] = [:]
+    private(set) var sources: [Int: TodaySourcePresentation] = [:]
 
     var missingSourceCount: Int {
-        sourceIDs.count - sourcePosts.count
+        sourceIDs.count - sources.count
+    }
+
+    mutating func addSources(_ posts: [Int: Post]) {
+        for (id, post) in posts {
+            sources[id] = TodaySourcePresentation(post: post)
+        }
     }
 
     init(edition: TodayPublishedEdition) {
@@ -95,13 +105,11 @@ struct TodayBriefProjection: Sendable {
         let highlights = overview.highlights.map { TodayReadingEvent.highlight($0, systems: systems) }
         let watchItems = overview.watchItems.map { TodayReadingEvent.highlight($0, systems: systems) }
         var companyCards: [Card] = []
-        var avatarURLs: [URL] = []
         for section in report.sections {
             let eligibleIDs = Set(TodayOverviewSelection.supplementarySystems(in: section, overview: overview).map(\.id))
             for group in section.groups {
                 for system in group.systems where eligibleIDs.contains(system.id) {
                     let company = CompanyCard(system)
-                    if case .remote(let url?) = company.avatar { avatarURLs.append(url) }
                     companyCards.append(Card(
                         id: "company-\(section.id)-\(group.id)-\(system.id)",
                         content: .company(company)
@@ -112,7 +120,6 @@ struct TodayBriefProjection: Sendable {
         cards = highlights.map { Card(id: "highlight-" + $0.id, content: .event($0)) }
             + companyCards
             + watchItems.map { Card(id: "watch-" + $0.id, content: .event($0)) }
-        self.avatarURLs = avatarURLs
         sourceIDs = Set(cards.flatMap(\.postIDs)).sorted()
         let headline = overview.headline
         let canonicalHeadline = TodayReadingEvent.canonical(headline)
@@ -158,7 +165,7 @@ struct TodayBriefOverviewView: View {
                 LazyHStack(spacing: 0) {
                     ForEach(brief.cards) { card in
                         ScrollView(.vertical) {
-                            VStack(alignment: .leading, spacing: 12) {
+                            LazyVStack(alignment: .leading, spacing: 12) {
                                 let isFirstCard = card.id == brief.cards.first?.id
                                 if isFirstCard {
                                     editionStatus
@@ -170,6 +177,11 @@ struct TodayBriefOverviewView: View {
                                     }
                                 }
                                 cardContent(card.content)
+                                let sources = card.postIDs.compactMap { brief.sources[$0] }
+                                sourcesHeading(card, availableCount: sources.count)
+                                ForEach(sources) { source in
+                                    TodayInlineSourceView(source: source)
+                                }
                                 if isFirstCard { editionCounts }
                             }
                             .padding(16)
@@ -186,12 +198,6 @@ struct TodayBriefOverviewView: View {
             .scrollIndicators(.hidden, axes: .horizontal)
             .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             .scrollTargetBehavior(.paging)
-            .clipShape(RoundedRectangle(cornerRadius: 18))
-            .overlay {
-                RoundedRectangle(cornerRadius: 18)
-                    .strokeBorder(TodayBriefStyle.accent.opacity(0.22))
-                    .allowsHitTesting(false)
-            }
             .accessibilityIdentifier("today-card-pager")
         }
     }
@@ -236,20 +242,37 @@ struct TodayBriefOverviewView: View {
             .accessibilityIdentifier("today-report-metadata")
     }
 
+    private func sourcesHeading(_ card: TodayBriefProjection.Card, availableCount: Int) -> some View {
+        let count = card.postIDs.count
+        return VStack(alignment: .leading, spacing: 5) {
+            Divider().padding(.bottom, 5)
+            Text(count == 0 ? "消息来源" : "消息来源 · \(count) 篇原文")
+                .font(.subheadline.weight(.semibold))
+                .accessibilityAddTraits(.isHeader)
+            if !card.sourceNames.isEmpty {
+                Text(card.sourceNames).font(.caption).foregroundStyle(.secondary)
+            }
+            if count == 0 {
+                Text("本条简报暂未提供原文引用").font(.caption).foregroundStyle(.secondary)
+            } else if availableCount < count {
+                Text("\(count - availableCount) 篇原文暂不可用").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
     @ViewBuilder
     private func cardContent(_ content: TodayBriefProjection.Card.Content) -> some View {
         switch content {
         case let .event(event):
-            TodayBriefEventContent(event: event, sourcePosts: brief.sourcePosts)
+            TodayBriefEventContent(event: event)
         case let .company(card):
-            TodayBriefCompanyRow(card: card, sourcePosts: brief.sourcePosts)
+            TodayBriefCompanyRow(card: card)
         }
     }
 }
 
 private struct TodayBriefEventContent: View {
     let event: TodayReadingEvent
-    let sourcePosts: [Int: Post]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -272,8 +295,6 @@ private struct TodayBriefEventContent: View {
                     Text(paragraph).font(.subheadline).lineSpacing(4).textSelection(.enabled)
                 }
             }
-            TodayEventSources(postIDs: event.postIDs, postsByID: sourcePosts)
-                .padding(.top, 6)
         }
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -283,7 +304,6 @@ private struct TodayBriefEventContent: View {
 
 private struct TodayBriefCompanyRow: View {
     let card: TodayBriefProjection.CompanyCard
-    let sourcePosts: [Int: Post]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -299,8 +319,6 @@ private struct TodayBriefCompanyRow: View {
             if let watch = card.watch {
                 Text(watch).font(.subheadline).foregroundStyle(TodayBriefStyle.accent)
             }
-            TodayEventSources(postIDs: card.postIDs, postsByID: sourcePosts, sourceNames: card.sources)
-                .padding(.top, 6)
         }
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -373,21 +391,9 @@ struct TodayHeaderView: View {
     let needsRetry: Bool
     let retry: () async -> Void
 
-    let reportDate: String?
-
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) {
-                    masthead.fixedSize(horizontal: true, vertical: false)
-                    Spacer(minLength: 0)
-                    headerActions
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    masthead
-                    headerActions
-                }
-            }
+            headerActions
             installStatus
             if showsBilling {
                 billingDetails
@@ -595,16 +601,6 @@ struct TodayHeaderView: View {
         .accessibilityHint(alreadyRequested ? "查看安装说明" : "向 iOS 发起安装请求")
     }
 
-    private var masthead: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text("今日").font(.system(.title, design: .serif, weight: .bold))
-                .accessibilityAddTraits(.isHeader)
-            if let reportDate {
-                Text(reportDate + " 日报").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-            }
-        }
-    }
-
     private var headerActions: some View {
         HStack(spacing: 8) {
             Button {
@@ -625,6 +621,7 @@ struct TodayHeaderView: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("today-billing-details")
             .accessibilityValue(showsBilling ? "已展开" : "已收起")
+            Spacer(minLength: 0)
             updateControl
         }
     }

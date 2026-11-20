@@ -70,19 +70,22 @@ final class TodayWorldStore: ObservableObject {
         self.fetchReport = fetchReport ?? Self.fetchCurrentReport
         #endif
         restoreBalanceIfNeeded()
-        restoreEdition()
     }
 
-    private func restoreEdition() {
-        guard usesPublishedSnapshots,
-              let saved = DisplaySnapshotCache.editions.read(
-                TodayEditionSnapshot.self, key: ServerConfiguration.currentURL.absoluteString, maximumAge: 48 * 60 * 60
+    private func restoreEdition(key: String) async {
+        guard usesPublishedSnapshots, brief == nil,
+              let saved = await DisplaySnapshotCache.editions.load(
+                TodayEditionSnapshot.self, key: key, maximumAge: 48 * 60 * 60
               ),
               (Self.billingDate(daysAgo: 2)...Self.billingDate(daysAgo: 1)).contains(saved.value.edition.date) else { return }
         let snapshot = saved.value
+        let projection = await Task.detached(priority: .userInitiated) {
+            var projection = TodayBriefProjection(edition: snapshot.edition)
+            projection.addSources(snapshot.sourcePosts)
+            return projection
+        }.value
+        guard !Task.isCancelled else { return }
         displayedEdition = snapshot.edition
-        var projection = TodayBriefProjection(edition: snapshot.edition)
-        projection.sourcePosts = snapshot.sourcePosts
         brief = projection
         isShowingCachedEdition = true
     }
@@ -107,7 +110,9 @@ final class TodayWorldStore: ObservableObject {
         let snapshotKey = baseURL.absoluteString
 
         do {
-            let loadedReport = try await fetchReport()
+            async let networkReport = fetchReport()
+            await restoreEdition(key: snapshotKey)
+            let loadedReport = try await networkReport
             guard !Task.isCancelled else { return }
             if let edition = TodayPublishedEdition(payload: loadedReport) {
                 try await prepareEdition(edition, baseURL: baseURL)
@@ -145,16 +150,22 @@ final class TodayWorldStore: ObservableObject {
         }
         try Task.checkCancellation()
 
-        let missingIDs = projection.sourceIDs.filter { projection.sourcePosts[$0] == nil }
+        let missingIDs = projection.sourceIDs.filter { projection.sources[$0] == nil }
         let fetchedPosts = try await fetchTodayEditionSources(ids: missingIDs, baseURL: baseURL)
         try Task.checkCancellation()
         guard current == nil || !fetchedPosts.isEmpty else { return }
-        projection.sourcePosts.merge(fetchedPosts) { _, fetched in fetched }
+
+        projection = await Task.detached(priority: .userInitiated) { [projection] in
+            var prepared = projection
+            prepared.addSources(fetchedPosts)
+            return prepared
+        }.value
+        try Task.checkCancellation()
         displayedEdition = edition
         brief = projection
 
         if usesPublishedSnapshots {
-            let snapshot = TodayEditionSnapshot(edition: edition, sourcePosts: projection.sourcePosts)
+            let snapshot = TodayEditionSnapshot(edition: edition, sourcePosts: projection.sources.mapValues(\.post))
             await DisplaySnapshotCache.editions.save(snapshot, key: baseURL.absoluteString, at: Date())
         }
     }
@@ -289,15 +300,13 @@ struct TodayWorldView: View {
     }
 
     var body: some View {
-        let avatarURLs = rootTabIsActive && scenePhase == .active ? (store.brief?.avatarURLs ?? []) : []
         NavigationStack {
             VStack(spacing: 0) {
                 TodayHeaderView(
                     waitingForRechargeReturn: $waitingForRechargeReturn,
                     balance: store.balance,
                     dailyCosts: store.dailyCosts, isLoading: store.isLoadingBalance,
-                    needsRetry: store.balanceNeedsRetry, retry: { await store.loadBalance(force: true) },
-                    reportDate: store.brief?.date ?? store.report?.date
+                    needsRetry: store.balanceNeedsRetry, retry: { await store.loadBalance(force: true) }
                 )
                 Group {
                     if let brief = store.brief {
@@ -320,9 +329,6 @@ struct TodayWorldView: View {
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
             await loadReport()
-        }
-        .task(id: avatarURLs, priority: .userInitiated) {
-            await ImageLoader.prefetchAvatars(avatarURLs, maximumCount: avatarURLs.count)
         }
         .task(id: rootTabIsActive && scenePhase == .active) {
             guard rootTabIsActive, scenePhase == .active else { return }
@@ -515,43 +521,32 @@ struct TodayReadingEvent: Identifiable, Sendable {
     }
 }
 
-struct TodayEventSources: View {
-    let postIDs: [Int]
-    let postsByID: [Int: Post]
-    var sourceNames = ""
+struct TodaySourcePresentation: Identifiable, Sendable {
+    let post: Post
+    let text: String
+    let reply: String?
+    let quote: String?
+    let quoteAuthor: String?
+    let author: String
+    let avatarURL: URL?
+    let time: String?
+    let hasMedia: Bool
+    let untranslatedTexts: [String]
 
-    var body: some View {
-        let posts = postIDs.compactMap { postsByID[$0] }
-        let missing = postIDs.count - posts.count
-        VStack(alignment: .leading, spacing: 0) {
-            Text("消息来源" + (postIDs.isEmpty ? "" : " · \(postIDs.count) 篇原文"))
-                .font(.subheadline.weight(.semibold))
-                .accessibilityAddTraits(.isHeader)
-            if !sourceNames.isEmpty {
-                Text(sourceNames)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 4)
-            }
-            if postIDs.isEmpty {
-                Text("本条简报暂未提供原文引用")
-                    .font(.caption).foregroundStyle(.secondary).padding(.top, 6)
-            }
-            ForEach(posts) { post in
-                Divider().padding(.top, 12)
-                TodayInlineSourceView(post: post)
-                    .padding(.top, 12)
-            }
-            if missing > 0 {
-                Text("\(missing) 篇原文暂不可用")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 8)
-            }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(TodayBriefStyle.accent.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+    var id: Int { post.id }
+
+    init(post: Post) {
+        self.post = post
+        text = post.hasTranslation ? post.displayContent : post.xStoredOriginalContent
+        reply = post.meta?.replyContext?.displayText
+        quote = post.meta?.quotedTweet?.displayText
+        quoteAuthor = post.meta?.quotedTweet?.author?.name
+        author = post.authorName
+        avatarURL = post.avatarURL
+        time = post.formattedTime
+        hasMedia = post.previewURL != nil || !post.videoURLs.isEmpty
+        untranslatedTexts = TodayReadingEvent.unique([text, reply, quote].compactMap { $0 })
+            .filter { !TodayChinesePreparation.isChinese($0) }
     }
 }
 
@@ -559,13 +554,6 @@ private enum TodayChinesePreparation {
     static func isChinese(_ text: String) -> Bool {
         text.range(of: "[\\p{Han}]", options: .regularExpression) != nil
             && !XPostTextFormatter.containsUntranslatedEnglishPassage(text)
-    }
-
-    static func texts(_ post: Post) -> [String] {
-        TodayReadingEvent.unique([
-            post.hasTranslation ? post.displayContent : post.xStoredOriginalContent,
-            post.meta?.replyContext?.displayText, post.meta?.quotedTweet?.displayText
-        ].compactMap { $0 })
     }
 }
 
@@ -618,48 +606,44 @@ private actor TodayChineseTextCache {
     }
 }
 
-private struct TodayInlineSourceView: View {
-    let post: Post
+struct TodayInlineSourceView: View {
+    let source: TodaySourcePresentation
     @State private var translations: [String: String] = [:]
     @State private var translating = false
     @State private var translationFailed = false
 
-    private var sourceText: String { post.hasTranslation ? post.displayContent : post.xStoredOriginalContent }
-
     private var textsNeedingTranslation: [String] {
-        TodayChinesePreparation.texts(post).filter {
-            translations[$0] == nil && !TodayChinesePreparation.isChinese($0)
-        }
+        source.untranslatedTexts.filter { translations[$0] == nil }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
-                AvatarView(url: post.avatarURL, name: post.authorName, size: 28)
+                AvatarView(url: source.avatarURL, name: source.author, size: 28)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(post.authorName).font(.subheadline.weight(.semibold))
-                    if let time = post.formattedTime {
+                    Text(source.author).font(.subheadline.weight(.semibold))
+                    if let time = source.time {
                         Text(time).font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }
-            if !sourceText.isEmpty {
-                Text(translations[sourceText] ?? sourceText)
+            if !source.text.isEmpty {
+                Text(translations[source.text] ?? source.text)
                     .font(.subheadline).lineSpacing(4).textSelection(.enabled)
             }
-            if let reply = post.meta?.replyContext?.displayText {
+            if let reply = source.reply {
                 Text("回复：\(translations[reply] ?? reply)")
                     .font(.subheadline).foregroundStyle(.secondary).textSelection(.enabled)
             }
-            if let quote = post.meta?.quotedTweet, let original = quote.displayText {
+            if let original = source.quote {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(quote.author?.name ?? "引用内容").font(.caption.weight(.semibold))
+                    Text(source.quoteAuthor ?? "引用内容").font(.caption.weight(.semibold))
                     Text(translations[original] ?? original).font(.subheadline).textSelection(.enabled)
                 }
                 .padding(.leading, 12)
                 .overlay(alignment: .leading) { Rectangle().fill(TodayBriefStyle.accent.opacity(0.25)).frame(width: 2) }
             }
-            if post.previewURL != nil || !post.videoURLs.isEmpty { XFeedMediaView(post: post) }
+            if source.hasMedia { XFeedMediaView(post: source.post) }
             if translating {
                 ProgressView("正在翻译").font(.caption)
             } else if !textsNeedingTranslation.isEmpty {
@@ -672,7 +656,7 @@ private struct TodayInlineSourceView: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("today-source-\(post.id)")
+        .accessibilityIdentifier("today-source-\(source.id)")
     }
 
     @MainActor private func prepareChinese() async {
@@ -685,7 +669,7 @@ private struct TodayInlineSourceView: View {
             guard !Task.isCancelled else { return }
             do {
                 let translated = try await TodayChineseTextCache.shared.text(
-                    text, tweetID: text == sourceText ? post.xTweetID : nil, baseURL: baseURL
+                    text, tweetID: text == source.text ? source.post.xTweetID : nil, baseURL: baseURL
                 )
                 guard !Task.isCancelled else { return }
                 translations[text] = translated
