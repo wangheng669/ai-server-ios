@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A4B801000000000000000001 /* TodayWorldView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4B801000000000000000002 /* TodayWorldView.swift */; };
+		AE5800000000000000000001 /* TodayBriefOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE5800000000000000000002 /* TodayBriefOverviewView.swift */; };
+		837F96D7A10C4DD7BCCF8DE3 /* DisplaySnapshotCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 198EDA66B17E4ED0B50960DD /* DisplaySnapshotCache.swift */; };
 		C17A00000000000000000001 /* CityNewsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C17A00000000000000000002 /* CityNewsView.swift */; };
 		C17A00000000000000000006 /* CityMapRegions.geojson in Resources */ = {isa = PBXBuildFile; fileRef = C17A00000000000000000007 /* CityMapRegions.geojson */; };
 		AA1000000000000000000001 /* GoogleSignalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000002 /* GoogleSignalView.swift */; };
@@ -93,6 +96,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A4B801000000000000000002 /* TodayWorldView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayWorldView.swift; sourceTree = "<group>"; };
+		AE5800000000000000000002 /* TodayBriefOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayBriefOverviewView.swift; sourceTree = "<group>"; };
+		198EDA66B17E4ED0B50960DD /* DisplaySnapshotCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplaySnapshotCache.swift; sourceTree = "<group>"; };
 		C17A00000000000000000002 /* CityNewsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CityNewsView.swift; sourceTree = "<group>"; };
 		C17A00000000000000000007 /* CityMapRegions.geojson */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = CityMaps/CityMapRegions.geojson; sourceTree = "<group>"; };
 		AA1000000000000000000002 /* GoogleSignalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleSignalView.swift; sourceTree = "<group>"; };
@@ -150,6 +156,15 @@
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
+		AE5800000000000000000003 /* Today */ = {
+			isa = PBXGroup;
+			children = (
+				AE5800000000000000000002 /* TodayBriefOverviewView.swift */,
+				A4B801000000000000000002 /* TodayWorldView.swift */,
+			);
+			path = Today;
+			sourceTree = "<group>";
+		};
 		AA1000000000000000000003 /* GoogleSignal */ = {
 			isa = PBXGroup;
 			children = (
@@ -217,6 +232,7 @@
 		7C156B98ABD30A5BB8636A6A /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				198EDA66B17E4ED0B50960DD /* DisplaySnapshotCache.swift */,
 				50B72A6FEDA7F1B4D6A9A499 /* APIClient.swift */,
 				3B4D5F60718293A4B5C6D7E8 /* PersonPushNotificationManager.swift */,
 				71E3DBE08DFCC43540E027C0 /* RealtimeFeedClient.swift */,
@@ -278,6 +294,7 @@
 		B1367CAD56FB51F5D9592501 /* Features */ = {
 			isa = PBXGroup;
 			children = (
+				AE5800000000000000000003 /* Today */,
 				C17A00000000000000000003 /* CityNews */,
 				2F30415263748596A7B8C9D0 /* Company */,
 				660608BC8DE73C89ED510152 /* Feed */,
@@ -486,6 +503,9 @@
 				0E1F2A3B4C5D6E7F8091A2B3 /* InstitutionResearchView.swift in Sources */,
 				0D1E2F30415263748596A7B8 /* CompanyResearchView.swift in Sources */,
 				00964D188729A223382D77B6 /* AIServerClientApp.swift in Sources */,
+				A4B801000000000000000001 /* TodayWorldView.swift in Sources */,
+				AE5800000000000000000001 /* TodayBriefOverviewView.swift in Sources */,
+				837F96D7A10C4DD7BCCF8DE3 /* DisplaySnapshotCache.swift in Sources */,
 				260E90A29878D779265564DE /* APIClient.swift in Sources */,
 				2A3C6E7F8091A2B3C4D5E6F7 /* PersonPushNotificationManager.swift in Sources */,
 				233ACCCB8DEA01858D633D98 /* CountryGDPDetailView.swift in Sources */,

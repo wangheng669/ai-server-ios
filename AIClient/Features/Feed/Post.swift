@@ -1501,6 +1501,11 @@ struct Post: Codable, Identifiable, Hashable {
     var previewURL: URL? {
         imageURLs.first ?? (videos ?? []).compactMap { $0.coverURL ?? $0.previewImageURL ?? $0.preview }.compactMap(MediaURL.image).first
     }
+    var xFeedVideoPoster: URL? {
+        let cover = videos?.lazy.compactMap { $0.coverURL ?? $0.previewImageURL ?? $0.preview }.first
+        return (cover ?? feedContentImages.first?.url).flatMap { MediaURL.feedImage($0, variant: "small") }
+    }
+
     var youtubeCoverURL: URL? {
         if let previewURL { return previewURL }
         guard let videoID = youtubeVideoID else { return nil }
