@@ -298,17 +298,9 @@ private func fetchTodayWorldPostBatch(ids: ArraySlice<Int>, baseURL: URL) async 
 struct TodayWorldView: View {
     @Environment(\.rootTabIsActive) private var rootTabIsActive
     @Environment(\.rootBottomChromeHeight) private var bottomChromeHeight
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store: TodayWorldStore
     @State private var waitingForRechargeReturn = false
-    @State private var openedOriginals: OpenedOriginals?
-
-    private struct OpenedOriginals {
-        let postIDs: [Int]
-        let avatars: [URL: UIImage]
-        let previews: [URL: UIImage]
-    }
 
     init(store: TodayWorldStore) {
         _store = StateObject(wrappedValue: store)
@@ -317,16 +309,7 @@ struct TodayWorldView: View {
     var body: some View {
         NavigationStack {
             GeometryReader { viewport in
-                ZStack {
-                    pageContent(viewport: viewport.size)
-                        .allowsHitTesting(openedOriginals == nil)
-                        .accessibilityHidden(openedOriginals != nil)
-                    if let openedOriginals, let brief = store.brief {
-                        originalsOverlay(openedOriginals, brief: brief, viewport: viewport.size)
-                            .transition(.opacity)
-                    }
-                }
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: openedOriginals != nil)
+                pageContent(viewport: viewport.size)
             }
             .background(TodayBriefStyle.surface)
             .toolbar(.hidden, for: .navigationBar)
@@ -345,12 +328,6 @@ struct TodayWorldView: View {
                 await store.loadBalance()
             }
         }
-        .onChange(of: rootTabIsActive) { _, active in
-            if !active { openedOriginals = nil }
-        }
-        .onChange(of: store.brief?.date) {
-            openedOriginals = nil
-        }
         .onChange(of: scenePhase) { _, phase in
             guard rootTabIsActive, phase == .active else { return }
             Task { await loadReport() }
@@ -367,9 +344,8 @@ struct TodayWorldView: View {
                     TodayBriefOverviewView(
                         brief: brief,
                         viewport: CGSize(width: viewport.width, height: readingHeight - topInset),
-                        openSources: {
-                            openedOriginals = OpenedOriginals(postIDs: $0, avatars: brief.avatars, previews: brief.previews)
-                        }
+                        isRefreshing: store.isLoading,
+                        retryReport: { await store.loadReport(force: true) }
                     )
                     .id(brief.date)
                 } else {
@@ -399,32 +375,6 @@ struct TodayWorldView: View {
         .frame(maxWidth: TodayBriefStyle.maximumCardWidth, alignment: .trailing)
         .frame(height: TodayBriefStyle.toolsRowHeight)
         .padding(.horizontal, TodayBriefStyle.horizontalInset)
-    }
-
-    private func originalsOverlay(_ selection: OpenedOriginals, brief: TodayBriefProjection, viewport: CGSize) -> some View {
-        let panelWidth = min(680, max(0, viewport.width - 24))
-        let readingHeight = max(0, viewport.height - bottomChromeHeight)
-        let verticalMargin = min(24, readingHeight * 0.045)
-        let panelHeight = min(840, max(0, readingHeight - verticalMargin * 2))
-        return ZStack {
-            TodayBriefStyle.surface
-                .overlay(TodayBriefStyle.accent.opacity(0.055))
-                .contentShape(Rectangle())
-                .onTapGesture { openedOriginals = nil }
-                .accessibilityHidden(true)
-            TodayOriginalsPanel(
-                sources: selection.postIDs.compactMap { brief.sources[$0] },
-                avatars: selection.avatars,
-                referenceCount: selection.postIDs.count,
-                width: panelWidth,
-                isRefreshing: store.isLoading,
-                retryReport: { await store.loadReport(force: true) },
-                close: { openedOriginals = nil }
-            )
-            .environment(\.preparedReadingMedia, selection.previews)
-            .frame(width: panelWidth, height: panelHeight)
-            .padding(.bottom, bottomChromeHeight)
-        }
     }
 
     private func loadReport() async {
