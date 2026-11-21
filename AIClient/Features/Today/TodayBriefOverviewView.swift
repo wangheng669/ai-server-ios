@@ -296,100 +296,118 @@ private struct TodayBriefCardButtonStyle: PrimitiveButtonStyle {
 private struct TodayBriefDeck: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selectedIndex = 0
-    @GestureState(resetTransaction: Transaction(animation: .spring(response: 0.32, dampingFraction: 0.88)))
-    private var drag: DragAxis? = nil
+    @State private var dragAxis: DragAxis?
+    @State private var shuffle: Shuffle?
+    @State private var isSettling = false
+    @GestureState private var isDragging = false
 
     let brief: TodayBriefProjection
     let viewport: CGSize
     let open: (TodayBriefProjection.Card) -> Void
 
     private enum DragAxis {
-        case horizontal(CGFloat)
+        case horizontal
         case vertical
-
-        var offset: CGFloat {
-            if case let .horizontal(offset) = self { return offset }
-            return 0
-        }
     }
 
-    private static let layerSpacing: CGFloat = 12
-    private static let maximumBackLayers = 2
+    private struct Shuffle {
+        let direction: Int
+        var progress: CGFloat = 0
+    }
+
+    fileprivate static let layerSpacing: CGFloat = 15
     private let shape = RoundedRectangle(cornerRadius: TodayBriefStyle.cardCornerRadius)
 
     var body: some View {
         let deckPadding: CGFloat = 30
         let toolsHeight = TodayBriefStyle.toolsRowHeight + TodayBriefStyle.toolsSpacing
-        let backLayers = min(Self.maximumBackLayers, brief.cards.count - 1)
+        let backLayers = min(2, brief.cards.count - 1)
         let stackHeight = CGFloat(backLayers) * Self.layerSpacing
         let cardHeight = min(468, max(0, viewport.height - toolsHeight - deckPadding - stackHeight))
         let cardWidth = min(max(0, viewport.width - TodayBriefStyle.horizontalInset * 2), TodayBriefStyle.maximumCardWidth)
-        let travel = max(1, (viewport.width + cardWidth) / 2 + 24)
-        let lastIndex = brief.cards.count - 1
-        let selection = min(selectedIndex, lastIndex)
-        let dragFraction = reduceMotion ? 0 : max(-1, min(1, (drag?.offset ?? 0) / travel))
-        let position = min(CGFloat(lastIndex), max(0, CGFloat(selection) - dragFraction))
-        let firstRendered = max(0, selection - 1)
-        let lastRendered = min(lastIndex, selection + Self.maximumBackLayers + 1)
-        let visibleCards = Array(brief.cards[firstRendered...lastRendered].enumerated())
+        let selection = min(selectedIndex, brief.cards.count - 1)
 
-        ZStack(alignment: .top) {
-            ForEach(visibleCards, id: \.element.id) { offset, card in
-                let index = firstRendered + offset
-                let distance = CGFloat(index) - position
-                let depth = max(0, distance)
-                let departure = min(0, distance)
-                let exitOpacity = min(1, (1 + departure) * 5)
-                let backOpacity = min(1, CGFloat(Self.maximumBackLayers + 1) - depth)
-                let shadowOpacity = 0.06 + 0.08 * max(0, 1 - depth)
-                cardLayer(card, index: index, selection: selection) {
-                    cardSurface(card, width: cardWidth, height: cardHeight, shadowOpacity: shadowOpacity)
-                }
-                    .scaleEffect(1 - 0.046 * depth, anchor: .bottom)
-                    .rotationEffect(.degrees(5 * departure), anchor: .bottom)
-                    .offset(x: travel * departure, y: Self.layerSpacing * depth)
-                    .opacity(max(0, min(exitOpacity, backOpacity)))
-                    .zIndex(-Double(index))
+        TodayBriefDeckLayers(
+            selection: selection,
+            cardCount: brief.cards.count,
+            cardWidth: cardWidth,
+            direction: shuffle?.direction ?? 1,
+            progress: shuffle?.progress ?? 0
+        ) { index, contentOpacity, shadowOpacity in
+            let card = brief.cards[index]
+            cardLayer(card, index: index, selection: selection) {
+                cardSurface(
+                    card, width: cardWidth, height: cardHeight,
+                    contentOpacity: contentOpacity, shadowOpacity: shadowOpacity
+                )
             }
+            .id(card.id)
         }
         .padding(.top, 12)
         .frame(width: viewport.width, height: cardHeight + stackHeight + deckPadding, alignment: .top)
         .clipped()
         .contentShape(Rectangle())
-        .simultaneousGesture(swipeGesture(from: selection, cardWidth: cardWidth))
+        .simultaneousGesture(swipeGesture(cardWidth: cardWidth))
+        .onChange(of: isDragging) { _, dragging in
+            if !dragging {
+                dragAxis = nil
+                finishShuffle(commit: false)
+            }
+        }
         .accessibilityIdentifier("today-card-pager")
     }
 
-    private func swipeGesture(from selection: Int, cardWidth: CGFloat) -> some Gesture {
+    private func swipeGesture(cardWidth: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 14)
-            .updating($drag) { value, axis, _ in
-                switch axis {
-                case .vertical:
-                    break
-                case .horizontal:
-                    axis = .horizontal(value.translation.width)
-                case nil:
-                    axis = abs(value.translation.width) > abs(value.translation.height)
-                        ? .horizontal(value.translation.width)
-                        : .vertical
+            .updating($isDragging) { _, dragging, _ in dragging = true }
+            .onChanged { value in
+                guard brief.cards.count > 1, !isSettling else { return }
+                let horizontal = value.translation.width
+                if dragAxis == nil {
+                    dragAxis = abs(horizontal) > abs(value.translation.height) ? .horizontal : .vertical
                 }
+                guard dragAxis == .horizontal else { return }
+                let progress = reduceMotion ? 0 : min(1, abs(horizontal) / max(1, cardWidth * 0.84))
+                shuffle = Shuffle(direction: horizontal < 0 ? 1 : -1, progress: progress)
             }
             .onEnded { value in
-                if case .vertical = drag { return }
+                defer { dragAxis = nil }
+                guard dragAxis == .horizontal else { return }
                 let horizontal = value.translation.width
-                guard abs(horizontal) > abs(value.translation.height) else { return }
                 let projected = value.predictedEndTranslation.width
                 let movedFarEnough = abs(horizontal) >= max(48, cardWidth * 0.22)
                 let flicked = abs(horizontal) >= 22 && horizontal * projected > 0 && abs(projected) >= cardWidth * 0.46
-                guard movedFarEnough || flicked else { return }
-                selectCard(at: selection + (horizontal < 0 ? 1 : -1))
+                finishShuffle(commit: movedFarEnough || flicked)
             }
     }
 
-    private func selectCard(at index: Int) {
-        guard brief.cards.indices.contains(index) else { return }
-        withAnimation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.88)) {
-            selectedIndex = index
+    private func advance(_ direction: Int) {
+        guard brief.cards.count > 1, shuffle == nil else { return }
+        shuffle = Shuffle(direction: direction)
+        finishShuffle(commit: true)
+    }
+
+    private func finishShuffle(commit: Bool) {
+        guard let shuffle, !isSettling, brief.cards.count > 1 else { return }
+        let count = brief.cards.count
+        let selection = min(selectedIndex, count - 1)
+        let next = (selection + shuffle.direction + count) % count
+        let target: CGFloat = commit ? 1 : 0
+
+        if reduceMotion || abs(target - shuffle.progress) < 0.001 {
+            if commit { selectedIndex = next }
+            self.shuffle = nil
+            return
+        }
+
+        isSettling = true
+        let duration = 0.62 * max(0.36, abs(target - shuffle.progress))
+        withAnimation(.easeInOut(duration: duration), completionCriteria: .logicallyComplete) {
+            self.shuffle?.progress = target
+        } completion: {
+            if commit { selectedIndex = next }
+            self.shuffle = nil
+            isSettling = false
         }
     }
 
@@ -398,14 +416,16 @@ private struct TodayBriefDeck: View {
         _ card: TodayBriefProjection.Card, index: Int, selection: Int, @ViewBuilder surface: () -> Surface
     ) -> some View {
         if index == selection {
-            Button { open(card) } label: { surface() }
+            Button {
+                if shuffle == nil { open(card) }
+            } label: { surface() }
                 .buttonStyle(TodayBriefCardButtonStyle())
                 .accessibilityHint("查看原文")
                 .accessibilityValue("第 \(index + 1) 张，共 \(brief.cards.count) 张")
                 .accessibilityAdjustableAction { direction in
                     switch direction {
-                    case .increment: selectCard(at: index + 1)
-                    case .decrement: selectCard(at: index - 1)
+                    case .increment: advance(1)
+                    case .decrement: advance(-1)
                     @unknown default: break
                     }
                 }
@@ -420,7 +440,8 @@ private struct TodayBriefDeck: View {
     }
 
     private func cardSurface(
-        _ card: TodayBriefProjection.Card, width: CGFloat, height: CGFloat, shadowOpacity: CGFloat
+        _ card: TodayBriefProjection.Card, width: CGFloat, height: CGFloat,
+        contentOpacity: CGFloat, shadowOpacity: CGFloat
     ) -> some View {
         TodayBriefCardFace(
             card: card,
@@ -428,6 +449,7 @@ private struct TodayBriefDeck: View {
             avatars: brief.avatars,
             compact: height < 350 || width < 290
         )
+        .opacity(contentOpacity)
         .frame(width: width, height: height)
         .background {
             shape.fill(TodayBriefStyle.surface)
@@ -435,6 +457,62 @@ private struct TodayBriefDeck: View {
         }
         .overlay { shape.strokeBorder(TodayBriefStyle.surfaceOutline) }
         .contentShape(shape)
+    }
+}
+
+private struct TodayBriefDeckLayers<Layer: View>: View, Animatable {
+    let selection: Int
+    let cardCount: Int
+    let cardWidth: CGFloat
+    let direction: Int
+    var progress: CGFloat
+    @ViewBuilder let layer: (_ index: Int, _ contentOpacity: CGFloat, _ shadowOpacity: CGFloat) -> Layer
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    var body: some View {
+        let stackSize = min(3, cardCount)
+        let front = stack(from: selection, size: stackSize)
+        let destination = stack(from: selection + direction, size: stackSize)
+        let visible = front + destination.filter { !front.contains($0) }
+        let fraction = min(1, max(0, progress))
+        let arc = sin(.pi * fraction)
+        let stackInset = CGFloat(stackSize - 1) * 4
+
+        ZStack(alignment: .top) {
+            ForEach(visible, id: \.self) { index in
+                let source = front.firstIndex(of: index)
+                let target = destination.firstIndex(of: index)
+                let sourceDepth = CGFloat(source ?? stackSize - 1)
+                let targetDepth = CGFloat(target ?? stackSize - 1)
+                let depth = sourceDepth + (targetDepth - sourceDepth) * fraction
+                let flight = index == selection ? arc : 0
+                let rank = (fraction < 0.56 ? source : target) ?? stackSize
+                let rearOpacity = min(1, max(0, (fraction - 0.56) / 0.44))
+                let outgoingOpacity = min(1, (1 - fraction) * 4)
+                let cardOpacity = source == nil ? rearOpacity : target == nil ? outgoingOpacity : 1
+                let textOpacity = min(1, max(0, 1 - depth * 1.54 + flight * 0.75))
+                let shadowOpacity = 0.06 + 0.08 * max(0, 1 - depth)
+
+                layer(index, textOpacity, shadowOpacity)
+                    .scaleEffect(1 - 0.03 * depth, anchor: .bottom)
+                    .rotationEffect(.degrees(-13 * flight * CGFloat(direction)))
+                    .offset(
+                        x: 16 * depth - stackInset - 0.92 * cardWidth * flight * CGFloat(direction),
+                        y: TodayBriefDeck.layerSpacing * depth - 18 * flight
+                    )
+                    .opacity(cardOpacity)
+                    .zIndex(-Double(rank))
+                    .transition(.identity)
+            }
+        }
+    }
+
+    private func stack(from first: Int, size: Int) -> [Int] {
+        (0..<size).map { (first + $0 + cardCount) % cardCount }
     }
 }
 
