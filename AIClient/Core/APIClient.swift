@@ -16,34 +16,27 @@ struct APIClient {
 
     func checkHealth() async throws { let _: HealthResponse = try await get(baseURL.appending(path: "health")) }
 
-    func fetchTodayWorldYesterdayReport() async throws -> TodayWorldYesterdayReportPayload {
-        let response: TodayWorldYesterdayReportResponse = try await get(
-            baseURL.appending(path: "api/ios/v1/today-world/yesterday-report"),
-            cachePolicy: .reloadIgnoringLocalCacheData
+    func fetchAliyunBalance(refresh: Bool = false) async throws -> AliyunAccountBalance {
+        var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/settings/aliyun-balance"), resolvingAgainstBaseURL: false)
+        if refresh { components?.queryItems = [URLQueryItem(name: "refresh", value: "1")] }
+        guard let url = components?.url else { throw APIError.invalidURL }
+        let response: AliyunBalanceResponse = try await get(
+            url, retriesTransientFailures: false,
+            cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20
         )
         guard response.success else { throw APIError.invalidResponse }
         return response.data
     }
 
-    func generateTodayWorldYesterdayReport() async throws -> TodayWorldYesterdayReportPayload {
-        var request = URLRequest(
-            url: baseURL.appending(path: "api/ios/v1/today-world/yesterday-report"),
-            cachePolicy: .reloadIgnoringLocalCacheData
+    func fetchTodayWorldYesterdayReport() async throws -> TodayWorldYesterdayReportPayload {
+        let response: TodayWorldYesterdayReportResponse = try await get(
+            baseURL.appending(path: "api/ios/v1/today-world/yesterday-report").appending(queryItems: [.init(name: "view", value: "edition")]),
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            timeoutInterval: 8,
+            retryableNetworkErrors: [.timedOut, .networkConnectionLost]
         )
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
-        guard (200..<300).contains(http.statusCode) else { throw APIError.httpStatus(http.statusCode) }
-        do {
-            let payload = try JSONDecoder().decode(TodayWorldYesterdayReportGenerationResponse.self, from: data)
-            guard payload.success else { throw APIError.invalidResponse }
-            return payload.data.report
-        } catch let error as APIError {
-            throw error
-        } catch {
-            throw APIError.decoding(error)
-        }
+        guard response.success else { throw APIError.invalidResponse }
+        return response.data
     }
 
     func fetchPosts(
@@ -753,12 +746,15 @@ struct APIClient {
         _ url: URL,
         retriesTransientFailures: Bool = true,
         cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy,
-        authorization: String? = nil
+        authorization: String? = nil,
+        timeoutInterval: TimeInterval? = nil,
+        retryableNetworkErrors: Set<URLError.Code>? = nil
     ) async throws -> Response {
         let attempts = retriesTransientFailures ? 2 : 1
         for attempt in 0..<attempts {
             do {
                 var request = URLRequest(url: url, cachePolicy: cachePolicy)
+                if let timeoutInterval { request.timeoutInterval = timeoutInterval }
                 request.setValue(authorization, forHTTPHeaderField: "Authorization")
                 let (data, response) = try await session.data(for: request)
                 guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
@@ -776,7 +772,8 @@ struct APIClient {
                 }
             } catch let error as URLError {
                 if error.code == .cancelled { throw CancellationError() }
-                guard attempt + 1 < attempts else { throw error }
+                guard attempt + 1 < attempts,
+                      retryableNetworkErrors?.contains(error.code) ?? true else { throw error }
                 #if DEBUG
                 print("Feed request failed (attempt \(attempt + 1)): \(url.absoluteString) — \(error)")
                 #endif
@@ -1086,21 +1083,54 @@ private struct WikipediaRelayArticleResponse: Decodable {
     let article: WikipediaRelayArticle
 }
 
+private struct AliyunBalanceResponse: Decodable {
+    let success: Bool
+    let data: AliyunAccountBalance
+}
+
+struct AliyunAccountBalance: Codable, Equatable {
+    let ok: Bool
+    let currency: String
+    let availableAmount: String?
+    let usage: AIUsageDailyCosts
+
+    var hasMissingFigures: Bool {
+        formattedAmount == nil || usage.todayCostCNY == nil || usage.yesterdayCostCNY == nil
+    }
+
+    var formattedAmount: String? {
+        guard ok, let availableAmount,
+              let amount = Decimal(string: availableAmount, locale: Locale(identifier: "en_US_POSIX")) else { return nil }
+        return amount.formatted(.currency(code: currency).locale(Locale(identifier: "zh_CN")))
+    }
+}
+
+struct AIUsageDailyCosts: Codable, Equatable, Sendable {
+    let date: String
+    let yesterdayDate: String
+    let timezone: String
+    let todayCostCNY: Double?
+    let yesterdayCostCNY: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case date, yesterdayDate, timezone
+        case todayCostCNY = "todayCostCny"
+        case yesterdayCostCNY = "yesterdayCostCny"
+    }
+
+    static func formattedCost(_ amount: Double?) -> String? {
+        guard let amount, amount.isFinite else { return nil }
+        return amount.formatted(.currency(code: "CNY")
+            .precision(.fractionLength(2...6))
+            .locale(Locale(identifier: "zh_CN")))
+    }
+}
+
 private struct HealthResponse: Decodable { let status: String }
 
 struct TodayWorldYesterdayReportResponse: Decodable {
     let success: Bool
     let data: TodayWorldYesterdayReportPayload
-}
-
-struct TodayWorldYesterdayReportGenerationResponse: Decodable {
-    let success: Bool
-    let data: TodayWorldYesterdayReportGenerationPayload
-}
-
-struct TodayWorldYesterdayReportGenerationPayload: Decodable {
-    let queued: Bool
-    let report: TodayWorldYesterdayReportPayload
 }
 
 struct TodayWorldYesterdayReportPayload: Decodable, Equatable {
@@ -1111,6 +1141,12 @@ struct TodayWorldYesterdayReportPayload: Decodable, Equatable {
     let progress: Int
     let sourceCount: Int
     let postCount: Int
+    struct Admission: Decodable, Equatable {
+        let state: String
+        let reason_codes: [String]
+        let reason: String?
+    }
+    let admission: Admission?
     let report: TodayWorldYesterdayReportContent
     let model: String?
     let totalTokens: Int
@@ -1118,7 +1154,7 @@ struct TodayWorldYesterdayReportPayload: Decodable, Equatable {
     let completedAt: String?
 
     enum CodingKeys: String, CodingKey {
-        case date, timezone, status, stage, progress, report, model
+        case date, timezone, status, stage, progress, report, model, admission
         case sourceCount = "source_count"
         case postCount = "post_count"
         case totalTokens = "total_tokens"
@@ -1130,31 +1166,37 @@ struct TodayWorldYesterdayReportPayload: Decodable, Equatable {
         status == "running" || status == "queued"
             || report.final?.status == "running" || report.final?.status == "queued"
     }
-
-    var shouldPollForFinalReport: Bool {
-        guard status != "failed" else { return false }
-        guard let finalStatus = report.final?.status else { return true }
-        return finalStatus != "succeeded" && finalStatus != "failed"
-    }
 }
 
 struct TodayWorldYesterdayReportContent: Decodable, Equatable {
+    struct SourceSection: Decodable, Equatable {
+        struct Group: Decodable, Equatable {
+            struct System: Decodable, Equatable {
+                struct Account: Decodable, Equatable {
+                    let post_ids: [Int]
+                }
+                let accounts: [Account]
+            }
+            let group_name: String
+            let systems: [System]
+        }
+        let section_key: String
+        let section_name: String
+        let groups: [Group]
+
+        var postCount: Int {
+            Set(groups.flatMap(\.systems).flatMap(\.accounts).flatMap(\.post_ids)).count
+        }
+    }
+    let sections: [SourceSection]?
     let final: TodayWorldFinalReport?
-
-    enum CodingKeys: String, CodingKey {
-        case final
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        final = try container.decodeIfPresent(TodayWorldFinalReport.self, forKey: .final)
-    }
 }
 
-struct TodayWorldFinalReport: Decodable, Equatable {
+struct TodayWorldFinalReport: Codable, Sendable, Equatable {
     let status: String
     let stage: String?
     let error: String?
+    let completenessStatus: String?
     let sections: [TodayWorldFinalReportSection]
     let sectionCount: Int
     let groupCount: Int
@@ -1170,6 +1212,7 @@ struct TodayWorldFinalReport: Decodable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case status, stage, error, sections, model, overview
+        case completenessStatus = "completeness_status"
         case sectionCount = "section_count"
         case groupCount = "group_count"
         case systemCount = "system_count"
@@ -1186,6 +1229,7 @@ struct TodayWorldFinalReport: Decodable, Equatable {
         status = try container.decode(String.self, forKey: .status)
         stage = try container.decodeIfPresent(String.self, forKey: .stage)
         error = try container.decodeIfPresent(String.self, forKey: .error)
+        completenessStatus = try container.decodeIfPresent(String.self, forKey: .completenessStatus)
         let decodedSections = try container.decodeIfPresent([TodayWorldFinalReportSection].self, forKey: .sections) ?? []
         sections = decodedSections
         sectionCount = try container.decodeIfPresent(Int.self, forKey: .sectionCount) ?? decodedSections.count
@@ -1213,7 +1257,7 @@ struct TodayWorldFinalReport: Decodable, Equatable {
     }
 }
 
-struct TodayWorldFinalReportSection: Decodable, Equatable, Identifiable {
+struct TodayWorldFinalReportSection: Codable, Sendable, Equatable, Identifiable {
     let sectionKey: String
     let sectionName: String
     let groups: [TodayWorldFinalReportGroup]
@@ -1230,7 +1274,7 @@ struct TodayWorldFinalReportSection: Decodable, Equatable, Identifiable {
     }
 }
 
-struct TodayWorldFinalReportGroup: Decodable, Equatable, Identifiable {
+struct TodayWorldFinalReportGroup: Codable, Sendable, Equatable, Identifiable {
     let groupKey: String
     let groupName: String
     let systems: [TodayWorldFinalReportSystem]
@@ -1243,7 +1287,7 @@ struct TodayWorldFinalReportGroup: Decodable, Equatable, Identifiable {
     }
 }
 
-struct TodayWorldFinalReportSystem: Decodable, Equatable, Identifiable {
+struct TodayWorldFinalReportSystem: Codable, Sendable, Equatable, Identifiable {
     let systemKey: String
     let systemName: String
     let headline: String
@@ -1280,7 +1324,7 @@ struct TodayWorldFinalReportSystem: Decodable, Equatable, Identifiable {
     }
 }
 
-struct TodayWorldFinalReportOverview: Decodable, Equatable {
+struct TodayWorldFinalReportOverview: Codable, Sendable, Equatable {
     let headline: String
     let highlights: [TodayWorldFinalReportOverviewItem]
     let watchItems: [TodayWorldFinalReportOverviewItem]
@@ -1293,21 +1337,30 @@ struct TodayWorldFinalReportOverview: Decodable, Equatable {
     }
 }
 
-struct TodayWorldFinalReportOverviewItem: Decodable, Equatable, Identifiable {
+struct TodayWorldFinalReportOverviewItem: Codable, Sendable, Equatable, Identifiable {
     let title: String?
     let text: String
+    let context: String?
     let systemKeys: [String]
     let postIDs: [Int]
     var id: String { ([title, text].compactMap { $0 } + postIDs.map(String.init)).joined(separator: "|") }
 
+    init(title: String?, text: String, systemKeys: [String], postIDs: [Int], context: String? = nil) {
+        self.title = title
+        self.text = text
+        self.systemKeys = systemKeys
+        self.postIDs = postIDs
+        self.context = context
+    }
+
     enum CodingKeys: String, CodingKey {
-        case title, text
+        case title, text, context
         case systemKeys = "system_keys"
         case postIDs = "post_ids"
     }
 }
 
-struct TodayWorldFinalReportFact: Decodable, Equatable, Identifiable {
+struct TodayWorldFinalReportFact: Codable, Sendable, Equatable, Identifiable {
     let category: String
     let text: String
     let sourceKeys: [String]
