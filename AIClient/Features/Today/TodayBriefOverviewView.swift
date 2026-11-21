@@ -241,7 +241,8 @@ private struct TodayOriginalsPanel: View {
                         TodayInlineSourceView(
                             source: source,
                             quoteAvatar: source.quoteAvatarURL.flatMap { avatars[$0] },
-                            width: max(1, width - TodayBriefStyle.horizontalInset * 2)
+                            width: max(1, width - TodayBriefStyle.horizontalInset * 2),
+                            allowsLocalTranslation: isCurrent
                         )
                     }
                     sourceStatus
