@@ -84,6 +84,50 @@ struct TodayBriefProjection: Sendable {
     fileprivate let cards: [Card]
     let sourceIDs: [Int]
     private(set) var sources: [Int: TodaySourcePresentation] = [:]
+    private(set) var avatars: [URL: UIImage] = [:]
+    private(set) var previews: [URL: UIImage] = [:]
+    var preparedImageCount: Int { avatars.count + previews.count }
+
+    private enum ReadingImage: Hashable, Sendable {
+        case avatar(URL)
+        case preview(URL)
+    }
+
+    @MainActor
+    mutating func prepareImages() async {
+        var seen = Set(avatars.keys.map(ReadingImage.avatar) + previews.keys.map(ReadingImage.preview))
+        var pending: [ReadingImage] = []
+        for card in cards {
+            if case .company(let company) = card.content, case .remote(let url?) = company.avatar {
+                pending.append(.avatar(url))
+            }
+            for id in card.postIDs {
+                guard let source = sources[id] else { continue }
+                pending += [source.avatarURL, source.quoteAvatarURL].compactMap { $0.map(ReadingImage.avatar) }
+                pending += source.previewURLs.map(ReadingImage.preview)
+            }
+        }
+
+        let scale = UIScreen.main.scale
+        let requests: [(ReadingImage, ImageLoader.Request)] = pending.compactMap { image in
+            guard seen.insert(image).inserted else { return nil }
+            switch image {
+            case .avatar(let url):
+                return ImageLoader.avatarRequest(url, size: 44).map { (image, $0) }
+            case .preview(let url):
+                let resolved = ImageLoader.request(for: url, targetSize: nil, scale: scale)
+                let request = ImageLoader.Request(url: resolved.url, pixelLimit: 640, scale: scale)
+                return (image, request)
+            }
+        }
+        let prepared = await ImageLoader.prepareReadingImages(requests)
+        for (key, image) in prepared {
+            switch key {
+            case .avatar(let url): avatars[url] = image
+            case .preview(let url): previews[url] = image
+            }
+        }
+    }
 
     mutating func addSources(_ posts: [Int: Post]) {
         for (id, post) in posts {
@@ -144,6 +188,7 @@ struct TodayOriginalsPanel: View {
     @AccessibilityFocusState private var headingFocused: Bool
 
     let sources: [TodaySourcePresentation]
+    let avatars: [URL: UIImage]
     let referenceCount: Int
     let width: CGFloat
     let isRefreshing: Bool
@@ -159,7 +204,7 @@ struct TodayOriginalsPanel: View {
         VStack(spacing: 0) {
             Group {
                 if let singleSource {
-                    TodaySourceAuthorView(source: singleSource)
+                    TodaySourceAuthorView(source: singleSource, image: singleSource.avatarURL.flatMap { avatars[$0] })
                 } else {
                     Text("原文")
                         .font(.headline)
@@ -181,10 +226,14 @@ struct TodayOriginalsPanel: View {
                             Divider()
                         }
                         if singleSource == nil {
-                            TodaySourceAuthorView(source: source)
+                            TodaySourceAuthorView(source: source, image: source.avatarURL.flatMap { avatars[$0] })
                                 .accessibilityAddTraits(.isHeader)
                         }
-                        TodayInlineSourceView(source: source, width: max(1, width - TodayBriefStyle.horizontalInset * 2))
+                        TodayInlineSourceView(
+                            source: source,
+                            quoteAvatar: source.quoteAvatarURL.flatMap { avatars[$0] },
+                            width: max(1, width - TodayBriefStyle.horizontalInset * 2)
+                        )
                     }
                     sourceStatus
                 }
@@ -275,6 +324,7 @@ private struct TodayBriefDeck: View {
                         TodayBriefCardFace(
                             card: card,
                             source: card.postIDs.lazy.compactMap { brief.sources[$0] }.first,
+                            avatars: brief.avatars,
                             compact: height < 350
                         )
                         .frame(width: width, height: height)
@@ -303,6 +353,7 @@ private struct TodayBriefDeck: View {
 private struct TodayBriefCardFace: View {
     let card: TodayBriefProjection.Card
     let source: TodaySourcePresentation?
+    let avatars: [URL: UIImage]
     let compact: Bool
 
     var body: some View {
@@ -349,10 +400,13 @@ private struct TodayBriefCardFace: View {
             switch card.content {
             case let .event(event):
                 if let logo = TodaySystemAvatar.Source(companySystemKey: event.companySystemKey) {
-                    TodaySystemAvatar(source: logo, name: event.sourceLabel, size: size)
+                    TodaySystemAvatar(source: logo, name: event.sourceLabel, size: size, avatars: avatars)
                 } else if let source {
-                    AvatarView(url: source.avatarURL, name: source.author, size: size)
-                        .accessibilityHidden(true)
+                    AvatarView(
+                        url: nil, name: source.author, size: size,
+                        loadingPolicy: .prepared(source.avatarURL.flatMap { avatars[$0] })
+                    )
+                    .accessibilityHidden(true)
                 } else {
                     Image(systemName: "newspaper")
                         .font(.subheadline.weight(.semibold))
@@ -362,7 +416,7 @@ private struct TodayBriefCardFace: View {
                 }
                 Text(event.sourceLabel.isEmpty ? source?.author ?? "简报" : event.sourceLabel)
             case let .company(company):
-                TodaySystemAvatar(source: company.avatar, name: company.name, size: size)
+                TodaySystemAvatar(source: company.avatar, name: company.name, size: size, avatars: avatars)
                     .accessibilityHidden(true)
                 Text(company.name)
             }
@@ -879,6 +933,7 @@ private struct TodaySystemAvatar: View {
     let source: Source
     let name: String
     let size: CGFloat
+    let avatars: [URL: UIImage]
 
     nonisolated private static let companyAssets: [String: String] = [
         "altman": "TodayCompanyOpenAI",
@@ -907,7 +962,7 @@ private struct TodaySystemAvatar: View {
                 .frame(width: size, height: size)
                 .accessibilityLabel("\(name) 公司标识")
         case .remote(let url):
-            AvatarView(url: url, name: name, size: size)
+            AvatarView(url: nil, name: name, size: size, loadingPolicy: .prepared(url.flatMap { avatars[$0] }))
         }
     }
 }

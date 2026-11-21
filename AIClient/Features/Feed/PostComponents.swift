@@ -890,6 +890,11 @@ struct PostAuthorHeader: View {
 }
 
 struct AvatarView: View {
+    enum LoadingPolicy {
+        case remote
+        case prepared(UIImage?)
+    }
+
     let url: URL?
     let name: String
     let size: CGFloat
@@ -897,6 +902,7 @@ struct AvatarView: View {
     var cornerRadius: CGFloat? = nil
     var rejectsUpscaledImages = false
     var placeholderSymbol: String? = nil
+    var loadingPolicy: LoadingPolicy = .remote
     @State private var loadedAvatar: (request: ImageLoader.Request, image: UIImage)?
 
     private var resolvedCornerRadius: CGFloat { cornerRadius ?? size / 2 }
@@ -907,10 +913,20 @@ struct AvatarView: View {
     }
 
     var body: some View {
-        let request = assetName == nil ? ImageLoader.avatarRequest(url, size: size) : nil
-        Group {
+        let request: ImageLoader.Request?
+        let image: UIImage?
+        switch loadingPolicy {
+        case .remote:
+            request = assetName == nil ? ImageLoader.avatarRequest(url, size: size) : nil
+            image = request.flatMap(avatarImage(for:))
+        case .prepared(let preparedImage):
+            request = nil
+            image = preparedImage
+        }
+
+        return Group {
             if let assetName { Image(assetName).resizable().scaledToFill() }
-            else if let request, let image = avatarImage(for: request) {
+            else if let image {
                 Image(uiImage: image)
                     .resizable()
                     .interpolation(.high)
@@ -955,6 +971,10 @@ struct AvatarView: View {
     }
 }
 
+extension EnvironmentValues {
+    @Entry var preparedReadingMedia: [URL: UIImage]? = nil
+}
+
 struct RemoteImage: View {
     let url: URL
     var targetWidth: CGFloat? = nil
@@ -964,19 +984,24 @@ struct RemoteImage: View {
     var onImageLoaded: ((UIImage) -> Void)? = nil
     var usesTimelinePlaceholder = false
     @State private var result: (request: ImageLoader.Request, image: UIImage?)?
+    @Environment(\.preparedReadingMedia) private var preparedReadingMedia
 
     var body: some View {
         let screen = UIScreen.main
         let size = CGSize(width: targetWidth ?? screen.bounds.width, height: height ?? screen.bounds.height)
         let request = ImageLoader.request(for: url, targetSize: size, scale: screen.scale)
-        let loaded = result?.request == request ? result?.image : nil
+        let image = if let preparedReadingMedia {
+            preparedReadingMedia[url]
+        } else {
+            (result?.request == request ? result?.image : nil) ?? ImageLoader.shared.cachedImage(for: request)
+        }
         ZStack {
             usesTimelinePlaceholder ? Color(uiColor: .secondarySystemBackground) : Color.clear
-            if let image = loaded ?? ImageLoader.shared.cachedImage(for: request) {
+            if let image {
                 Image(uiImage: image)
                     .resizable()
                     .aspectRatio(contentMode: contentMode)
-            } else if result?.request == request {
+            } else if preparedReadingMedia != nil || result?.request == request {
                 Image(systemName: "photo").foregroundStyle(.secondary)
                     .accessibilityLabel("图片加载失败")
             } else if usesTimelinePlaceholder {
@@ -994,6 +1019,7 @@ struct RemoteImage: View {
             transaction.disablesAnimations = true
         }
         .task(id: request) {
+            guard preparedReadingMedia == nil else { return }
             let loadedImage = await ImageLoader.shared.image(for: request)
             guard !Task.isCancelled else { return }
             result = (request, loadedImage)
@@ -1202,7 +1228,7 @@ private extension NSString {
 actor ImageLoader {
     static let shared = ImageLoader()
 
-    struct Request: Hashable {
+    struct Request: Hashable, Sendable {
         let url: URL
         let pixelLimit: CGFloat?
         let scale: CGFloat
@@ -1381,6 +1407,51 @@ actor ImageLoader {
             PrefetchRequest(url: $0, width: 44, height: 44, prefersCompactXAvatar: true)
         }
         await prefetch(requests, maximumConcurrentLoads: 4)
+    }
+
+    /// Finishes the initial reading snapshot even if a remote image is slow.
+    static func prepareReadingImages<Key: Hashable & Sendable>(
+        _ requests: [(Key, Request)]
+    ) async -> [Key: UIImage] {
+        guard !requests.isEmpty else { return [:] }
+        let (images, output) = AsyncStream.makeStream(of: (Key, UIImage).self)
+        let worker = Task {
+            await withTaskGroup(of: Void.self) { group in
+                var pending = requests.makeIterator()
+                for _ in 0..<min(requests.count, 8) {
+                    guard let (key, request) = pending.next() else { break }
+                    group.addTask { await prepareImage(key, request: request, output: output) }
+                }
+                while await group.next() != nil {
+                    guard !Task.isCancelled, let (key, request) = pending.next() else { continue }
+                    group.addTask { await prepareImage(key, request: request, output: output) }
+                }
+            }
+            output.finish()
+        }
+        let deadline = Task {
+            try? await Task.sleep(for: .seconds(3))
+            if !Task.isCancelled { output.finish() }
+        }
+        defer {
+            worker.cancel()
+            deadline.cancel()
+        }
+
+        var prepared: [Key: UIImage] = [:]
+        for await (key, image) in images {
+            prepared[key] = image
+        }
+        return prepared
+    }
+
+    private static func prepareImage<Key: Sendable>(
+        _ key: Key, request: Request, output: AsyncStream<(Key, UIImage)>.Continuation
+    ) async {
+        guard !Task.isCancelled else { return }
+        if let image = await shared.image(for: request), !Task.isCancelled {
+            output.yield((key, image))
+        }
     }
 
     static func compactAvatarCandidateURLs(_ url: URL) -> [URL] {
@@ -2049,6 +2120,7 @@ struct XFeedQuotedPostCard: View {
     let availableWidth: CGFloat
     var enablesTextSelection = false
     var isDetail = false
+    var avatarLoadingPolicy: AvatarView.LoadingPolicy = .remote
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -2057,7 +2129,8 @@ struct XFeedQuotedPostCard: View {
                     AvatarView(
                         url: avatarURL,
                         name: quote.author?.name ?? "引用动态",
-                        size: 28
+                        size: 28,
+                        loadingPolicy: avatarLoadingPolicy
                     )
                 }
 
@@ -2222,6 +2295,7 @@ struct XVideoPlayerView: View {
     @State private var observationSessionID: String?
     @State private var observationStartedAt: Date?
     @AppStorage("x.video.isMuted") private var isMuted = false
+    @Environment(\.preparedReadingMedia) private var preparedReadingMedia
     private let fallbackURL: URL?
     private let thumbnailURL: URL?
     private let fallbackThumbnailURL: URL?
@@ -2234,7 +2308,15 @@ struct XVideoPlayerView: View {
     private let observationSurface: String
 
     private var hasPosterSource: Bool {
-        thumbnailURL != nil || fallbackThumbnailURL != nil || generatesThumbnailWhenMissing
+        preparedReadingMedia == nil &&
+            (thumbnailURL != nil || fallbackThumbnailURL != nil || generatesThumbnailWhenMissing)
+    }
+
+    private var displayedThumbnail: UIImage? {
+        if let preparedReadingMedia {
+            return thumbnailURL.flatMap { preparedReadingMedia[$0] }
+        }
+        return thumbnail
     }
 
     init(
@@ -2267,8 +2349,8 @@ struct XVideoPlayerView: View {
         ZStack {
             Color.black
 
-            if !isVideoReady, let thumbnail {
-                Image(uiImage: thumbnail)
+            if !isVideoReady, let displayedThumbnail {
+                Image(uiImage: displayedThumbnail)
                     .resizable()
                     .aspectRatio(contentMode: contentMode)
             } else if hasPosterSource, playbackState == .idle, !thumbnailFailed, chromeStyle == .standard {

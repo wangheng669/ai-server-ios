@@ -79,11 +79,12 @@ final class TodayWorldStore: ObservableObject {
               ),
               (Self.billingDate(daysAgo: 2)...Self.billingDate(daysAgo: 1)).contains(saved.value.edition.date) else { return }
         let snapshot = saved.value
-        let projection = await Task.detached(priority: .userInitiated) {
+        var projection = await Task.detached(priority: .userInitiated) {
             var projection = TodayBriefProjection(edition: snapshot.edition)
             projection.addSources(snapshot.sourcePosts)
             return projection
         }.value
+        await projection.prepareImages()
         guard !Task.isCancelled else { return }
         displayedEdition = snapshot.edition
         brief = projection
@@ -115,7 +116,7 @@ final class TodayWorldStore: ObservableObject {
             let loadedReport = try await networkReport
             guard !Task.isCancelled else { return }
             if let edition = TodayPublishedEdition(payload: loadedReport) {
-                try await prepareEdition(edition, baseURL: baseURL)
+                try await prepareEdition(edition, baseURL: baseURL, retryImages: force)
                 if isShowingCachedEdition { isShowingCachedEdition = false }
             } else if let brief, brief.date < loadedReport.date {
                 if !isShowingCachedEdition { isShowingCachedEdition = true }
@@ -138,7 +139,7 @@ final class TodayWorldStore: ObservableObject {
         }
     }
 
-    private func prepareEdition(_ edition: TodayPublishedEdition, baseURL: URL) async throws {
+    private func prepareEdition(_ edition: TodayPublishedEdition, baseURL: URL, retryImages: Bool) async throws {
         let current = displayedEdition == edition ? brief : nil
         var projection: TodayBriefProjection
         if let current {
@@ -153,18 +154,24 @@ final class TodayWorldStore: ObservableObject {
         let missingIDs = projection.sourceIDs.filter { projection.sources[$0] == nil }
         let fetchedPosts = try await fetchTodayEditionSources(ids: missingIDs, baseURL: baseURL)
         try Task.checkCancellation()
-        guard current == nil || !fetchedPosts.isEmpty else { return }
+        guard current == nil || !fetchedPosts.isEmpty || retryImages else { return }
 
-        projection = await Task.detached(priority: .userInitiated) { [projection] in
-            var prepared = projection
-            prepared.addSources(fetchedPosts)
-            return prepared
-        }.value
+        if !fetchedPosts.isEmpty {
+            projection = await Task.detached(priority: .userInitiated) { [projection] in
+                var prepared = projection
+                prepared.addSources(fetchedPosts)
+                return prepared
+            }.value
+        }
+        await projection.prepareImages()
         try Task.checkCancellation()
-        displayedEdition = edition
-        brief = projection
+        let sourcePostsChanged = current == nil || !fetchedPosts.isEmpty
+        if sourcePostsChanged || current?.preparedImageCount != projection.preparedImageCount {
+            displayedEdition = edition
+            brief = projection
+        }
 
-        if usesPublishedSnapshots {
+        if usesPublishedSnapshots, sourcePostsChanged {
             let snapshot = TodayEditionSnapshot(edition: edition, sourcePosts: projection.sources.mapValues(\.post))
             await DisplaySnapshotCache.editions.save(snapshot, key: baseURL.absoluteString, at: Date())
         }
@@ -295,7 +302,13 @@ struct TodayWorldView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store: TodayWorldStore
     @State private var waitingForRechargeReturn = false
-    @State private var originalPostIDs: [Int]?
+    @State private var openedOriginals: OpenedOriginals?
+
+    private struct OpenedOriginals {
+        let postIDs: [Int]
+        let avatars: [URL: UIImage]
+        let previews: [URL: UIImage]
+    }
 
     init(store: TodayWorldStore) {
         _store = StateObject(wrappedValue: store)
@@ -306,14 +319,14 @@ struct TodayWorldView: View {
             GeometryReader { viewport in
                 ZStack {
                     pageContent(viewport: viewport.size)
-                        .allowsHitTesting(originalPostIDs == nil)
-                        .accessibilityHidden(originalPostIDs != nil)
-                    if let originalPostIDs, let brief = store.brief {
-                        originalsOverlay(postIDs: originalPostIDs, brief: brief, viewport: viewport.size)
+                        .allowsHitTesting(openedOriginals == nil)
+                        .accessibilityHidden(openedOriginals != nil)
+                    if let openedOriginals, let brief = store.brief {
+                        originalsOverlay(openedOriginals, brief: brief, viewport: viewport.size)
                             .transition(.opacity)
                     }
                 }
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: originalPostIDs != nil)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: openedOriginals != nil)
             }
             .background(TodayBriefStyle.surface)
             .toolbar(.hidden, for: .navigationBar)
@@ -333,10 +346,10 @@ struct TodayWorldView: View {
             }
         }
         .onChange(of: rootTabIsActive) { _, active in
-            if !active { originalPostIDs = nil }
+            if !active { openedOriginals = nil }
         }
         .onChange(of: store.brief?.date) {
-            originalPostIDs = nil
+            openedOriginals = nil
         }
         .onChange(of: scenePhase) { _, phase in
             guard rootTabIsActive, phase == .active else { return }
@@ -354,7 +367,9 @@ struct TodayWorldView: View {
                     TodayBriefOverviewView(
                         brief: brief,
                         viewport: CGSize(width: viewport.width, height: readingHeight - topInset),
-                        openSources: { originalPostIDs = $0 }
+                        openSources: {
+                            openedOriginals = OpenedOriginals(postIDs: $0, avatars: brief.avatars, previews: brief.previews)
+                        }
                     )
                     .id(brief.date)
                 } else {
@@ -386,7 +401,7 @@ struct TodayWorldView: View {
         .padding(.horizontal, TodayBriefStyle.horizontalInset)
     }
 
-    private func originalsOverlay(postIDs: [Int], brief: TodayBriefProjection, viewport: CGSize) -> some View {
+    private func originalsOverlay(_ selection: OpenedOriginals, brief: TodayBriefProjection, viewport: CGSize) -> some View {
         let panelWidth = min(680, max(0, viewport.width - 24))
         let readingHeight = max(0, viewport.height - bottomChromeHeight)
         let verticalMargin = min(24, readingHeight * 0.045)
@@ -395,16 +410,18 @@ struct TodayWorldView: View {
             TodayBriefStyle.surface
                 .overlay(TodayBriefStyle.accent.opacity(0.055))
                 .contentShape(Rectangle())
-                .onTapGesture { originalPostIDs = nil }
+                .onTapGesture { openedOriginals = nil }
                 .accessibilityHidden(true)
             TodayOriginalsPanel(
-                sources: postIDs.compactMap { brief.sources[$0] },
-                referenceCount: postIDs.count,
+                sources: selection.postIDs.compactMap { brief.sources[$0] },
+                avatars: selection.avatars,
+                referenceCount: selection.postIDs.count,
                 width: panelWidth,
                 isRefreshing: store.isLoading,
                 retryReport: { await store.loadReport(force: true) },
-                close: { originalPostIDs = nil }
+                close: { openedOriginals = nil }
             )
+            .environment(\.preparedReadingMedia, selection.previews)
             .frame(width: panelWidth, height: panelHeight)
             .padding(.bottom, bottomChromeHeight)
         }
@@ -587,8 +604,10 @@ struct TodaySourcePresentation: Identifiable, Sendable {
     let quote: XQuotedPost?
     let author: String
     let avatarURL: URL?
+    let quoteAvatarURL: URL?
     let time: String?
     let hasMedia: Bool
+    let previewURLs: [URL]
 
     var id: Int { post.id }
 
@@ -598,20 +617,32 @@ struct TodaySourcePresentation: Identifiable, Sendable {
             post.hasTranslation ? post.displayContent : post.xStoredOriginalContent
         )
         reply = post.xReplyContext?.displayText
-        quote = post.xQuotedPost
+        let sourceQuote = post.xQuotedPost
+        quote = sourceQuote
         author = post.authorName
         avatarURL = post.avatarURL
+        quoteAvatarURL = sourceQuote?.author?.profileImageURL.flatMap(URL.init(string:))
         time = post.formattedTime
         hasMedia = post.previewURL != nil || !post.videoURLs.isEmpty
+        let mainPreviews = if !post.videoURLs.isEmpty {
+            [post.xFeedVideoPoster].compactMap { $0 }
+        } else {
+            post.feedImageURLs + [post.previewURL].compactMap { $0 }
+        }
+        let quotedPreviews = sourceQuote?.media?.compactMap { media in
+            media.playbackURL == nil ? media.feedDisplayURL : media.previewURL
+        } ?? []
+        previewURLs = mainPreviews + quotedPreviews
     }
 }
 
 struct TodaySourceAuthorView: View {
     let source: TodaySourcePresentation
+    let image: UIImage?
 
     var body: some View {
         HStack(spacing: 10) {
-            AvatarView(url: source.avatarURL, name: source.author, size: 30)
+            AvatarView(url: nil, name: source.author, size: 30, loadingPolicy: .prepared(image))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(source.author).font(.subheadline.weight(.semibold))
@@ -626,6 +657,7 @@ struct TodaySourceAuthorView: View {
 
 struct TodayInlineSourceView: View {
     let source: TodaySourcePresentation
+    let quoteAvatar: UIImage?
     let width: CGFloat
 
     var body: some View {
@@ -644,7 +676,8 @@ struct TodayInlineSourceView: View {
                 XFeedQuotedPostCard(
                     quote: quote,
                     availableWidth: width,
-                    isDetail: true
+                    isDetail: true,
+                    avatarLoadingPolicy: .prepared(quoteAvatar)
                 )
             }
         }
