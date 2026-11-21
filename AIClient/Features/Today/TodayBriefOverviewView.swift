@@ -347,6 +347,7 @@ private struct TodayBriefDeck: View {
                     selection: selection,
                     cardCount: brief.cards.count,
                     cardWidth: cardWidth,
+                    viewportWidth: viewport.width,
                     direction: shuffle?.direction ?? 1,
                     progress: shuffle?.progress ?? 0
                 ) { index, contentOpacity, shadowOpacity in
@@ -614,6 +615,7 @@ private struct TodayBriefDeckLayers<Layer: View>: View, Animatable {
     let selection: Int
     let cardCount: Int
     let cardWidth: CGFloat
+    let viewportWidth: CGFloat
     let direction: Int
     var progress: CGFloat
     @ViewBuilder let layer: (_ index: Int, _ contentOpacity: CGFloat, _ shadowOpacity: CGFloat) -> Layer
@@ -631,6 +633,7 @@ private struct TodayBriefDeckLayers<Layer: View>: View, Animatable {
         let fraction = min(1, max(0, progress))
         let arc = sin(.pi * fraction)
         let stackInset = CGFloat(stackSize - 1) * 4
+        let entryTravel = (viewportWidth + cardWidth) / 2 + 24
 
         ZStack(alignment: .top) {
             ForEach(visible, id: \.self) { index in
@@ -638,24 +641,27 @@ private struct TodayBriefDeckLayers<Layer: View>: View, Animatable {
                 let target = destination.firstIndex(of: index)
                 let sourceDepth = CGFloat(source ?? stackSize - 1)
                 let targetDepth = CGFloat(target ?? stackSize - 1)
-                let depth = sourceDepth + (targetDepth - sourceDepth) * fraction
-                let flight = index == selection ? arc : 0
+                let isReturning = direction < 0 && target == 0 && fraction > 0
+                let depth = isReturning ? 0 : sourceDepth + (targetDepth - sourceDepth) * fraction
+                let flight = direction > 0 && index == selection ? arc : 0
+                let approach = isReturning ? 1 - fraction : 0
                 let rank = (fraction < 0.56 ? source : target) ?? stackSize
                 let rearOpacity = min(1, max(0, (fraction - 0.56) / 0.44))
                 let outgoingOpacity = min(1, (1 - fraction) * 4)
-                let cardOpacity = source == nil ? rearOpacity : target == nil ? outgoingOpacity : 1
+                let shuffleOpacity = source == nil ? rearOpacity : target == nil ? outgoingOpacity : 1
+                let cardOpacity = isReturning ? min(1, fraction * 8) : shuffleOpacity
                 let textOpacity = min(1, max(0, 1 - depth * 1.54 + flight * 0.75))
                 let shadowOpacity = 0.06 + 0.08 * max(0, 1 - depth)
 
                 layer(index, textOpacity, shadowOpacity)
                     .scaleEffect(1 - 0.03 * depth, anchor: .bottom)
-                    .rotationEffect(.degrees(-13 * flight * CGFloat(direction)))
+                    .rotationEffect(.degrees(-13 * flight - 6 * approach))
                     .offset(
-                        x: 16 * depth - stackInset - 0.92 * cardWidth * flight * CGFloat(direction),
+                        x: 16 * depth - stackInset - 0.92 * cardWidth * flight - entryTravel * approach,
                         y: TodayBriefDeck.layerSpacing * depth - 18 * flight
                     )
                     .opacity(cardOpacity)
-                    .zIndex(-Double(rank))
+                    .zIndex(isReturning ? 1 : -Double(rank))
                     .transition(.identity)
             }
         }
