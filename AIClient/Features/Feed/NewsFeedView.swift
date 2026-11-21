@@ -2,8 +2,6 @@ import SwiftUI
 import WebKit
 import QuartzCore
 
-enum RootTab: Hashable { case observation, investment, learning, people }
-
 private enum FlashFilter: String, CaseIterable, Identifiable {
     case important, tech, equity, commodity, company, geopolitical, other
 
@@ -54,16 +52,13 @@ private enum YouTubePersonFilter: String, CaseIterable, Identifiable {
     var feedID: Int? {
         switch self {
         case .all: nil
-        case .wangZhian: 79
+        case .wangZhian: 167
         case .chaiJing: 1391
         case .xiaodao: 7911
         }
     }
     var person: String? { self == .all ? nil : rawValue }
     var avatarURL: URL? {
-        if self == .xiaodao {
-            return URL(string: "https://yt3.googleusercontent.com/ytc/AIdro_mb2vZI-xznESM1CQpzVUOQFe1h9DVsghEWhCHPWfpt7ss=s900-c-k-c0x00ffffff-no-rj")
-        }
         guard let feedID else { return nil }
         return URL(string: "/api/ios/v1/rss/feeds/\(feedID)/avatar", relativeTo: ServerConfiguration.currentURL)?.absoluteURL
     }
@@ -125,17 +120,6 @@ enum FeedPaginationLayout {
     }
 }
 
-enum FeedDetailChromePolicy {
-    static func hidesRootChrome(isPresented: Bool, isXueqiu: Bool) -> Bool {
-        isPresented && !isXueqiu
-    }
-}
-
-enum FeedSourceTransitionPolicy {
-    static let fadeOutDuration = 0.10
-    static let fadeInDuration = 0.22
-}
-
 enum FeedEntitySelectorPositionPolicy {
     static let allAccountsID = "feed-entity:all"
 
@@ -178,30 +162,11 @@ private struct FeedEntityChoice: Identifiable, Equatable {
     let feedID: Int?
 }
 
-private struct YouTubeFirstVideoPrewarmer: UIViewRepresentable {
-    let videoID: String
-
-    func makeUIView(context: Context) -> WKWebView {
-        YouTubeWarmPlayerPool.shared.prewarm(videoID: videoID)
-    }
-
-    func updateUIView(_ webView: WKWebView, context: Context) {}
-}
-
 struct NewsFeedView: View {
-    private struct NotificationPostFailure {
-        let postID: Int
-        let notFound: Bool
-    }
-
-    @Binding private var showsDetail: Bool
-    @Binding private var hidesTabBar: Bool
-    @Binding private var notificationPostID: Int?
-    @StateObject private var model = NewsFeedViewModel()
+    @StateObject private var model: NewsFeedViewModel
     @StateObject private var weiboFollowingModel = WeiboFollowingFeedModel()
     @State private var searchedXAuthor: XAuthorDestination?
     @State private var selectedPost: Post?
-    @State private var notificationPostFailure: NotificationPostFailure?
     @State private var isFeedChromeHidden = false
     @State private var isFeedAtTop = true
     @State private var sourceChromeStates: [FeedSource: Bool] = [:]
@@ -214,8 +179,7 @@ struct NewsFeedView: View {
     @State private var isYouTubePersonSelectorExpanded = false
     @State private var isFeedEntitySelectorExpanded = false
     @State private var feedEntitySearch = ""
-    @State private var isSourceContentVisible = true
-    @Environment(\.openURL) private var openURL
+    @FocusState private var feedEntitySearchIsFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.rootTabIsActive) private var rootTabIsActive
     @Environment(\.rootBottomChromeHeight) private var rootBottomChromeHeight
@@ -225,37 +189,16 @@ struct NewsFeedView: View {
     private let opensBilibiliDetailPreview = ProcessInfo.processInfo.arguments.contains("--bilibili-detail-preview")
     private let opensWeChatDetailPreview = ProcessInfo.processInfo.arguments.contains("--wechat-detail-preview")
 
-    init(
-        showsDetail: Binding<Bool> = .constant(false),
-        hidesTabBar: Binding<Bool> = .constant(false),
-        notificationPostID: Binding<Int?> = .constant(nil)
-    ) {
-        _showsDetail = showsDetail
-        _hidesTabBar = hidesTabBar
-        _notificationPostID = notificationPostID
+    @MainActor
+    init(model: NewsFeedViewModel? = nil) {
+        _model = StateObject(wrappedValue: model ?? NewsFeedViewModel())
         WeiboSessionCookieStore.importFromEnvironmentIfPresent()
-    }
-
-    private var selectedXPost: Binding<Post?> {
-        Binding(
-            get: { selectedPost?.sourceName == "X" ? selectedPost : nil },
-            set: { selectedPost = $0 }
-        )
-    }
-
-    private var selectedNonXPost: Binding<Post?> {
-        Binding(
-            get: { selectedPost?.sourceName == "X" ? nil : selectedPost },
-            set: { selectedPost = $0 }
-        )
     }
 
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottomTrailing) {
                 content
-                    .opacity(isSourceContentVisible ? 1 : 0.15)
-                    .scaleEffect(isSourceContentVisible ? 1 : 0.997)
 
                 if isSourceSelectorExpanded || isYouTubePersonSelectorExpanded || isFeedEntitySelectorExpanded {
                     Color.black.opacity(0.045)
@@ -293,53 +236,25 @@ struct NewsFeedView: View {
             .background(Color(uiColor: .systemBackground))
             .toolbar(.hidden, for: .navigationBar)
         }
-        .fullScreenCover(item: $searchedXAuthor) { author in
+        .appFullScreenCover(item: $searchedXAuthor) { author in
             NavigationStack { XAuthorPostsView(author: author) }
         }
-        .sheet(item: selectedNonXPost, onDismiss: {
-            showsDetail = false
-        }) { post in
-            NavigationStack {
-                if let source = FeedSource(rawValue: post.source ?? ""),
-                   source == .weibo || source == .douyin || source == .baidu,
-                   let link = post.linkURL {
-                    EmbeddedWebPage(
-                        url: link,
-                        source: source,
-                        presentedAsSheet: true
-                    )
-                } else {
-                    PostDetailView(
-                        post: post,
-                        preloadedNewYorkTimesArticle: model.preloadedNewYorkTimesArticle(for: post.id),
-                        rssAvatarURL: rssDirectoryAvatarURL(for: post),
-                        presentedAsSheet: true
-                    )
-                }
-            }
-            .presentationDetents([.large])
-            .presentationDragIndicator(.hidden)
-            .presentationCornerRadius(28)
-            .presentationContentInteraction(.scrolls)
-        }
-        .fullScreenCover(item: selectedXPost, onDismiss: {
-            showsDetail = false
-        }) { post in
-            NavigationStack {
-                PostDetailView(post: post, presentedAsSheet: true)
-            }
+        .appSheet(item: $selectedPost) { post in
+            FeedPostSheetContent(post: post, model: model)
+                .readingSheetPresentation()
         }
         .onChange(of: rootTabIsActive, initial: true) { _, isActive in
             if isActive && scenePhase == .active {
                 model.startRealtime()
             } else {
                 model.stopRealtime()
+                if !isActive { closeSelectors() }
             }
         }
         .onChange(of: scenePhase) { _, phase in
             if rootTabIsActive, phase == .active {
                 model.startRealtime()
-                if hasLoadedFeedOnce {
+                if hasLoadedFeedOnce, !model.isLoading {
                     Task { await model.refresh() }
                 }
             } else {
@@ -347,50 +262,9 @@ struct NewsFeedView: View {
             }
         }
         .onChange(of: selectedPost, initial: true) { _, post in
-            if let post {
-                showsDetail = FeedDetailChromePolicy.hidesRootChrome(
-                    isPresented: true,
-                    isXueqiu: post.isXueqiu
-                )
-            }
             if post == nil {
                 isFeedChromeHidden = false
-                hidesTabBar = false
             }
-        }
-        .task(id: notificationPostID) {
-            guard let postID = notificationPostID else { return }
-            notificationPostFailure = nil
-            defer {
-                if !Task.isCancelled, notificationPostID == postID {
-                    notificationPostID = nil
-                }
-            }
-            do {
-                let post = try await APIClient(baseURL: ServerConfiguration.currentURL).fetchPost(id: postID)
-                guard !Task.isCancelled, notificationPostID == postID else { return }
-                selectedPost = post
-            } catch {
-                guard !Task.isCancelled, notificationPostID == postID else { return }
-                let notFound: Bool
-                if case APIError.httpStatus(404) = error {
-                    notFound = true
-                } else {
-                    notFound = false
-                }
-                notificationPostFailure = NotificationPostFailure(postID: postID, notFound: notFound)
-            }
-        }
-        .alert("无法打开文章", isPresented: Binding(
-            get: { notificationPostFailure != nil },
-            set: { if !$0 { notificationPostFailure = nil } }
-        ), presenting: notificationPostFailure) { failure in
-            if !failure.notFound {
-                Button("重试") { notificationPostID = failure.postID }
-            }
-            Button("关闭", role: .cancel) {}
-        } message: { failure in
-            Text(failure.notFound ? "这篇文章已不可用。" : "暂时无法加载文章，请重试。")
         }
         .onChange(of: model.pendingRealtimePosts.count) { _, count in
             guard count > 0, isFeedAtTop else { return }
@@ -400,24 +274,22 @@ struct NewsFeedView: View {
             guard isAtTop, !model.pendingRealtimePosts.isEmpty else { return }
             withAnimation(.easeOut(duration: 0.2)) { model.acceptPendingRealtimePosts() }
         }
-        .onChange(of: isFeedChromeHidden, initial: true) { _, isHidden in
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                hidesTabBar = isHidden
-            }
+        .onChange(of: isFeedEntitySelectorExpanded) { _, expanded in
+            if !expanded { feedEntitySearchIsFocused = false }
         }
-        .onDisappear {
-            showsDetail = false
-            hidesTabBar = false
+        .task(id: rootTabIsActive && model.source == .xueqiu) {
+            guard rootTabIsActive, model.source == .xueqiu else { return }
+            await model.loadXueqiuDirectory()
         }
-        .task(id: model.source.rawValue) {
-            await model.loadInitial()
-            hasLoadedFeedOnce = true
+        .task(id: rootTabIsActive && scenePhase == .active ? model.source : nil, priority: .utility) {
+            guard rootTabIsActive, scenePhase == .active else { return }
+            await model.prepareAdjacentSources()
         }
-        .task(id: rootTabIsActive) {
+        .task(id: rootTabIsActive ? model.source : nil) {
             guard rootTabIsActive else { return }
             await model.loadInitial()
+            guard !Task.isCancelled else { return }
+            hasLoadedFeedOnce = true
             #if DEBUG
             if opensZhihuDetailPreview,
                selectedPost == nil,
@@ -445,7 +317,6 @@ struct NewsFeedView: View {
                 selectedPost = first
             }
             #endif
-            await model.warmSourceCache()
         }
     }
 
@@ -671,12 +542,21 @@ struct NewsFeedView: View {
                 )
             }
         }
+        if model.source == .xueqiu {
+            return model.xueqiuFeeds.map { feed in
+                FeedEntityChoice(
+                    id: "rss:\(feed.id)",
+                    name: feed.xueqiuAuthorName,
+                    subtitle: nil,
+                    avatarURL: feed.preferredAvatarURL,
+                    feedID: feed.id
+                )
+            }
+        }
 
         let posts: [Post]
         if model.source == .weibo {
             posts = weiboFollowingModel.directoryPosts
-        } else if model.source == .xueqiu {
-            posts = model.xueqiuDirectoryPosts
         } else {
             posts = model.posts(for: model.source)
         }
@@ -788,6 +668,9 @@ struct NewsFeedView: View {
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.secondary)
                     TextField("搜索账号", text: $feedEntitySearch)
+                        .focused($feedEntitySearchIsFocused)
+                        .submitLabel(.search)
+                        .onSubmit { feedEntitySearchIsFocused = false }
                         .font(.system(size: 13))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -830,6 +713,7 @@ struct NewsFeedView: View {
                     .padding(4)
                 }
                 .scrollIndicators(feedEntityChoices.count > 6 ? .visible : .hidden)
+                .scrollDismissesKeyboard(.interactively)
                 .task(id: feedEntityMenuScrollTargetID) {
                     await Task.yield()
                     proxy.scrollTo(feedEntityMenuScrollTargetID, anchor: .center)
@@ -906,6 +790,7 @@ struct NewsFeedView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(choice?.name ?? "全部账号")
+        .accessibilityIdentifier(choice.map { "feed-account-choice-\($0.id)" } ?? "feed-account-all")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
@@ -946,6 +831,7 @@ struct NewsFeedView: View {
     }
 
     private func selectFeedEntity(_ choice: FeedEntityChoice?) {
+        feedEntitySearchIsFocused = false
         withAnimation(.smooth(duration: 0.20)) {
             isFeedEntitySelectorExpanded = false
             feedEntitySearch = ""
@@ -977,11 +863,6 @@ struct NewsFeedView: View {
         return rawSource
     }
 
-    private func feedID(from source: String?) -> Int? {
-        guard let source, source.lowercased().hasPrefix("rss:") else { return nil }
-        return Int(source.dropFirst(4))
-    }
-
     private var currentYouTubePersonFilter: YouTubePersonFilter {
         YouTubePersonFilter.allCases.first { $0.person == model.selectedYouTubePerson } ?? .all
     }
@@ -1005,20 +886,8 @@ struct NewsFeedView: View {
     }
 
     private func youtubeRemoteAvatar(_ option: YouTubePersonFilter, size: CGFloat) -> some View {
-        AsyncImage(url: option.avatarURL) { phase in
-            if let image = phase.image {
-                image.resizable().scaledToFill()
-            } else {
-                Image(systemName: "person.fill")
-                    .font(.system(size: size * 0.42, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(uiColor: .secondarySystemBackground))
-            }
-        }
-        .frame(width: size, height: size)
-        .clipShape(Circle())
-        .overlay(Circle().stroke(Color.white.opacity(0.9), lineWidth: max(1, size * 0.045)))
+        AvatarView(url: option.avatarURL, name: option.title, size: size, placeholderSymbol: "person.fill")
+            .overlay(Circle().stroke(Color.white.opacity(0.9), lineWidth: max(1, size * 0.045)))
     }
 
     private func sourceOption(_ source: FeedSource) -> some View {
@@ -1068,6 +937,7 @@ struct NewsFeedView: View {
     }
 
     private func closeSelectors() {
+        feedEntitySearchIsFocused = false
         withAnimation(.smooth(duration: 0.20)) {
             isSourceSelectorExpanded = false
             isYouTubePersonSelectorExpanded = false
@@ -1156,9 +1026,15 @@ struct NewsFeedView: View {
         } else {
             let posts = model.posts(for: source)
             ZStack {
-                feedList(for: source, posts: posts)
-                    .opacity(posts.isEmpty ? 0 : 1)
-                    .allowsHitTesting(!posts.isEmpty)
+                Group {
+                    if source == .x {
+                        xTimelineList(posts)
+                    } else {
+                        feedList(for: source, posts: posts)
+                    }
+                }
+                .opacity(posts.isEmpty ? 0 : 1)
+                .allowsHitTesting(!posts.isEmpty)
 
                 if posts.isEmpty {
                     feedStatus(for: source)
@@ -1236,7 +1112,7 @@ struct NewsFeedView: View {
     }
 
     private var weiboFollowingFeed: some View {
-        let followingPosts = visibleWeiboFollowingPosts
+        let followingPosts = weiboFollowingModel.posts
         return ZStack {
             if !followingPosts.isEmpty {
                 ScrollView {
@@ -1287,61 +1163,142 @@ struct NewsFeedView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var visibleWeiboFollowingPosts: [Post] {
-        weiboFollowingModel.posts
+    private func xTimelineList(_ posts: [Post]) -> some View {
+        let isActive = rootTabIsActive && model.source == .x
+        let paginationPost = posts.dropLast(2).last ?? posts.last
+        return GeometryReader { geometry in
+            let cardWidth = max(1, geometry.size.width - NewsCardView.xHorizontalInset * 2)
+            ScrollViewReader { proxy in
+                List {
+                    ForEach(Array(posts.enumerated()), id: \.element.id) { index, post in
+                        let displayed = model.postForDisplay(post)
+                        NewsCardView(post: displayed, onOpen: { openPost(displayed) }, xTimelineWidth: cardWidth)
+                            .equatable()
+                            .accessibilityIdentifier("feed-post-\(post.id)")
+                            .alignmentGuide(.listRowSeparatorLeading) { _ in NewsCardView.xHorizontalInset }
+                            .alignmentGuide(.listRowSeparatorTrailing) { dimensions in
+                                dimensions.width - NewsCardView.xHorizontalInset
+                            }
+                            .listRowSeparatorTint(Color.primary.opacity(0.08))
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .task(id: isActive) {
+                                guard isActive else { return }
+                                if index % 4 == 2 {
+                                    let upcoming = Array(posts.dropFirst(index + 2).prefix(4))
+                                    async let images: Void = ImageLoader.prefetchXTimelineImages(for: upcoming)
+                                    await model.translateXPostIfNeeded(post)
+                                    await images
+                                } else {
+                                    await model.translateXPostIfNeeded(post)
+                                }
+                            }
+                            .task(id: isActive && post.id == paginationPost?.id ? posts.last?.id : nil) {
+                                guard isActive, !Task.isCancelled,
+                                      post.id == paginationPost?.id, model.errorMessage == nil else { return }
+                                // Finish the page request even when a fast swipe recycles its anchor row.
+                                await Task {
+                                    await model.loadMoreIfNeeded(current: post, thresholdPostID: post.id)
+                                }.value
+                            }
+                    }
+                    if isActive, model.isLoadingMore {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                            .listRowSeparator(.hidden)
+                    }
+                    if isActive, model.errorMessage != nil, let last = posts.last {
+                        Button("加载失败，点按重试") {
+                            Task { await model.loadMoreIfNeeded(current: last) }
+                        }
+                        .listRowSeparator(.hidden)
+                    }
+                    Color.clear.frame(height: 55).listRowSeparator(.hidden)
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .accessibilityIdentifier("feed-list-x")
+                .modifier(FeedChromeScrollModifier(
+                    isActive: isActive,
+                    isHidden: $isFeedChromeHidden,
+                    isAtTop: $isFeedAtTop
+                ))
+                .overlay(alignment: .top) {
+                    if isActive, !model.pendingRealtimePosts.isEmpty {
+                        xNewPostsPill {
+                            withAnimation(.snappy(duration: 0.35)) {
+                                model.acceptPendingRealtimePosts()
+                                if let first = model.posts.first { proxy.scrollTo(first.id, anchor: .top) }
+                            }
+                        }
+                        .padding(.top, 10)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                }
+            }
+        }
     }
 
-    // Variable-height Zhihu answers stalled inside LazyVStack placement on iOS 26.
-    // List keeps these rows virtualized without using that lazy-stack layout path.
-    private func zhihuFeedList(posts: [Post]) -> some View {
-        ScrollViewReader { proxy in
+    // Variable-height rich-text and media rows can stall LazyVStack placement.
+    // Keep these sources in a virtualized List with a per-source scroll anchor.
+    private func virtualizedFeedList(source: FeedSource, posts: [Post]) -> some View {
+        let isActive = rootTabIsActive && model.source == source
+        let canPaginate = isActive && !model.isLoading && !model.isSwitchingSource
+        return ScrollViewReader { proxy in
             List {
                 ForEach(Array(posts.enumerated()), id: \.element.id) { index, post in
-                    feedPostCell(source: .zhihu, post: post, index: index, posts: posts)
+                    feedPostCell(source: source, post: post, index: index, posts: posts)
                         .id(post.id)
-                        .onGeometryChange(for: CGRect.self) { geometry in
-                            geometry.frame(in: .named("zhihu-feed-viewport"))
-                        } action: { frame in
-                            guard rootTabIsActive, model.source == .zhihu else { return }
-                            scrollPositionStore.recordZhihuRow(post.id, frame: frame)
+                        .onGeometryChange(for: Int?.self) { geometry in
+                            geometry.frame(in: .named("feed-viewport-\(source.rawValue)")).maxY > 0 ? index : nil
+                        } action: { index in
+                            scrollPositionStore.recordRow(post.id, index: index, source: source)
                         }
-                        .onDisappear { scrollPositionStore.removeZhihuRow(post.id) }
+                        .onDisappear { scrollPositionStore.removeRow(post.id, source: source) }
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
-                        .task(id: "\(rootTabIsActive)-\(posts.last?.id ?? 0)") {
-                            guard rootTabIsActive, model.source == .zhihu, post.id == posts.last?.id else { return }
-                            await model.loadMoreIfNeeded(current: post)
+                        .background {
+                            if post.id == posts.last?.id {
+                                Color.clear.task(id: canPaginate) {
+                                    guard canPaginate else { return }
+                                    await model.loadMoreIfNeeded(current: post)
+                                }
+                            }
                         }
                 }
-                if model.isLoadingMore {
+                if isActive, model.isLoadingMore {
                     ProgressView().frame(maxWidth: .infinity).listRowSeparator(.hidden)
                 }
-                if model.errorMessage != nil {
+                if isActive, model.errorMessage != nil {
                     Button("加载失败，点按重试") {
-                        if let last = posts.last { Task { await model.loadMoreIfNeeded(current: last) } }
+                        if !model.hasLoadedFirstPage(for: source) {
+                            Task { await model.refresh() }
+                        } else if let last = posts.last {
+                            Task { await model.loadMoreIfNeeded(current: last) }
+                        }
                     }
                     .listRowSeparator(.hidden)
                 }
                 Color.clear.frame(height: 55).listRowSeparator(.hidden)
             }
-            .coordinateSpace(name: "zhihu-feed-viewport")
+            .coordinateSpace(name: "feed-viewport-\(source.rawValue)")
             .onChange(of: model.source) { previous, current in
-                if previous == .zhihu { scrollPositionStore.isRestoringZhihu = true }
-                guard current == .zhihu else { return }
-                let anchor = scrollPositionStore.zhihuAnchor
+                if previous == source { scrollPositionStore.setRestoring(true, source: source) }
+                guard current == source else { return }
+                let anchor = scrollPositionStore.anchor(for: source)
                 Task { @MainActor in
                     await Task.yield()
-                    guard model.source == .zhihu else { return }
+                    guard model.source == source else { return }
                     if let anchor { proxy.scrollTo(anchor, anchor: .top) }
                     await Task.yield()
-                    if model.source == .zhihu { scrollPositionStore.isRestoringZhihu = false }
+                    if model.source == source { scrollPositionStore.setRestoring(false, source: source) }
                 }
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .accessibilityIdentifier("feed-list-zhihu")
+            .accessibilityIdentifier("feed-list-\(source.rawValue)")
             .modifier(FeedChromeScrollModifier(
-                isActive: model.source == .zhihu,
+                isActive: isActive,
                 isHidden: $isFeedChromeHidden,
                 isAtTop: $isFeedAtTop
             ))
@@ -1354,20 +1311,22 @@ struct NewsFeedView: View {
         posts: [Post],
         topInset: CGFloat = FeedChromeLayout.headerHeight
     ) -> some View {
-        if source == .zhihu {
-            zhihuFeedList(posts: posts)
+        if source == .zhihu || source == .xueqiu {
+            virtualizedFeedList(source: source, posts: posts)
         } else {
+            let isActive = rootTabIsActive && model.source == source
+            let canPaginate = isActive && !model.isLoading && !model.isSwitchingSource
             let visiblePosts = visiblePosts(for: source, posts: posts)
             let isSelectedRSSPage = source == .rss && model.selectedRSSFeedID != nil
             let isSelectedWeChatPage = source == .wechat && model.selectedWeChatFeedID != nil
-            let usesFilteredPagination = source == .flash
+            let usesFilteredPagination = source == .flash || source == .bilibili
                 || (source == .rss && !isSelectedRSSPage)
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         Color.clear.frame(height: topInset).id("feed-top")
                         if source == .rss {
-                            if model.isLoadingRSSSelection {
+                            if model.isLoadingRSSSelection && model.selectedRSSPosts.isEmpty {
                                 HStack(spacing: 8) {
                                     ProgressView().controlSize(.small)
                                     Text("正在加载该来源")
@@ -1379,7 +1338,7 @@ struct NewsFeedView: View {
                             }
                         }
                         if source == .wechat {
-                            if model.isLoadingWeChatSelection {
+                            if model.isLoadingWeChatSelection && model.selectedWeChatPosts.isEmpty {
                                 HStack(spacing: 8) {
                                     ProgressView().controlSize(.small)
                                     Text("正在加载该来源")
@@ -1440,8 +1399,8 @@ struct NewsFeedView: View {
                             )
                             Color.clear
                                 .frame(height: 1)
-                                .task(id: "\(rootTabIsActive)-page-\(source.rawValue)-\(paginationTaskPostID)") {
-                                    guard rootTabIsActive, source == model.source else { return }
+                                .task(id: "\(canPaginate)-page-\(paginationTaskPostID)") {
+                                    guard canPaginate else { return }
                                     if isSelectedRSSPage {
                                         await model.loadMoreSelectedRSSIfNeeded(current: tail)
                                     } else if isSelectedWeChatPage {
@@ -1460,17 +1419,17 @@ struct NewsFeedView: View {
                            let rawTail = posts.last {
                             Color.clear
                                 .frame(height: 1)
-                                .task(id: "\(rootTabIsActive)-empty-page-\(rawTail.id)") {
-                                    guard rootTabIsActive, source == model.source else { return }
+                                .task(id: "\(canPaginate)-empty-page-\(rawTail.id)") {
+                                    guard canPaginate else { return }
                                     await model.loadMoreIfNeeded(current: rawTail)
                                 }
                         }
-                        if model.isLoadingMore
+                        if isActive && (model.isLoadingMore
                             || (isSelectedRSSPage && model.isLoadingMoreRSSSelection)
-                            || (isSelectedWeChatPage && model.isLoadingMoreWeChatSelection) {
+                            || (isSelectedWeChatPage && model.isLoadingMoreWeChatSelection)) {
                             ProgressView().padding(20)
                         }
-                        if model.errorMessage != nil {
+                        if isActive, model.errorMessage != nil {
                             Button("加载失败，点按重试") {
                                 if source == .rss,
                                    model.selectedRSSFeedID != nil,
@@ -1480,6 +1439,8 @@ struct NewsFeedView: View {
                                           model.selectedWeChatFeedID != nil,
                                           let last = model.selectedWeChatPosts.last {
                                     Task { await model.loadMoreSelectedWeChatIfNeeded(current: last) }
+                                } else if !model.hasLoadedFirstPage(for: source) {
+                                    Task { await model.refresh() }
                                 } else if let last = model.posts.last {
                                     Task { await model.loadMoreIfNeeded(current: last) }
                                 }
@@ -1493,23 +1454,10 @@ struct NewsFeedView: View {
                 }
                 .accessibilityIdentifier("feed-list-\(source.rawValue)")
                 .modifier(FeedChromeScrollModifier(
-                    isActive: source == model.source,
+                    isActive: rootTabIsActive && source == model.source,
                     isHidden: $isFeedChromeHidden,
                     isAtTop: $isFeedAtTop
                 ))
-                .overlay(alignment: .top) {
-                    if source == .x, model.source == .x, !model.pendingRealtimePosts.isEmpty {
-                        xNewPostsPill {
-                            withAnimation(.snappy(duration: 0.35)) {
-                                model.acceptPendingRealtimePosts()
-                                proxy.scrollTo("feed-top", anchor: .top)
-                            }
-                        }
-                        .padding(.top, isFeedChromeHidden ? 12 : FeedChromeLayout.headerHeight + 8)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                    }
-                }
-                .animation(.snappy(duration: 0.25), value: model.pendingRealtimePosts.count)
 
             }
         }
@@ -1524,7 +1472,7 @@ struct NewsFeedView: View {
         let displayPost = model.postForDisplay(post)
         return NewsCardView(
             post: displayPost,
-            rssAvatarURL: rssDirectoryAvatarURL(for: displayPost),
+            rssAvatarURL: rssDirectoryAvatarURL(for: displayPost, feeds: model.rssFeeds),
             usesWeChatStyle: source == .wechat,
             isFeaturedBilibili: source == .bilibili && post.id == posts.first?.id,
             isExpandedFlash: expandedFlashIDs.contains(post.id),
@@ -1548,13 +1496,6 @@ struct NewsFeedView: View {
                 openPost(displayPost)
             }
         })
-        .task(id: "\(rootTabIsActive)-\(source == model.source)-x-translation-\(post.id)") {
-            guard rootTabIsActive, source == .x, source == model.source else { return }
-            await model.translateXPostIfNeeded(post)
-        }
-        .task(id: "\(rootTabIsActive)-rss-translate-\(post.id)") {
-            await model.translateRSSPostIfNeeded(post)
-        }
         .task(id: "\(rootTabIsActive)-youtube-prewarm-\(post.id)") {
             guard rootTabIsActive,
                   source == .youtube,
@@ -1567,12 +1508,6 @@ struct NewsFeedView: View {
                 baseURL: ServerConfiguration.currentURL
             )
         }
-    }
-
-    private func rssDirectoryAvatarURL(for post: Post) -> URL? {
-        guard post.isRSS,
-              let feedID = feedID(from: post.source) else { return nil }
-        return model.rssFeeds.first { $0.id == feedID }?.preferredAvatarURL
     }
 
     private func xNewPostsPill(action: @escaping () -> Void) -> some View {
@@ -1618,11 +1553,10 @@ struct NewsFeedView: View {
             }
             return rssPosts
         }
+        if source == .bilibili { return BilibiliFeedDisplay.uniquePosts(posts) }
         guard source == .flash else { return posts }
         return posts.filter { flashFilter.matches($0) }
     }
-
-    private var rssQualityThreshold: Double { 6.0 }
 
     private var weChatAccounts: [WeChatAccount] {
         [
@@ -1630,55 +1564,6 @@ struct NewsFeedView: View {
             .init(id: 2373, name: "小互 AI"),
             .init(id: 19, name: "量子位")
         ]
-    }
-
-    private func sourceAvatarButton(
-        id: Int?,
-        name: String,
-        avatarURL: URL?,
-        isSelected: Bool,
-        rejectsUpscaledImages: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            VStack(spacing: 5) {
-                ZStack {
-                    if let id {
-                        AvatarView(
-                            url: avatarURL,
-                            name: name,
-                            size: 34,
-                            rejectsUpscaledImages: rejectsUpscaledImages
-                        )
-                            .id(id)
-                    } else {
-                        Circle()
-                            .fill(Color.secondary.opacity(0.10))
-                            .frame(width: 34, height: 34)
-                            .overlay {
-                                Image(systemName: "square.grid.2x2.fill")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(isSelected ? Color.blue : Color.secondary)
-                            }
-                    }
-                }
-                .overlay {
-                    Circle()
-                        .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 2)
-                        .padding(-2.5)
-                }
-
-                Text(name)
-                    .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
-                    .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-                    .lineLimit(1)
-                    .frame(width: 52)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("筛选来源：\(name)")
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private var flashFeedHeader: some View {
@@ -1732,12 +1617,13 @@ struct NewsFeedView: View {
         for source: FeedSource,
         topInset: CGFloat = FeedChromeLayout.headerHeight
     ) -> some View {
-        if source == model.source, model.isLoading {
+        if source == model.source ? model.isLoading || model.isSwitchingSource
+            : !model.hasLoadedFirstPage(for: source) {
             FeedTimelineLoadingView(topInset: topInset)
         } else {
             VStack {
                 if source == model.source, let error = model.errorMessage {
-                    ContentUnavailableView { Label("网络连接失败", systemImage: "wifi.exclamationmark") }
+                    ContentUnavailableView { Label("\(source.title)暂时无法更新", systemImage: "exclamationmark.triangle") }
                         description: { Text(error) }
                         actions: { Button("重新加载") { Task { await model.refresh() } } }
                 } else {
@@ -1765,39 +1651,12 @@ struct NewsFeedView: View {
     }
 
     private func selectSourceFromTap(_ source: FeedSource) {
-        guard source != model.source else { return }
         UISelectionFeedbackGenerator().selectionChanged()
-
-        guard !reduceMotion else {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                selectSource(source)
-                isSourceSelectorExpanded = false
-            }
-            return
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            selectSource(source)
         }
-
-        withAnimation(.easeOut(duration: FeedSourceTransitionPolicy.fadeOutDuration)) {
-            isSourceContentVisible = false
-            isSourceSelectorExpanded = false
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + FeedSourceTransitionPolicy.fadeOutDuration) {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                selectSource(source)
-            }
-
-            withAnimation(.easeInOut(duration: FeedSourceTransitionPolicy.fadeInDuration)) {
-                isSourceContentVisible = true
-            }
-        }
-    }
-
-    private func open(_ path: String) {
-        if let url = URL(string: path, relativeTo: ServerConfiguration.currentURL)?.absoluteURL { openURL(url) }
     }
 
 }
@@ -1843,10 +1702,42 @@ private struct FeedTimelineLoadingView: View {
     }
 }
 
+struct FeedPostSheetContent: View {
+    let post: Post
+    let model: NewsFeedViewModel?
+    var loadsStoredDetail = true
+
+    var body: some View {
+        NavigationStack {
+            if let source = FeedSource(rawValue: post.source ?? ""),
+               source == .weibo || source == .douyin || source == .baidu,
+               let link = post.linkURL {
+                EmbeddedWebPage(url: link, source: source)
+            } else {
+                PostDetailView(
+                    post: post,
+                    preloadedNewYorkTimesArticle: model?.preloadedNewYorkTimesArticle(for: post.id),
+                    rssAvatarURL: rssDirectoryAvatarURL(for: post, feeds: model?.rssFeeds ?? []),
+                    loadsStoredDetail: loadsStoredDetail
+                )
+            }
+        }
+    }
+}
+
+private func feedID(from source: String?) -> Int? {
+    guard let source, source.lowercased().hasPrefix("rss:") else { return nil }
+    return Int(source.dropFirst(4))
+}
+
+private func rssDirectoryAvatarURL(for post: Post, feeds: [RSSFeedSource]) -> URL? {
+    guard post.isRSS, let feedID = feedID(from: post.source) else { return nil }
+    return feeds.first { $0.id == feedID }?.preferredAvatarURL
+}
+
 private struct EmbeddedWebPage: View {
     let url: URL
     let source: FeedSource
-    let presentedAsSheet: Bool
     @StateObject private var model = EmbeddedWebViewModel()
     @State private var isShowingWeiboAccountMenu = false
     @Environment(\.dismiss) private var dismiss
@@ -1895,24 +1786,11 @@ private struct EmbeddedWebPage: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
-        .background(InteractivePopGestureEnabler())
         .overlay(alignment: .bottomTrailing) {
-            if presentedAsSheet {
-                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭网页详情")
-                    .padding(16)
-            }
+            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭网页详情")
+                .padding(16)
         }
         .toolbar {
-            if !presentedAsSheet {
-                ToolbarItem(placement: .principal) {
-                    HStack(spacing: 6) {
-                        hotTopicMark
-                        Text(source.hotTopicPageTitle)
-                            .font(.system(size: 16, weight: .semibold))
-                    }
-                    .accessibilityElement(children: .combine)
-                }
-            }
             if source == .weibo {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -1963,34 +1841,14 @@ private struct EmbeddedWebPage: View {
         .background(Color(uiColor: .systemBackground))
     }
 
-    @ViewBuilder private var hotTopicMark: some View {
-        if source == .baidu {
-            Image("BaiduMark")
-                .resizable()
-                .renderingMode(.original)
-                .scaledToFit()
-                .frame(width: 21, height: 21)
-                .accessibilityHidden(true)
-        } else {
-            Image(source.hotTopicMarkAssetName)
-                .resizable()
-                .renderingMode(.template)
-                .scaledToFit()
-                .foregroundStyle(source == .weibo ? Color.red : Color.primary)
-                .frame(width: 19, height: 19)
-                .accessibilityHidden(true)
-        }
-    }
-
     @ViewBuilder private var weiboAccountButtonLabel: some View {
         if let avatarURL = model.weiboAvatarURL {
-            AsyncImage(url: MediaURL.image(avatarURL.absoluteString) ?? avatarURL) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                Image(systemName: model.isAuthenticating ? "checkmark.circle.fill" : "person.crop.circle")
-            }
-            .frame(width: 30, height: 30)
-            .clipShape(Circle())
+            AvatarView(
+                url: avatarURL,
+                name: model.weiboDisplayName ?? "微博",
+                size: 30,
+                placeholderSymbol: model.isAuthenticating ? "checkmark.circle.fill" : "person.crop.circle"
+            )
             .overlay { Circle().stroke(.quaternary, lineWidth: 0.5) }
         } else if let initial = model.weiboAccountInitial {
             Text(initial)
@@ -2838,20 +2696,31 @@ private func isWeiboLoginURL(_ url: URL?) -> Bool {
 
 private final class FeedScrollPositionStore: ObservableObject {
     private var offsets: [FeedSource: CGPoint] = [:]
-    private var zhihuRowFrames: [Int: CGRect] = [:]
-    private(set) var zhihuAnchor: Int?
-    var isRestoringZhihu = false
+    private var rowsBelowTop: [FeedSource: [Int: Int]] = [:]
+    private var anchors: [FeedSource: Int] = [:]
+    private var restoringSources: Set<FeedSource> = []
 
-    func recordZhihuRow(_ id: Int, frame: CGRect) {
-        guard !isRestoringZhihu else { return }
-        zhihuRowFrames[id] = frame
-        if let first = zhihuRowFrames.filter({ $0.value.maxY > 0 })
-            .min(by: { $0.value.minY < $1.value.minY }) {
-            zhihuAnchor = first.key
+    func recordRow(_ id: Int, index: Int?, source: FeedSource) {
+        rowsBelowTop[source, default: [:]][id] = index
+        guard !restoringSources.contains(source) else { return }
+        updateAnchor(for: source)
+    }
+
+    private func updateAnchor(for source: FeedSource) {
+        if let first = rowsBelowTop[source]?.min(by: { $0.value < $1.value }) {
+            anchors[source] = first.key
         }
     }
 
-    func removeZhihuRow(_ id: Int) { zhihuRowFrames[id] = nil }
+    func removeRow(_ id: Int, source: FeedSource) { rowsBelowTop[source]?[id] = nil }
+    func anchor(for source: FeedSource) -> Int? { anchors[source] }
+    func setRestoring(_ restoring: Bool, source: FeedSource) {
+        if restoring { restoringSources.insert(source) }
+        else {
+            restoringSources.remove(source)
+            updateAnchor(for: source)
+        }
+    }
 
     func offset(for source: FeedSource) -> CGPoint? { offsets[source] }
     func save(_ offset: CGPoint, for source: FeedSource) { offsets[source] = offset }
@@ -3034,7 +2903,7 @@ private struct FeedChromeScrollModifier: ViewModifier {
 
         switch nextDirection {
         case .towardOlder where tracking.directionalTravel >= 28:
-            isAtTop = false
+            if isAtTop { isAtTop = false }
             setHidden(true)
             tracking.directionalTravel = 0
         case .towardNewer where tracking.directionalTravel >= 10:
@@ -3283,7 +3152,7 @@ private final class XAttributedTextBox {
     init(_ value: AttributedString) { self.value = value }
 }
 
-struct NewsCardView: View {
+struct NewsCardView: View, Equatable {
     @ObservedObject private var verificationStore = XAuthorVerificationStore.shared
     private static let xTimelineCache: NSCache<NSString, NSString> = {
         let cache = NSCache<NSString, NSString>()
@@ -3317,109 +3186,112 @@ struct NewsCardView: View {
         else { socialCard }
     }
 
+    static let xHorizontalInset: CGFloat = 18
+    var xTimelineWidth: CGFloat? = nil
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.post == rhs.post && lhs.xTimelineWidth == rhs.xTimelineWidth
+            && lhs.rssAvatarURL == rhs.rssAvatarURL && lhs.usesWeChatStyle == rhs.usesWeChatStyle
+            && lhs.isFeaturedBilibili == rhs.isFeaturedBilibili && lhs.isExpandedFlash == rhs.isExpandedFlash
+    }
+
     private var xCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let content = xTimelineContent
+        let width = xTimelineWidth ?? UIScreen.main.bounds.width - Self.xHorizontalInset * 2
+        let showsExpansion = !isXTextExpanded && XTimelineTextLayout.needsExpansion(content, width: width)
+        return VStack(alignment: .leading, spacing: 11) {
             if let attribution = post.xRepostAttributionText {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.2.squarepath")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text(attribution)
-                        .font(.system(size: 13, weight: .semibold))
-                        .lineLimit(1)
-                }
-                .foregroundStyle(.secondary)
-                .padding(.leading, 54)
-                .accessibilityElement(children: .combine)
+                Label(attribution, systemImage: "arrow.2.squarepath")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
 
-            HStack(alignment: .top, spacing: 10) {
-                AvatarView(
-                    url: post.avatarURL,
-                    name: post.authorName,
-                    size: 44,
-                    cornerRadius: xAvatarCornerRadius
-                )
+            xAuthorHeader
                 .contentShape(Rectangle())
                 .onTapGesture { onOpen?() }
+                .accessibilityIdentifier("feed-x-author-\(post.id)")
 
-                VStack(alignment: .leading, spacing: 5) {
-                    xAuthorHeader
+            if !content.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    xRichText(content)
+                        .font(.system(size: XTimelineTextLayout.fontSize))
+                        .lineSpacing(XTimelineTextLayout.lineSpacing)
+                        .lineLimit(showsExpansion ? XTimelineTextLayout.lineLimit : nil)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
                         .contentShape(Rectangle())
                         .onTapGesture { onOpen?() }
 
-                    VStack(alignment: .leading, spacing: 5) {
-                        xRichText(xTimelineContent)
-                            .font(.system(size: 15, weight: .regular))
-                            .lineSpacing(2)
-                            .multilineTextAlignment(.leading)
-                            .lineLimit(isLongXPost && !isXTextExpanded ? 9 : nil)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        if isLongXPost && !isXTextExpanded {
-                            Button(action: { isXTextExpanded = true }) {
-                                Text("显示更多")
-                                    .font(.system(size: 15, weight: .regular))
-                                    .foregroundStyle(.blue)
-                            }
+                    if showsExpansion {
+                        Button("显示更多") { isXTextExpanded = true }
+                            .font(.subheadline.weight(.medium))
                             .buttonStyle(.plain)
+                            .foregroundStyle(.tint)
                             .accessibilityLabel("展开完整帖子正文")
-                        }
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture { onOpen?() }
-
-                    if let reply = post.xReplyContext,
-                       let replyText = reply.displayText {
-                        XReplyContextCard(reply: reply, text: replyText, isTimeline: true)
-                            .contentShape(Rectangle())
-                            .onTapGesture { onOpen?() }
-                    }
-
-                    VStack(alignment: .leading, spacing: 0) {
-                        XFeedMediaView(post: post, onOpenQuote: onOpen)
-                        FeedEngagementRow(post: post, showsOnlyLikeAndBookmark: false, showsTimelineActions: true)
-                            .padding(.top, 6)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
+
+            if let reply = post.xReplyContext, let replyText = reply.displayText {
+                XReplyContextCard(reply: reply, text: replyText, isTimeline: true)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onOpen?() }
+            }
+
+            if post.images?.isEmpty == false || post.videos?.isEmpty == false || post.xQuotedPost != nil {
+                XFeedMediaView(post: post, timelineWidth: width, onOpenQuote: onOpen)
+            }
+
+            FeedEngagementRow(post: post, showsTimelineActions: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        // Report the complete intrinsic row height to the lazy stack, including
-        // bounded multiline text, rather than accepting a stale height proposal.
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 12)
-        .contentShape(Rectangle())
+        .padding(.horizontal, Self.xHorizontalInset)
+        .padding(.top, 15)
+        .padding(.bottom, 10)
         .accessibilityElement(children: .contain)
     }
 
     private var xAuthorHeader: some View {
-        HStack(spacing: 4) {
-            Text(post.authorName)
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .layoutPriority(3)
+        HStack(spacing: 10) {
+            AvatarView(
+                url: post.avatarURL,
+                name: post.authorName,
+                size: 38,
+                cornerRadius: xAvatarCornerRadius
+            )
 
-            if verificationStore.isVerified(handle: post.authorHandle, reported: post.user?.verified) {
-                Image(systemName: "checkmark.seal.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(xVerificationColor)
-                    .accessibilityLabel("已认证")
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 5) {
+                    Text(post.authorName)
+                        .font(.system(size: 16, weight: .semibold))
+                        .lineLimit(1)
+
+                    if verificationStore.isVerified(handle: post.authorHandle, reported: post.user?.verified) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(xVerificationColor)
+                            .accessibilityLabel("已认证")
+                    }
+                }
+                if let handle = post.authorHandle {
+                    Text(handle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
 
-            if let handle = post.authorHandle {
-                Text(handle)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
+            Spacer(minLength: 8)
+
             if let time = post.formattedTime {
-                Text("· \(time)").lineLimit(1)
+                Text(time)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
         }
-        .font(.system(size: 15))
-        .foregroundStyle(.secondary)
     }
 
     private var xTimelineContent: String {
@@ -3430,10 +3302,6 @@ struct NewsCardView: View {
         let value = XPostTextFormatter.timelineText(post.displayContent)
         Self.xTimelineCache.setObject(value as NSString, forKey: key, cost: value.utf8.count)
         return value
-    }
-
-    private var isLongXPost: Bool {
-        XTimelineTextLayout.needsExpansion(xTimelineContent, width: UIScreen.main.bounds.width - 78)
     }
 
     private func xRichText(_ value: String) -> Text {
@@ -3472,7 +3340,7 @@ struct NewsCardView: View {
         let usesOrganizationShape = type.contains("business")
             || type.contains("government")
             || type.contains("organization")
-        return usesOrganizationShape ? 10 : 22
+        return usesOrganizationShape ? 10 : 19
     }
 
     private var xueqiuCard: some View {
@@ -3491,19 +3359,6 @@ struct NewsCardView: View {
                     videoMaxHeight: 360
                 )
             }
-
-            HStack(spacing: 0) {
-                Label("分享", systemImage: "square.and.arrow.up")
-                Spacer()
-                xueqiuMetric("bubble.left", post.meta?.metrics?.replies)
-                Spacer()
-                xueqiuMetric("hand.thumbsup", post.meta?.metrics?.likes)
-                Spacer()
-                Image(systemName: "ellipsis")
-            }
-            .font(.system(size: 15.5))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 4)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
@@ -3520,6 +3375,7 @@ struct NewsCardView: View {
             HStack(spacing: 9) {
                 AvatarView(url: post.avatarURL, name: post.authorName, size: 32)
                 Text(post.authorName)
+                    .accessibilityIdentifier("feed-xueqiu-author-\(post.id)")
                     .font(.system(size: 15.5, weight: .medium))
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -3591,15 +3447,6 @@ struct NewsCardView: View {
                             cornerRadius: 7
                         )
                     }
-
-                    HStack(spacing: 4) {
-                        Text("相关讨论")
-                        if let replies = post.meta?.metrics?.replies, replies > 0 {
-                            Text(replies.formattedFeedCount)
-                        }
-                    }
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 13)
@@ -3608,13 +3455,6 @@ struct NewsCardView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func xueqiuMetric(_ icon: String, _ value: Int?) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon)
-            if let value, value > 0 { Text(value.formattedFeedCount) }
-        }
     }
 
     private func xueqiuRichText(_ value: String, links: [XueqiuTextLink] = []) -> Text {
@@ -3650,41 +3490,31 @@ struct NewsCardView: View {
     }
 
     private var truthCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Image("TruthMark")
-                    .resizable()
-                    .renderingMode(.original)
-                    .scaledToFill()
-                    .frame(width: 34, height: 34)
-                    .clipShape(Circle())
+        let hasImages = !post.imageURLs.isEmpty
+        let hasMedia = hasImages || !post.videoURLs.isEmpty || post.previewURL != nil
+        let isMediaPlaceholder = hasMedia && post.originalDisplayContent.wholeMatch(
+            of: #/\[(?:图片帖子: [1-9][0-9]*张图片|视频帖子: [1-9][0-9]*个视频|媒体帖子(?:: [1-9][0-9]*张图片, [1-9][0-9]*个视频)?)\]/#
+        ) != nil
 
-                HStack(spacing: 5) {
-                    Text("特朗普")
-                        .font(.system(size: 15.5, weight: .bold))
-                    Image(systemName: "checkmark.seal.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.red)
-                    if let time = post.formattedTime {
-                        Text(time)
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Spacer(minLength: 6)
-
+        return VStack(alignment: .leading, spacing: 8) {
+            if let time = post.formattedTime {
+                Text(time)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
             }
 
-            Text(post.truthFeedContent)
-                .font(.system(size: 15, weight: .regular))
-                .lineSpacing(3)
-                .lineLimit(post.imageURLs.isEmpty ? 3 : 2)
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if !isMediaPlaceholder {
+                TruthLocalTranslationView(post: post)
+                    .font(.system(size: 15, weight: .regular))
+                    .lineSpacing(3)
+                    .lineLimit(hasImages ? 2 : 3)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             PostMediaGrid(
                 post: post,
+                usesFeedSizedImages: true,
                 singleImageMaxHeight: 210,
                 singleImageContentMode: .fill,
                 multiImageHeight: 126,
@@ -3701,6 +3531,7 @@ struct NewsCardView: View {
     private var zhihuCard: some View {
         VStack(alignment: .leading, spacing: 9) {
             Text(post.zhihuQuestionTitle)
+                .accessibilityIdentifier("feed-zhihu-question-\(post.id)")
                 .font(.system(size: 17, weight: .semibold))
                 .lineSpacing(2)
                 .lineLimit(3)
@@ -3809,7 +3640,7 @@ struct NewsCardView: View {
                 .foregroundStyle((post.feedRank ?? 99) <= 3 ? .orange : .secondary)
                 .frame(width: 30)
             VStack(alignment: .leading, spacing: 3) {
-                Text(post.displayTitle).font(.subheadline.weight(.semibold)).lineLimit(2).multilineTextAlignment(.leading)
+                LocalTranslatedText(original: post.rssOriginalTitle ?? post.displayTitle, serverChinese: post.rssOriginalTitle == nil ? nil : post.displayTitle, enabled: post.isRSS).font(.subheadline.weight(.semibold)).lineLimit(2).multilineTextAlignment(.leading)
                 if post.source != FeedSource.douyin.rawValue,
                    let summary = post.displaySummary,
                    !summary.isEmpty {
@@ -4100,16 +3931,17 @@ struct NewsCardView: View {
     private var youtubeCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let cover = post.youtubeCoverURL {
+                let size = ImageLoader.youtubeCardCoverSize(screenWidth: UIScreen.main.bounds.width)
                 RemoteImage(
                     url: cover,
-                    targetWidth: max((UIScreen.main.bounds.width - 24) / 2, 120),
-                    height: max((UIScreen.main.bounds.width - 44) / 2, 120) * 9 / 16,
+                    targetWidth: size.width,
+                    height: size.height,
                     cornerRadius: 9,
                     contentMode: .fill
                 )
             }
 
-            Text(post.displayTitle)
+            LocalTranslatedText(original: post.rssOriginalTitle ?? post.displayTitle, serverChinese: post.rssOriginalTitle == nil ? nil : post.displayTitle, enabled: post.isRSS)
                 .font(.system(size: 15, weight: .semibold))
                 .lineSpacing(2)
                 .lineLimit(2)
@@ -4165,7 +3997,7 @@ struct NewsCardView: View {
                 }
             }
 
-            Text(post.displayTitle)
+            LocalTranslatedText(original: post.rssOriginalTitle ?? post.displayTitle, serverChinese: post.rssOriginalTitle == nil ? nil : post.displayTitle, enabled: post.isRSS)
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.primary)
                 .lineSpacing(1)
@@ -4173,7 +4005,7 @@ struct NewsCardView: View {
                 .multilineTextAlignment(.leading)
 
             if post.rssListContent != post.displayTitle {
-                Text(post.rssListContent)
+                LocalTranslatedText(original: post.rssListContent)
                     .font(.system(size: 14.5, weight: .regular))
                     .foregroundStyle(.secondary)
                     .lineSpacing(2)
@@ -4204,7 +4036,7 @@ struct NewsCardView: View {
                     }
                 }
 
-                Text(post.displayTitle)
+                LocalTranslatedText(original: post.rssOriginalTitle ?? post.displayTitle, serverChinese: post.rssOriginalTitle == nil ? nil : post.displayTitle, enabled: post.isRSS)
                     .font(.system(size: 18, weight: .bold))
                     .foregroundStyle(.primary)
                     .lineSpacing(3)
@@ -4214,9 +4046,10 @@ struct NewsCardView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if let previewURL = post.previewURL {
-                RemoteImage(url: previewURL, height: 86, cornerRadius: 10)
-                    .frame(width: 98, height: 86)
+            if let previewURL = post.weChatCardPreviewURL {
+                let size = ImageLoader.weChatCardCoverSize
+                RemoteImage(url: previewURL, targetWidth: size.width, height: size.height, cornerRadius: 10)
+                    .frame(width: size.width, height: size.height)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .padding(.top, 1)
             }
@@ -4232,13 +4065,13 @@ struct NewsCardView: View {
 
     private var newYorkTimesCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(post.displayTitle)
+            LocalTranslatedText(original: post.rssOriginalTitle ?? post.displayTitle, serverChinese: post.rssOriginalTitle == nil ? nil : post.displayTitle, enabled: post.isRSS)
                 .font(.system(size: 21, weight: .bold, design: .serif))
                 .lineSpacing(2)
                 .multilineTextAlignment(.leading)
 
             if post.newYorkTimesFeedExcerpt != post.displayTitle {
-                Text(post.newYorkTimesFeedExcerpt)
+                LocalTranslatedText(original: post.newYorkTimesFeedExcerpt)
                     .font(.system(size: 15, weight: .regular, design: .serif))
                     .foregroundStyle(.secondary)
                     .lineSpacing(4)

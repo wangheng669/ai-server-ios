@@ -62,7 +62,6 @@ struct CountryGDPDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var history: CountryGDPHistory?
     @State private var isLoading = true
-    @State private var loadFailed = false
     @State private var selectedYear: String?
 
     private var localizedName: String {
@@ -98,8 +97,7 @@ struct CountryGDPDetailView: View {
             } else if isLoading {
                 VStack(spacing: 20) {
                     hero(nil)
-                    ProgressView("正在读取历史趋势")
-                        .frame(maxWidth: .infinity)
+                    ContentLoadingPlaceholder(title: "正在读取历史趋势", layout: .chart)
                 }
                 .padding(InvestmentDesign.pageInset)
             } else {
@@ -108,7 +106,7 @@ struct CountryGDPDetailView: View {
                     ContentUnavailableView {
                         Label("历史趋势暂不可用", systemImage: "chart.xyaxis.line")
                     } description: {
-                        Text("服务器未返回该国家的历年 GDP 数据")
+                        Text("暂时无法读取历史数据，请稍后重试")
                     } actions: {
                         Button("重新加载") { Task { await load() } }
                             .buttonStyle(.borderedProminent)
@@ -123,27 +121,8 @@ struct CountryGDPDetailView: View {
             DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭国家 GDP 详情")
                 .padding(16)
         }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            detailHeader
-        }
         .toolbar(.hidden, for: .navigationBar)
         .task { await load() }
-    }
-
-    private var detailHeader: some View {
-        HStack {
-            Text("国家 GDP")
-                .font(.headline)
-            Spacer()
-        }
-        .padding(.horizontal, InvestmentDesign.pageInset)
-        .frame(height: 50)
-        .background(InvestmentDesign.surface)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(InvestmentDesign.divider)
-                .frame(height: 0.5)
-        }
     }
 
     private func hero(_ history: CountryGDPHistory?) -> some View {
@@ -317,7 +296,7 @@ struct CountryGDPDetailView: View {
                     .symbolSize(48)
                 }
             }
-            .chartYScale(domain: 0...yMaximum)
+            .chartYScale(domain: 0...yMaximum, range: .plotDimension(padding: 6))
             .chartXScale(range: .plotDimension(startPadding: 18, endPadding: 18))
             .chartYAxis {
                 AxisMarks(position: .leading, values: yTicks) { value in
@@ -366,18 +345,20 @@ struct CountryGDPDetailView: View {
         geometry: GeometryProxy,
         history: CountryGDPHistory
     ) {
-        guard !history.points.isEmpty,
-              let plotFrame = proxy.plotFrame else { return }
+        guard let firstYear = history.points.first?.year,
+              let lastYear = history.points.last?.year,
+              let plotFrame = proxy.plotFrame,
+              let firstPointX = proxy.position(forX: String(firstYear)),
+              let lastPointX = proxy.position(forX: String(lastYear)) else { return }
 
         let frame = geometry[plotFrame]
         guard frame.width > 0 else { return }
-        let relativeX = min(max(locationX - frame.minX, 0), frame.width)
-        let progress = relativeX / frame.width
-        guard let index = CountryGDPChartInteraction.nearestIndex(
-            progress: progress,
-            count: history.points.count
-        ) else { return }
-        selectedYear = String(history.points[index].year)
+        let plotX = CountryGDPChartInteraction.plotX(
+            locationX: locationX, plotOriginX: frame.minX, firstPointX: firstPointX, lastPointX: lastPointX
+        )
+        if let year = proxy.value(atX: plotX, as: String.self), year != selectedYear {
+            selectedYear = year
+        }
     }
 
     private func chartMaximum(_ history: CountryGDPHistory) -> Double {
@@ -449,12 +430,13 @@ struct CountryGDPDetailView: View {
     @MainActor
     private func load() async {
         if history == nil { isLoading = true }
-        loadFailed = false
         defer { isLoading = false }
         do {
-            history = try await CountryGDPService().history(countryCode: route.countryCode)
+            let value = try await CountryGDPService().history(countryCode: route.countryCode)
+            guard !Task.isCancelled else { return }
+            history = value
         } catch {
-            if history == nil { loadFailed = true }
+            // An empty history uses the sheet's retry state.
         }
     }
 }
@@ -469,9 +451,9 @@ extension CountryGDPFormat {
 }
 
 enum CountryGDPChartInteraction {
-    static func nearestIndex(progress: CGFloat, count: Int) -> Int? {
-        guard count > 0 else { return nil }
-        let clampedProgress = min(max(progress, 0), 1)
-        return Int((clampedProgress * CGFloat(count - 1)).rounded())
+    static func plotX(locationX: CGFloat, plotOriginX: CGFloat, firstPointX: CGFloat, lastPointX: CGFloat) -> CGFloat {
+        let lower = min(firstPointX, lastPointX)
+        let upper = max(firstPointX, lastPointX)
+        return min(max(locationX - plotOriginX, lower), upper)
     }
 }

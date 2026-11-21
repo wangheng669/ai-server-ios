@@ -70,20 +70,58 @@ struct DetailSheetCloseButton: View {
 
     var body: some View {
         Button(action: action) {
-            Label("关闭", systemImage: "xmark")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 16)
-                .frame(height: 44)
-                .background(.regularMaterial, in: Capsule())
-                .overlay {
-                    Capsule()
-                        .stroke(Color.primary.opacity(0.10), lineWidth: 0.5)
-                }
-                .shadow(color: .black.opacity(0.14), radius: 12, y: 5)
+            ZStack {
+                Circle()
+                    .fill(Color(uiColor: .tertiarySystemFill))
+                    .frame(width: 32, height: 32)
+                Image(systemName: "xmark")
+                    .symbolRenderingMode(.monochrome)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color(uiColor: .label))
+            }
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+/// Compact modal actions for existing control rows and floating corners.
+struct DetailSheetControls<Actions: View>: View {
+    var closeLabel = "关闭详情"
+    var closeIdentifier = "detail-sheet-close"
+    let onClose: () -> Void
+    @ViewBuilder var actions: Actions
+
+    var body: some View {
+        HStack(spacing: 12) {
+            actions
+                .buttonStyle(.plain)
+                .foregroundStyle(.primary)
+            DetailSheetCloseButton(action: onClose, accessibilityLabel: closeLabel)
+                .accessibilityIdentifier(closeIdentifier)
+        }
+        .padding(4)
+        .background(.regularMaterial, in: Capsule())
+    }
+}
+
+extension DetailSheetControls where Actions == EmptyView {
+    init(closeLabel: String = "关闭详情", closeIdentifier: String = "detail-sheet-close", onClose: @escaping () -> Void) {
+        self.closeLabel = closeLabel
+        self.closeIdentifier = closeIdentifier
+        self.onClose = onClose
+        self.actions = EmptyView()
+    }
+}
+
+extension View {
+    func readingSheetPresentation() -> some View {
+        appPresentationDetents([.large])
+            .appPresentationCornerRadius(28)
+            .appPresentationScrollsWithoutExpanding()
+            .appPresentationDragIndicator()
     }
 }
 
@@ -94,8 +132,6 @@ struct InAppBrowserDestination: Identifiable, Equatable {
 
 struct InAppBrowserSheet: View {
     let url: URL
-    var showsTitleHeader = true
-    var onDismiss: (() -> Void)?
     @State private var title = ""
     @State private var englishArticle: EnglishWebArticleCandidate?
     @State private var translatedArticle: TranslatedWebArticle?
@@ -110,23 +146,6 @@ struct InAppBrowserSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if showsTitleHeader && !title.isEmpty {
-                Text(title)
-                    .font(.system(size: 16, weight: .semibold))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 12)
-                    .contentShape(Rectangle())
-                    .gesture(
-                        DragGesture(minimumDistance: 20)
-                            .onEnded { value in
-                                if value.translation.height > 80 { close() }
-                            }
-                    )
-                Divider().opacity(0.55)
-            }
             if ExternalAccessPolicy.requiresServerRelay(url) {
                 ServerArticleReaderView(url: url) { title = $0 }
             } else {
@@ -148,7 +167,7 @@ struct InAppBrowserSheet: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(uiColor: .systemBackground).ignoresSafeArea())
         .overlay(alignment: .bottomTrailing) {
-            DetailSheetCloseButton(action: close, accessibilityLabel: "关闭网页详情")
+            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭网页详情")
                 .padding(16)
         }
         .overlay(alignment: .bottomLeading) {
@@ -156,7 +175,7 @@ struct InAppBrowserSheet: View {
                 .padding(16)
         }
         .accessibilityIdentifier("in-app-browser")
-        .accessibilityAction(.escape) { close() }
+        .accessibilityAction(.escape) { dismiss() }
         .task(id: englishArticle?.identity) {
             guard let englishArticle else { return }
             await translate(englishArticle)
@@ -283,14 +302,6 @@ struct InAppBrowserSheet: View {
         )
         title = translatedArticle?.title ?? title
         showsOriginal = false
-    }
-
-    private func close() {
-        if let onDismiss {
-            onDismiss()
-        } else {
-            dismiss()
-        }
     }
 }
 
@@ -488,7 +499,7 @@ struct ServerArticleReaderView: View {
                     Button("重试") { Task { await load() } }
                 }
             } else {
-                ProgressView("正在通过服务器读取正文…")
+                ContentLoadingPlaceholder(title: "正在载入正文", layout: .article, rowCount: 4)
             }
         }
         .background(Color(uiColor: .systemBackground))
@@ -600,15 +611,14 @@ private struct InAppBrowserCoverModifier: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if horizontalSizeClass == .regular {
-            content.fullScreenCover(item: $destination) { destination in
+            content.appFullScreenCover(item: $destination) { destination in
                 InAppBrowserSheet(url: destination.url)
             }
         } else {
-            content.sheet(item: $destination) { destination in
+            content.appSheet(item: $destination) { destination in
                 InAppBrowserSheet(url: destination.url)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.hidden)
-                .presentationCornerRadius(28)
+                .appPresentationDetents([.large])
+                .appPresentationCornerRadius(28)
             }
         }
     }
@@ -891,15 +901,9 @@ struct AvatarView: View {
     var assetName: String? = nil
     var cornerRadius: CGFloat? = nil
     var rejectsUpscaledImages = false
+    var placeholderSymbol: String? = nil
     var loadingPolicy: LoadingPolicy = .remote
-    @State private var image: UIImage?
-
-    private var displayedImage: UIImage? {
-        switch loadingPolicy {
-        case .remote: image
-        case let .prepared(preparedImage): preparedImage
-        }
-    }
+    @State private var loadedAvatar: (request: ImageLoader.Request, image: UIImage)?
 
     private var resolvedCornerRadius: CGFloat { cornerRadius ?? size / 2 }
     private var imageBackground: Color {
@@ -909,10 +913,21 @@ struct AvatarView: View {
     }
 
     var body: some View {
-        Group {
+        let request: ImageLoader.Request?
+        let image: UIImage?
+        switch loadingPolicy {
+        case .remote:
+            request = assetName == nil ? ImageLoader.avatarRequest(url, size: size) : nil
+            image = request.flatMap(avatarImage(for:))
+        case .prepared(let preparedImage):
+            request = nil
+            image = preparedImage
+        }
+
+        return Group {
             if let assetName { Image(assetName).resizable().scaledToFill() }
-            else if let displayedImage {
-                Image(uiImage: displayedImage)
+            else if let image {
+                Image(uiImage: image)
                     .resizable()
                     .interpolation(.high)
                     .antialiased(true)
@@ -920,29 +935,39 @@ struct AvatarView: View {
             }
             else {
                 RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous)
-                    .fill(Color.blue.opacity(0.11))
-                    .overlay { Text(name.prefix(1)).font(.caption.bold()).foregroundStyle(.blue) }
+                    .fill(placeholderSymbol == nil ? Color.blue.opacity(0.11) : Color(uiColor: .secondarySystemBackground))
+                    .overlay {
+                        if let placeholderSymbol {
+                            Image(systemName: placeholderSymbol)
+                                .font(.system(size: size * 0.42, weight: .medium))
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text(name.prefix(1)).font(.caption.bold()).foregroundStyle(.blue)
+                        }
+                    }
             }
         }
         .frame(width: size, height: size)
         .background(imageBackground)
         .clipShape(RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous))
-        .task(id: url) {
-            guard assetName == nil, case .remote = loadingPolicy else { return }
-            let loaded = await ImageLoader.load(
-                url,
-                targetSize: CGSize(width: size, height: size),
-                prefersCompactXAvatar: true
-            )
-            guard !Task.isCancelled else { return }
-            if rejectsUpscaledImages,
-               let cgImage = loaded?.cgImage,
-               min(cgImage.width, cgImage.height) < Int(size * UIScreen.main.scale * 0.9) {
-                image = nil
-            } else {
-                image = loaded
-            }
+        .task(id: request) {
+            guard let request,
+                  let image = await ImageLoader.shared.image(for: request),
+                  !Task.isCancelled else { return }
+            loadedAvatar = (request, image)
         }
+    }
+
+    private func avatarImage(for request: ImageLoader.Request) -> UIImage? {
+        let image = loadedAvatar?.request == request
+            ? loadedAvatar?.image
+            : ImageLoader.shared.cachedImage(for: request)
+        if rejectsUpscaledImages,
+           let cgImage = image?.cgImage,
+           min(cgImage.width, cgImage.height) < Int(size * request.scale * 0.9) {
+            return nil
+        }
+        return image
     }
 }
 
@@ -957,19 +982,31 @@ struct RemoteImage: View {
     var cornerRadius: CGFloat = 0
     var contentMode: ContentMode = .fill
     var onImageLoaded: ((UIImage) -> Void)? = nil
+    var usesTimelinePlaceholder = false
+    @State private var result: (request: ImageLoader.Request, image: UIImage?)?
     @Environment(\.preparedReadingMedia) private var preparedReadingMedia
-    @State private var image: UIImage?
-    @State private var finished = false
 
     var body: some View {
+        let screen = UIScreen.main
+        let size = CGSize(width: targetWidth ?? screen.bounds.width, height: height ?? screen.bounds.height)
+        let request = ImageLoader.request(for: url, targetSize: size, scale: screen.scale)
+        let image = if let preparedReadingMedia {
+            preparedReadingMedia[url]
+        } else {
+            (result?.request == request ? result?.image : nil) ?? ImageLoader.shared.cachedImage(for: request)
+        }
         ZStack {
-            Color.clear
-            if let image = (preparedReadingMedia == nil ? image : preparedReadingMedia?[url]) {
+            usesTimelinePlaceholder ? Color(uiColor: .secondarySystemBackground) : Color.clear
+            if let image {
                 Image(uiImage: image)
                     .resizable()
                     .aspectRatio(contentMode: contentMode)
-            } else if preparedReadingMedia != nil || finished {
+            } else if preparedReadingMedia != nil || result?.request == request {
                 Image(systemName: "photo").foregroundStyle(.secondary)
+                    .accessibilityLabel("图片加载失败")
+            } else if usesTimelinePlaceholder {
+                Image(systemName: "photo").foregroundStyle(.tertiary)
+                    .accessibilityLabel("图片加载中")
             } else {
                 ProgressView().foregroundStyle(.secondary)
             }
@@ -981,21 +1018,12 @@ struct RemoteImage: View {
             transaction.animation = nil
             transaction.disablesAnimations = true
         }
-        .task(id: url) {
+        .task(id: request) {
             guard preparedReadingMedia == nil else { return }
-            finished = false
-            let targetHeight = height ?? UIScreen.main.bounds.height
-            let loadedImage = await ImageLoader.load(
-                url,
-                targetSize: CGSize(
-                    width: targetWidth ?? UIScreen.main.bounds.width,
-                    height: targetHeight
-                )
-            )
+            let loadedImage = await ImageLoader.shared.image(for: request)
             guard !Task.isCancelled else { return }
-            image = loadedImage
+            result = (request, loadedImage)
             if let loadedImage { onImageLoaded?(loadedImage) }
-            finished = true
         }
     }
 
@@ -1200,6 +1228,24 @@ private extension NSString {
 actor ImageLoader {
     static let shared = ImageLoader()
 
+    struct Request: Hashable, Sendable {
+        let url: URL
+        let pixelLimit: CGFloat?
+        let scale: CGFloat
+        let isAvatar: Bool
+
+        init(url: URL, pixelLimit: CGFloat?, scale: CGFloat, isAvatar: Bool = false) {
+            self.url = url
+            self.pixelLimit = pixelLimit
+            self.scale = scale
+            self.isAvatar = isAvatar
+        }
+
+        fileprivate var cacheKey: String {
+            "\(url.absoluteString)|\(Int(pixelLimit ?? 0))|\(scale)|\(isAvatar)"
+        }
+    }
+
     private struct Download {
         let id: UUID
         let task: Task<Data?, Never>
@@ -1212,8 +1258,11 @@ actor ImageLoader {
         let prefersCompactXAvatar: Bool
     }
 
-    private let cache = NSCache<NSString, UIImage>()
+    // NSCache synchronizes its own access, so views can read decoded images during rendering.
+    nonisolated(unsafe) private let cache = NSCache<NSString, UIImage>()
+    nonisolated(unsafe) private let avatarCache = NSCache<NSString, UIImage>()
     private let dataCache = NSCache<NSURL, NSData>()
+    private let avatarDataCache = NSCache<NSURL, NSData>()
     private var downloads: [URL: Download] = [:]
     private var imageTasks: [String: Task<UIImage?, Never>] = [:]
 
@@ -1223,78 +1272,98 @@ actor ImageLoader {
         self.imageDataLoader = imageDataLoader ?? { await Self.download($0) }
         cache.totalCostLimit = 48 * 1024 * 1024
         cache.countLimit = 120
+        avatarCache.totalCostLimit = 24 * 1024 * 1024
+        avatarCache.countLimit = 200
         dataCache.totalCostLimit = 12 * 1024 * 1024
         dataCache.countLimit = 80
+        avatarDataCache.totalCostLimit = 4 * 1024 * 1024
+        avatarDataCache.countLimit = 120
     }
 
     func removeCachedImages() {
         cache.removeAllObjects()
+        avatarCache.removeAllObjects()
         dataCache.removeAllObjects()
+        avatarDataCache.removeAllObjects()
     }
 
     static func load(
         _ url: URL?,
-        targetSize: CGSize? = nil,
-        prefersCompactXAvatar: Bool = false
+        targetSize: CGSize? = nil
     ) async -> UIImage? {
         guard let url else { return nil }
-        let candidateURLs = prefersCompactXAvatar
-            ? compactAvatarCandidateURLs(url)
-            : avatarCandidateURLs(url)
-        for sourceURL in candidateURLs {
-            let relayedURL = MediaURL.image(sourceURL.absoluteString) ?? sourceURL
-            if let image = await shared.image(
-                for: relayedURL,
-                targetSize: targetSize,
-                scale: UIScreen.main.scale
-            ) {
-                return image
-            }
-        }
-        return nil
+        return await shared.image(for: request(for: url, targetSize: targetSize, scale: UIScreen.main.scale))
     }
 
-    static func prefetchFeedImages(for posts: [Post]) async {
-        let visiblePosts = Array(posts.prefix(6))
-        guard !visiblePosts.isEmpty else { return }
+    static func request(for url: URL, targetSize: CGSize?, scale: CGFloat) -> Request {
+        let source = highResolutionAvatarURL(sourceImageURL(from: url))
+        let relay = MediaURL.image(source.absoluteString) ?? source
+        // A timeline rendition is already bounded. Prewarming and every card layout
+        // can share one decoded image, including while the download is in flight.
+        let limit = MediaURL.feedPhotoSize(for: source)?.maxPixels ?? cachePixelLimit(targetSize: targetSize, scale: scale)
+        return Request(url: relay, pixelLimit: limit, scale: scale)
+    }
 
-        let screenWidth = await MainActor.run { UIScreen.main.bounds.width }
-        var requests: [PrefetchRequest] = []
+    @MainActor
+    static func avatarRequest(_ url: URL?, size: CGFloat) -> Request? {
+        guard let url, let source = compactAvatarCandidateURLs(url).first else { return nil }
+        let scale = UIScreen.main.scale
+        let targetSize = CGSize(width: size, height: size)
+        // Standard avatar sizes share a decoded thumbnail up to the compact X image size.
+        let pixelLimit = size * scale <= 200 ? 200 : cachePixelLimit(targetSize: targetSize, scale: scale)
+        return Request(url: MediaURL.image(source.absoluteString) ?? source, pixelLimit: pixelLimit, scale: scale, isAvatar: true)
+    }
 
-        for post in visiblePosts {
-            if let avatarURL = post.avatarURL {
-                requests.append(.init(
-                    url: avatarURL,
-                    width: 44,
-                    height: 44,
-                    prefersCompactXAvatar: true
-                ))
-            }
-            if let quoteAvatarURL = post.xQuotedPost?.author?.profileImageURL.flatMap(URL.init(string:)) {
-                requests.append(.init(
-                    url: quoteAvatarURL,
-                    width: 28,
-                    height: 28,
-                    prefersCompactXAvatar: true
-                ))
-            }
+    static func youtubeCardCoverSize(screenWidth: CGFloat) -> CGSize {
+        CGSize(width: max((screenWidth - 24) / 2, 120), height: max((screenWidth - 44) / 2, 120) * 9 / 16)
+    }
+
+    static let weChatCardCoverSize = CGSize(width: 98, height: 86)
+
+    static func prefetchFeedImages(for posts: [Post], source: FeedSource) async {
+        if source == .x {
+            await prefetchXTimelineImages(for: posts)
+            return
         }
 
-        for post in visiblePosts.prefix(4) {
-            let mediaURL = post.sourceName == "X"
-                ? post.feedImageURLs.first ?? post.previewURL
-                : post.previewURL
-            if let mediaURL {
+        let visiblePosts = posts.prefix(12)
+        guard !visiblePosts.isEmpty else { return }
+
+        var requests: [PrefetchRequest] = []
+        let authors = visiblePosts.compactMap { post in
+            post.isRSS ? post.rssCardAvatarURL : post.zhihuAnswerAvatarURL
+        }
+        let quotedAuthors = visiblePosts.compactMap { $0.xQuotedPost?.author?.profileImageURL.flatMap(URL.init(string:)) }
+
+        async let avatarWarmup: Void = prefetchAvatars(authors + quotedAuthors)
+        let screenWidth = await MainActor.run { UIScreen.main.bounds.width }
+
+        let socialTimeline = visiblePosts.first.map { $0.source == "x" || $0.source == "truth" } ?? false
+        for post in visiblePosts.prefix(socialTimeline ? 12 : 4) {
+            guard requests.count < 8 else { break }
+            let mediaURLs: [URL]
+            var targetSize = CGSize(width: screenWidth, height: 260)
+            if source == .youtube {
+                mediaURLs = [post.youtubeCoverURL].compactMap { $0 }
+                targetSize = youtubeCardCoverSize(screenWidth: screenWidth)
+            } else if source == .wechat {
+                mediaURLs = [post.weChatCardPreviewURL].compactMap { $0 }
+                targetSize = weChatCardCoverSize
+            } else if socialTimeline, post.videoURLs.isEmpty {
+                mediaURLs = Array(post.feedImageURLs.prefix(4))
+            } else {
+                mediaURLs = [post.source == "x" ? post.xFeedVideoPoster : post.previewURL].compactMap { $0 }
+            }
+            for mediaURL in mediaURLs.prefix(8 - requests.count) {
                 requests.append(.init(
                     url: mediaURL,
-                    width: screenWidth,
-                    height: 260,
+                    width: targetSize.width,
+                    height: targetSize.height,
                     prefersCompactXAvatar: false
                 ))
             }
-            if let quoteImageURL = post.xQuotedPost?.media?
-                .first(where: { !$0.isVideo })?
-                .feedDisplayURL {
+            let quoteURLs = (post.xQuotedPost?.media ?? []).compactMap(\.feedDisplayURL)
+            for quoteImageURL in quoteURLs.prefix(8 - requests.count) {
                 requests.append(.init(
                     url: quoteImageURL,
                     width: max(screenWidth - 102, 220),
@@ -1307,35 +1376,40 @@ actor ImageLoader {
         var seen = Set<URL>()
         let uniqueRequests = requests.filter { seen.insert($0.url).inserted }
         await prefetch(uniqueRequests, maximumConcurrentLoads: 4)
+        await avatarWarmup
     }
 
-    struct Request: Sendable {
-        let url: URL
-        let pixelLimit: CGFloat?
-        let scale: CGFloat
+    static func prefetchXTimelineImages(for posts: [Post]) async {
+        let screenWidth = await MainActor.run { UIScreen.main.bounds.width }
+        var requests: [PrefetchRequest] = []
+        for post in posts.prefix(4) {
+            let media = post.videos?.isEmpty == false
+                ? [post.xFeedVideoPoster].compactMap { $0 }
+                : Array(post.feedImageURLs.prefix(4))
+            let quoteMedia = post.xQuotedPost?.media?.compactMap(\.feedDisplayURL).prefix(2)
+            for url in media {
+                requests.append(.init(url: url, width: screenWidth, height: 280, prefersCompactXAvatar: false))
+            }
+            if let avatar = post.avatarURL {
+                requests.append(.init(url: avatar, width: 38, height: 38, prefersCompactXAvatar: true))
+            }
+            for url in quoteMedia ?? [] {
+                requests.append(.init(url: url, width: screenWidth, height: 240, prefersCompactXAvatar: false))
+            }
+        }
+        var seen = Set<URL>()
+        await prefetch(requests.filter { seen.insert($0.url).inserted }, maximumConcurrentLoads: 4)
     }
 
-    static func request(for url: URL, targetSize: CGSize?, scale: CGFloat) -> Request {
-        let source = highResolutionAvatarURL(sourceImageURL(from: url))
-        return Request(
-            url: MediaURL.image(source.absoluteString) ?? source,
-            pixelLimit: cachePixelLimit(targetSize: targetSize, scale: scale),
-            scale: scale
-        )
+    static func prefetchAvatars(_ urls: [URL], maximumCount: Int = 12) async {
+        var seen = Set<URL>()
+        let requests = urls.filter { seen.insert($0).inserted }.prefix(maximumCount).map {
+            PrefetchRequest(url: $0, width: 44, height: 44, prefersCompactXAvatar: true)
+        }
+        await prefetch(requests, maximumConcurrentLoads: 4)
     }
 
-    @MainActor
-    static func avatarRequest(_ url: URL?, size: CGFloat) -> Request? {
-        guard let url, let source = compactAvatarCandidateURLs(url).first else { return nil }
-        let scale = UIScreen.main.scale
-        let pixelLimit = size * scale <= 200 ? 200 : cachePixelLimit(targetSize: CGSize(width: size, height: size), scale: scale)
-        return Request(
-            url: MediaURL.image(source.absoluteString) ?? source,
-            pixelLimit: pixelLimit,
-            scale: scale
-        )
-    }
-
+    /// Finishes the initial reading snapshot even if a remote image is slow.
     static func prepareReadingImages<Key: Hashable & Sendable>(
         _ requests: [(Key, Request)]
     ) async -> [Key: UIImage] {
@@ -1380,10 +1454,6 @@ actor ImageLoader {
         }
     }
 
-    static func avatarCandidateURLs(_ url: URL) -> [URL] {
-        [highResolutionAvatarURL(sourceImageURL(from: url))]
-    }
-
     static func compactAvatarCandidateURLs(_ url: URL) -> [URL] {
         let sourceURL = sourceImageURL(from: url)
         let upgradedURL = highResolutionAvatarURL(sourceURL)
@@ -1426,19 +1496,21 @@ actor ImageLoader {
     }
 
     func image(for url: URL, targetSize: CGSize?, scale: CGFloat) async -> UIImage? {
-        let pixelLimit = Self.cachePixelLimit(targetSize: targetSize, scale: scale)
-        return await image(for: Request(url: url, pixelLimit: pixelLimit, scale: scale))
+        let request = Request(url: url, pixelLimit: Self.cachePixelLimit(targetSize: targetSize, scale: scale), scale: scale)
+        return await image(for: request)
     }
 
-    private func image(for request: Request) async -> UIImage? {
-        let url = request.url
-        let pixelLimit = request.pixelLimit
-        let key = "\(url.absoluteString)|\(Int(pixelLimit ?? 0))"
-        let cacheKey = key as NSString
-        if let cached = cache.object(forKey: cacheKey) { return cached }
+    nonisolated func cachedImage(for request: Request) -> UIImage? {
+        let decodedCache = request.isAvatar ? avatarCache : cache
+        return decodedCache.object(forKey: request.cacheKey as NSString)
+    }
+
+    func image(for request: Request) async -> UIImage? {
+        if let cached = cachedImage(for: request) { return cached }
+        let key = request.cacheKey
         if let existing = imageTasks[key] { return await existing.value }
 
-        let task = Task { await self.loadImage(for: url, pixelLimit: pixelLimit, scale: request.scale, cacheKey: cacheKey) }
+        let task = Task { await self.loadImage(for: request) }
         imageTasks[key] = task
         let image = await task.value
         imageTasks[key] = nil
@@ -1453,16 +1525,20 @@ actor ImageLoader {
         return ceil(pixels / 128) * 128
     }
 
-    private func loadImage(for url: URL, pixelLimit: CGFloat?, scale: CGFloat, cacheKey: NSString) async -> UIImage? {
+    private func loadImage(for request: Request) async -> UIImage? {
+        let url = request.url
+        let rawCache = request.isAvatar ? avatarDataCache : dataCache
+        let diskCache = request.isAvatar ? ImageDiskCache.avatars : ImageDiskCache.shared
+        let decodedCache = request.isAvatar ? avatarCache : cache
         let data: Data?
         var downloadedData = false
         var loadedFromDisk = false
-        if let cachedData = dataCache.object(forKey: url as NSURL) {
+        if let cachedData = rawCache.object(forKey: url as NSURL) {
             data = cachedData as Data
-        } else if let cachedData = await ImageDiskCache.shared.data(for: url) {
+        } else if let cachedData = await diskCache.data(for: url) {
             data = cachedData
             loadedFromDisk = true
-            dataCache.setObject(cachedData as NSData, forKey: url as NSURL, cost: cachedData.count)
+            rawCache.setObject(cachedData as NSData, forKey: url as NSURL, cost: cachedData.count)
         } else {
             let download: Download
             if let existing = downloads[url] {
@@ -1477,7 +1553,7 @@ actor ImageLoader {
             if downloads[url]?.id == download.id { downloads[url] = nil }
             if let data {
                 downloadedData = true
-                dataCache.setObject(data as NSData, forKey: url as NSURL, cost: data.count)
+                rawCache.setObject(data as NSData, forKey: url as NSURL, cost: data.count)
             }
         }
 
@@ -1485,21 +1561,21 @@ actor ImageLoader {
 
         // Visible cells await this work; do not seed ImageIO's worker queues at Utility QoS.
         let decodedImage = await Task.detached(priority: .userInitiated) {
-            Self.decode(data, pixelLimit: pixelLimit, scale: scale)
+            Self.decode(data, pixelLimit: request.pixelLimit, scale: request.scale)
         }.value
         guard let decodedImage else {
+            rawCache.removeObject(forKey: url as NSURL)
             if loadedFromDisk {
-                dataCache.removeObject(forKey: url as NSURL)
-                await ImageDiskCache.shared.removeData(for: url)
-                return await loadImage(for: url, pixelLimit: pixelLimit, scale: scale, cacheKey: cacheKey)
+                await diskCache.removeData(for: url)
+                return await loadImage(for: request)
             }
             return nil
         }
-        let cost = max(1, decodedImage.cgImage.map { $0.bytesPerRow * $0.height } ?? Int(decodedImage.size.width * decodedImage.size.height * scale * scale * 4))
-        cache.setObject(decodedImage, forKey: cacheKey, cost: cost)
+        let cost = max(1, decodedImage.cgImage.map { $0.bytesPerRow * $0.height } ?? Int(decodedImage.size.width * decodedImage.size.height * request.scale * request.scale * 4))
+        decodedCache.setObject(decodedImage, forKey: request.cacheKey as NSString, cost: cost)
         if downloadedData {
             Task(priority: .utility) {
-                await ImageDiskCache.shared.store(data, for: url)
+                await diskCache.store(data, for: url)
             }
         }
         return decodedImage
@@ -1525,11 +1601,12 @@ actor ImageLoader {
     }
 
     private static func load(_ request: PrefetchRequest) async {
-        _ = await load(
-            request.url,
-            targetSize: CGSize(width: request.width, height: request.height),
-            prefersCompactXAvatar: request.prefersCompactXAvatar
-        )
+        if request.prefersCompactXAvatar {
+            guard let avatar = await avatarRequest(request.url, size: request.width) else { return }
+            _ = await shared.image(for: avatar)
+        } else {
+            _ = await load(request.url, targetSize: CGSize(width: request.width, height: request.height))
+        }
     }
 
     private static func download(_ url: URL) async -> Data? {
@@ -1568,9 +1645,14 @@ actor ImageLoader {
 
 actor ImageDiskCache {
     static let shared = ImageDiskCache(
-        directory: ImageDiskCache.defaultDirectory,
+        directory: ImageDiskCache.directory(named: "FeedImageCache"),
         maxBytes: 256 * 1024 * 1024,
         maxFileCount: 1_200
+    )
+    static let avatars = ImageDiskCache(
+        directory: ImageDiskCache.directory(named: "AvatarCache"),
+        maxBytes: 64 * 1024 * 1024,
+        maxFileCount: 1_800
     )
 
     private let directory: URL
@@ -1578,6 +1660,7 @@ actor ImageDiskCache {
     private let maxFileCount: Int
     private var isPrepared = false
     private var writesSinceTrim = 0
+    private var trimTask: Task<Void, Never>?
 
     init(directory: URL, maxBytes: Int, maxFileCount: Int) {
         self.directory = directory
@@ -1607,7 +1690,7 @@ actor ImageDiskCache {
             try? mutableFileURL.setResourceValues(resourceValues)
             writesSinceTrim += 1
             if writesSinceTrim >= 24 {
-                trim()
+                scheduleTrim()
             }
         } catch {
             try? FileManager.default.removeItem(at: fileURL)
@@ -1621,6 +1704,8 @@ actor ImageDiskCache {
 
     func trim() {
         prepareIfNeeded()
+        trimTask?.cancel()
+        trimTask = nil
         writesSinceTrim = 0
         let keys: Set<URLResourceKey> = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]
         guard let files = try? FileManager.default.contentsOfDirectory(
@@ -1655,7 +1740,16 @@ actor ImageDiskCache {
         guard !isPrepared else { return }
         isPrepared = true
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        trim()
+        scheduleTrim()
+    }
+
+    private func scheduleTrim() {
+        guard trimTask == nil else { return }
+        trimTask = Task(priority: .utility) { [weak self] in
+            do { try await Task.sleep(for: .seconds(1)) }
+            catch { return }
+            await self?.trim()
+        }
     }
 
     private func cachedFileURL(for url: URL) -> URL {
@@ -1664,10 +1758,10 @@ actor ImageDiskCache {
         return directory.appendingPathComponent(filename, isDirectory: false)
     }
 
-    private static var defaultDirectory: URL {
+    private static func directory(named name: String) -> URL {
         let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
-        return root.appendingPathComponent("FeedImageCache", isDirectory: true)
+        return root.appendingPathComponent(name, isDirectory: true)
     }
 }
 
@@ -1704,6 +1798,8 @@ struct PostMediaGrid: View {
     @State private var compactImageURLs: Set<URL> = []
     @State private var loadedSingleImageAspectRatio: CGFloat?
     @State private var loadedVideoAspectRatio: CGFloat?
+
+    private var isXTimelinePreview: Bool { usesFeedSizedImages && post.source == "x" }
 
     private var knownCompactImageURLs: Set<URL> {
         guard post.isRSS else { return [] }
@@ -1774,7 +1870,7 @@ struct PostMediaGrid: View {
     }
 
     private func recordLoadedImage(_ image: UIImage, at url: URL, isSingleImage: Bool) {
-        if isSingleImage, image.size.width > 0, image.size.height > 0 {
+        if isSingleImage, !isXTimelinePreview, image.size.width > 0, image.size.height > 0 {
             loadedSingleImageAspectRatio = image.size.width / image.size.height
         }
 
@@ -1814,16 +1910,8 @@ struct PostMediaGrid: View {
 
     @MainActor
     private func loadVideoAspectRatio(for url: URL) async {
-        let asset = AVURLAsset(url: url)
-        guard let track = try? await asset.loadTracks(withMediaType: .video).first,
-              let naturalSize = try? await track.load(.naturalSize),
-              let preferredTransform = try? await track.load(.preferredTransform),
-              !Task.isCancelled else { return }
-        let displayedSize = naturalSize.applying(preferredTransform)
-        let width = abs(displayedSize.width)
-        let height = abs(displayedSize.height)
-        guard width > 0, height > 0 else { return }
-        loadedVideoAspectRatio = width / height
+        guard let aspectRatio = await videoTrackAspectRatio(for: url) else { return }
+        loadedVideoAspectRatio = aspectRatio
     }
 
     var body: some View {
@@ -1850,7 +1938,8 @@ struct PostMediaGrid: View {
                         height: resolvedSingleImageHeight,
                         cornerRadius: cornerRadius,
                         contentMode: singleImageContentMode,
-                        onImageLoaded: { recordLoadedImage($0, at: url, isSingleImage: true) }
+                        onImageLoaded: isXTimelinePreview ? nil : { recordLoadedImage($0, at: url, isSingleImage: true) },
+                        usesTimelinePlaceholder: isXTimelinePreview
                     )
                 }
                 .frame(maxWidth: .infinity)
@@ -1866,7 +1955,8 @@ struct PostMediaGrid: View {
                                 height: multiImageHeight,
                                 cornerRadius: 6,
                                 contentMode: .fit,
-                                onImageLoaded: { recordLoadedImage($0, at: url, isSingleImage: false) }
+                                onImageLoaded: isXTimelinePreview ? nil : { recordLoadedImage($0, at: url, isSingleImage: false) },
+                                usesTimelinePlaceholder: isXTimelinePreview
                             )
                             .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
                         }
@@ -1922,6 +2012,10 @@ struct ImageGallerySelection: Identifiable {
 }
 
 enum XTimelineTextLayout {
+    static let fontSize: CGFloat = 16
+    static let lineSpacing: CGFloat = 3
+    static let lineLimit = 8
+
     private static let cache: NSCache<NSString, NSNumber> = {
         let cache = NSCache<NSString, NSNumber>()
         cache.countLimit = 400
@@ -1932,16 +2026,17 @@ enum XTimelineTextLayout {
         let width = max(1, width)
         let key = "\(width)|\(text)" as NSString
         if let cached = cache.object(forKey: key) { return cached.boolValue }
-        let font = UIFont.systemFont(ofSize: 15)
+        let font = UIFont.systemFont(ofSize: fontSize)
         let paragraph = NSMutableParagraphStyle()
-        paragraph.lineSpacing = 2
+        paragraph.lineSpacing = lineSpacing
         let height = (text as NSString).boundingRect(
             with: CGSize(width: width, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
             attributes: [.font: font, .paragraphStyle: paragraph],
             context: nil
         ).height
-        let expanded = height > font.lineHeight * 9 + 2 * 8 + 0.5
+        let collapsedHeight = font.lineHeight * CGFloat(lineLimit) + lineSpacing * CGFloat(lineLimit - 1)
+        let expanded = height > collapsedHeight + 0.5
         cache.setObject(NSNumber(value: expanded), forKey: key)
         return expanded
     }
@@ -1959,7 +2054,7 @@ struct XFeedMediaView: View {
                 XVideoPlayerView(
                     url: videoURL,
                     fallbackURL: post.feedPlaybackFallbackURL,
-                    thumbnailURL: timelineWidth == nil ? post.previewURL : post.xFeedVideoPoster,
+                    thumbnailURL: post.xFeedVideoPoster,
                     generatesThumbnailWhenMissing: timelineWidth == nil,
                     reportsPlaybackEvents: true,
                     observationSurface: "x-feed"
@@ -2061,7 +2156,10 @@ struct XFeedQuotedPostCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .background(
+            Color(uiColor: isDetail ? .systemBackground : .secondarySystemBackground),
+            in: RoundedRectangle(cornerRadius: 13, style: .continuous)
+        )
         .overlay {
             RoundedRectangle(cornerRadius: 13, style: .continuous)
                 .stroke(Color.secondary.opacity(0.18), lineWidth: 0.5)
@@ -2094,7 +2192,7 @@ struct XFeedQuotedPostCard: View {
             XVideoPlayerView(
                 url: videoURL,
                 fallbackURL: nil,
-                thumbnailURL: media.previewURL,
+                thumbnailURL: isDetail ? media.previewURL : media.feedDisplayURL,
                 generatesThumbnailWhenMissing: false,
                 reportsPlaybackEvents: true,
                 observationSurface: "x-quoted"
@@ -2107,7 +2205,8 @@ struct XFeedQuotedPostCard: View {
                 targetWidth: availableWidth - 24,
                 height: quotedMediaHeight(media),
                 cornerRadius: 8,
-                contentMode: .fit
+                contentMode: .fit,
+                usesTimelinePlaceholder: !isDetail
             )
             .frame(maxWidth: .infinity)
             .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
@@ -2195,8 +2294,8 @@ struct XVideoPlayerView: View {
     @State private var playbackFallbackTask: Task<Void, Never>?
     @State private var observationSessionID: String?
     @State private var observationStartedAt: Date?
-    @Environment(\.preparedReadingMedia) private var preparedReadingMedia
     @AppStorage("x.video.isMuted") private var isMuted = false
+    @Environment(\.preparedReadingMedia) private var preparedReadingMedia
     private let fallbackURL: URL?
     private let thumbnailURL: URL?
     private let fallbackThumbnailURL: URL?
@@ -2208,9 +2307,16 @@ struct XVideoPlayerView: View {
     private let onAspectRatioResolved: ((CGFloat) -> Void)?
     private let observationSurface: String
 
+    private var hasPosterSource: Bool {
+        preparedReadingMedia == nil &&
+            (thumbnailURL != nil || fallbackThumbnailURL != nil || generatesThumbnailWhenMissing)
+    }
+
     private var displayedThumbnail: UIImage? {
-        guard let preparedReadingMedia else { return thumbnail }
-        return thumbnailURL.flatMap { preparedReadingMedia[$0] }
+        if let preparedReadingMedia {
+            return thumbnailURL.flatMap { preparedReadingMedia[$0] }
+        }
+        return thumbnail
     }
 
     init(
@@ -2247,18 +2353,20 @@ struct XVideoPlayerView: View {
                 Image(uiImage: displayedThumbnail)
                     .resizable()
                     .aspectRatio(contentMode: contentMode)
-            } else if preparedReadingMedia == nil, playbackState == .idle, !thumbnailFailed, chromeStyle == .standard {
+            } else if hasPosterSource, playbackState == .idle, !thumbnailFailed, chromeStyle == .standard {
                 ProgressView().tint(.white)
             }
 
-            XPlayerLayerView(
-                player: player,
-                videoGravity: contentMode == .fill ? .resizeAspectFill : .resizeAspect,
-                onReadyForDisplay: markVideoReady,
-                onFailure: markPlaybackFailed
-            )
-                .opacity(isVideoReady ? 1 : 0.001)
-                .allowsHitTesting(false)
+            if let player {
+                XPlayerLayerView(
+                    player: player,
+                    videoGravity: contentMode == .fill ? .resizeAspectFill : .resizeAspect,
+                    onReadyForDisplay: markVideoReady,
+                    onFailure: markPlaybackFailed
+                )
+                    .opacity(isVideoReady ? 1 : 0.001)
+                    .allowsHitTesting(false)
+            }
 
             switch playbackState {
             case .idle:
@@ -2289,7 +2397,7 @@ struct XVideoPlayerView: View {
                 .frame(maxHeight: .infinity, alignment: .bottom)
             }
 
-            if preparedReadingMedia == nil, thumbnailFailed, playbackState == .idle, chromeStyle == .standard {
+            if hasPosterSource, thumbnailFailed, playbackState == .idle, chromeStyle == .standard {
                 Button {
                     thumbnailFailed = false
                     Task { await loadThumbnail(ignoringCache: true) }
@@ -2310,7 +2418,6 @@ struct XVideoPlayerView: View {
         .frame(maxWidth: .infinity)
         .clipped()
         .task(id: playbackURL) {
-            guard preparedReadingMedia == nil else { return }
             if onAspectRatioResolved != nil {
                 async let thumbnailLoad: Void = loadThumbnail()
                 async let aspectRatioLoad: Void = loadVideoAspectRatio()
@@ -2331,7 +2438,7 @@ struct XVideoPlayerView: View {
                 stopPlayback()
             }
         }
-        .fullScreenCover(isPresented: $isFullscreenPresented) {
+        .appFullScreenCover(isPresented: $isFullscreenPresented) {
             if let player {
                 FullscreenVideoPlayerView(player: player, isMuted: $isMuted)
             }
@@ -2496,7 +2603,7 @@ struct XVideoPlayerView: View {
 
     @MainActor
     private func loadThumbnail(ignoringCache: Bool = false) async {
-        guard thumbnail == nil else { return }
+        guard hasPosterSource, thumbnail == nil else { return }
         if !ignoringCache, let cached = Self.thumbnailCache.object(forKey: playbackURL as NSURL) {
             thumbnail = cached
             return
@@ -2546,16 +2653,8 @@ struct XVideoPlayerView: View {
 
     @MainActor
     private func loadVideoAspectRatio() async {
-        let asset = AVURLAsset(url: playbackURL)
-        guard let track = try? await asset.loadTracks(withMediaType: .video).first,
-              let naturalSize = try? await track.load(.naturalSize),
-              let preferredTransform = try? await track.load(.preferredTransform),
-              !Task.isCancelled else { return }
-        let displayedSize = naturalSize.applying(preferredTransform)
-        let width = abs(displayedSize.width)
-        let height = abs(displayedSize.height)
-        guard width > 0, height > 0 else { return }
-        onAspectRatioResolved?(width / height)
+        guard let aspectRatio = await videoTrackAspectRatio(for: playbackURL) else { return }
+        onAspectRatioResolved?(aspectRatio)
     }
 }
 
@@ -2877,6 +2976,15 @@ struct FeedEngagementRow: View {
     }
 
     var body: some View {
+        VStack(spacing: 6) {
+            engagementActions
+            if let bookmarkError {
+                InlineActionNotice(message: bookmarkError, retry: saveBookmark) { self.bookmarkError = nil }
+            }
+        }
+    }
+
+    private var engagementActions: some View {
         HStack(spacing: showsTimelineActions ? 4 : 12) {
             if showsDetailActions || showsTimelineActions {
                 metric("bubble", post.meta?.metrics?.replies, label: "回复")
@@ -2893,6 +3001,7 @@ struct FeedEngagementRow: View {
                     Image(systemName: "square.and.arrow.up")
                         .font(.system(size: showsTimelineActions ? 14 : 17))
                         .frame(width: showsTimelineActions ? 24 : 36, height: showsTimelineActions ? 32 : 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("分享帖子")
@@ -2902,11 +3011,6 @@ struct FeedEngagementRow: View {
         .frame(height: showsOnlyLikeAndBookmark ? 44 : 32)
         .contentShape(Rectangle())
         .sensoryFeedback(.success, trigger: isBookmarked)
-        .alert("书签保存失败", isPresented: bookmarkErrorBinding) {
-            Button("知道了", role: .cancel) { bookmarkError = nil }
-        } message: {
-            Text(bookmarkError ?? "请稍后重试")
-        }
     }
 
     private var bookmarkButton: some View {
@@ -2932,16 +3036,10 @@ struct FeedEngagementRow: View {
         .accessibilityLabel(isBookmarked ? "已加入书签" : "加入书签")
     }
 
-    private var bookmarkErrorBinding: Binding<Bool> {
-        Binding(
-            get: { bookmarkError != nil },
-            set: { if !$0 { bookmarkError = nil } }
-        )
-    }
-
     private func saveBookmark() {
         guard let tweetID = post.xTweetID, !isBookmarking, !isBookmarked else { return }
         isBookmarking = true
+        bookmarkError = nil
         Task {
             defer { isBookmarking = false }
             do {
@@ -3375,4 +3473,17 @@ struct PostActionRow: View {
     private func action(_ icon: String, _ text: String) -> some View {
         Label(text, systemImage: icon).font(.caption).foregroundStyle(.secondary)
     }
+}
+
+func videoTrackAspectRatio(for url: URL) async -> CGFloat? {
+    let asset = AVURLAsset(url: url)
+    guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+          let naturalSize = try? await track.load(.naturalSize),
+          let preferredTransform = try? await track.load(.preferredTransform),
+          !Task.isCancelled else { return nil }
+    let displayedSize = naturalSize.applying(preferredTransform)
+    let width = abs(displayedSize.width)
+    let height = abs(displayedSize.height)
+    guard width > 0, height > 0 else { return nil }
+    return width / height
 }

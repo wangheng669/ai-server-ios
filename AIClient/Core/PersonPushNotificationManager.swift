@@ -6,7 +6,6 @@ import UserNotifications
 @MainActor
 final class PersonPushNotificationManager: ObservableObject {
     static let shared = PersonPushNotificationManager()
-    static let legacySamAltmanID = "1605"
 
     @Published private(set) var enabledPersonIDs: Set<String>
     @Published private(set) var isUpdating = false
@@ -15,20 +14,17 @@ final class PersonPushNotificationManager: ObservableObject {
     private let defaults: UserDefaults
     private let session: URLSession
     private let enabledPersonIDsKey = "personPush.enabledPersonIDs"
-    private let legacySamAltmanEnabledKey = "personPush.samAltman.enabled"
+    private let registrationTokensKey = "personPush.registrationTokens"
     private let tokenKey = "personPush.deviceToken"
+    // A failed registration response can leave either the old or the new token active.
+    private var registrationTokens: [String: [String]]
+    private var subscriptionRequests: [String: (id: UUID, task: Task<Void, Error>)] = [:]
 
     init(defaults: UserDefaults = .standard, session: URLSession = .shared) {
         self.defaults = defaults
         self.session = session
-        if let storedIDs = defaults.stringArray(forKey: enabledPersonIDsKey) {
-            enabledPersonIDs = Set(storedIDs)
-        } else if defaults.bool(forKey: legacySamAltmanEnabledKey) {
-            enabledPersonIDs = [Self.legacySamAltmanID]
-            defaults.set(Array(enabledPersonIDs), forKey: enabledPersonIDsKey)
-        } else {
-            enabledPersonIDs = []
-        }
+        enabledPersonIDs = Set(defaults.stringArray(forKey: enabledPersonIDsKey) ?? [])
+        registrationTokens = defaults.dictionary(forKey: registrationTokensKey) as? [String: [String]] ?? [:]
     }
 
     func isEnabled(for personID: String) -> Bool {
@@ -38,7 +34,8 @@ final class PersonPushNotificationManager: ObservableObject {
     func restoreRegistration() async {
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
-        if settings.authorizationStatus == .notDetermined {
+        switch settings.authorizationStatus {
+        case .notDetermined:
             do {
                 if try await center.requestAuthorization(options: [.alert, .badge, .sound]) {
                     UIApplication.shared.registerForRemoteNotifications()
@@ -46,24 +43,15 @@ final class PersonPushNotificationManager: ObservableObject {
             } catch {
                 errorMessage = "通知权限申请失败，请稍后再试"
             }
-            return
-        }
-        guard settings.authorizationStatus == .authorized ||
-                settings.authorizationStatus == .provisional else {
-            let personIDs = enabledPersonIDs
+        case .authorized, .provisional, .ephemeral:
+            UIApplication.shared.registerForRemoteNotifications()
+        case .denied:
+            for personID in enabledPersonIDs { rememberCurrentTokenIfNeeded(for: personID) }
             updateLocalState(enabledPersonIDs: [])
-            if let token = defaults.string(forKey: tokenKey), !token.isEmpty {
-                for personID in personIDs {
-                    try? await updateServerSubscription(
-                        token: token,
-                        personID: personID,
-                        enabled: false
-                    )
-                }
-            }
-            return
+        @unknown default:
+            break
         }
-        UIApplication.shared.registerForRemoteNotifications()
+        await retryPendingDisables()
     }
 
     func setEnabled(_ enabled: Bool, for personID: String) async {
@@ -101,14 +89,10 @@ final class PersonPushNotificationManager: ObservableObject {
                 updateLocalState(personID: personID, enabled: false)
             }
         } else {
+            rememberCurrentTokenIfNeeded(for: personID)
             updateLocalState(personID: personID, enabled: false)
-            guard let token = defaults.string(forKey: tokenKey), !token.isEmpty else { return }
             do {
-                try await updateServerSubscription(
-                    token: token,
-                    personID: personID,
-                    enabled: false
-                )
+                try await syncDisabledSubscription(for: personID)
             } catch {
                 errorMessage = "本机提醒已关闭；服务器同步将在下次启动时重试"
             }
@@ -117,6 +101,7 @@ final class PersonPushNotificationManager: ObservableObject {
 
     func didRegister(deviceToken: Data) async {
         let token = deviceToken.map { String(format: "%02x", $0) }.joined()
+        for personID in enabledPersonIDs { rememberCurrentTokenIfNeeded(for: personID) }
         defaults.set(token, forKey: tokenKey)
         var failed = false
         do {
@@ -125,6 +110,8 @@ final class PersonPushNotificationManager: ObservableObject {
             failed = true
         }
         for personID in enabledPersonIDs {
+            guard defaults.string(forKey: tokenKey) == token else { return }
+            guard enabledPersonIDs.contains(personID) else { continue }
             do {
                 try await updateServerSubscription(
                     token: token,
@@ -132,9 +119,10 @@ final class PersonPushNotificationManager: ObservableObject {
                     enabled: true
                 )
             } catch {
-                failed = true
+                if enabledPersonIDs.contains(personID) { failed = true }
             }
         }
+        guard defaults.string(forKey: tokenKey) == token else { return }
         if failed {
             errorMessage = "通知设备注册失败，请稍后重新开启"
         } else {
@@ -161,6 +149,46 @@ final class PersonPushNotificationManager: ObservableObject {
         defaults.set(enabledPersonIDs.sorted(), forKey: enabledPersonIDsKey)
     }
 
+    private func rememberCurrentTokenIfNeeded(for personID: String) {
+        guard registrationTokens[personID] == nil,
+              let token = defaults.string(forKey: tokenKey) else { return }
+        rememberRegistrationToken(token, for: personID)
+    }
+
+    private func rememberRegistrationToken(_ token: String, for personID: String) {
+        let tokens = registrationTokens[personID] ?? []
+        guard !token.isEmpty, !tokens.contains(token) else { return }
+        setRegistrationTokens(tokens + [token], for: personID)
+    }
+
+    private func setRegistrationTokens(_ tokens: [String], for personID: String) {
+        let value: [String]? = tokens.isEmpty ? nil : tokens
+        guard registrationTokens[personID] != value else { return }
+        registrationTokens[personID] = value
+        defaults.set(registrationTokens, forKey: registrationTokensKey)
+    }
+
+    private func retryPendingDisables() async {
+        let pending = Set(registrationTokens.keys).subtracting(enabledPersonIDs)
+        for personID in pending {
+            try? await syncDisabledSubscription(for: personID)
+        }
+    }
+
+    private func syncDisabledSubscription(for personID: String) async throws {
+        var failure: Error?
+        for token in registrationTokens[personID] ?? [] {
+            guard !enabledPersonIDs.contains(personID) else { break }
+            guard registrationTokens[personID]?.contains(token) == true else { continue }
+            do {
+                try await updateServerSubscription(token: token, personID: personID, enabled: false)
+            } catch {
+                failure = error
+            }
+        }
+        if let failure { throw failure }
+    }
+
     private func updateServerSubscription(
         token: String,
         personID: String,
@@ -180,11 +208,30 @@ final class PersonPushNotificationManager: ObservableObject {
                 environment: Self.apnsEnvironment
             )
         )
-        let (_, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse,
-              (200..<300).contains(http.statusCode) else {
-            throw SubscriptionError.invalidResponse
+        if enabled { rememberRegistrationToken(token, for: personID) }
+        let previous = subscriptionRequests[personID]?.task
+        let id = UUID()
+        let task = Task { [session, request] in
+            // Token updates and user actions for a person must reach the server in order.
+            _ = try? await previous?.value
+            if enabled { rememberRegistrationToken(token, for: personID) }
+            let (_, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse,
+                  (200..<300).contains(http.statusCode) else {
+                throw SubscriptionError.invalidResponse
+            }
+            if enabled {
+                if subscriptionRequests[personID]?.id == id { setRegistrationTokens([token], for: personID) }
+            } else {
+                let remaining = registrationTokens[personID]?.filter { $0 != token } ?? []
+                setRegistrationTokens(remaining, for: personID)
+            }
         }
+        subscriptionRequests[personID] = (id, task)
+        defer {
+            if subscriptionRequests[personID]?.id == id { subscriptionRequests[personID] = nil }
+        }
+        try await task.value
     }
 
     private func registerNotificationDevice(token: String) async throws {

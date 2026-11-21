@@ -6,19 +6,17 @@ import Observation
 final class PersonDetailStore {
     private(set) var ownPosts: [Post] = []
     private(set) var discussions: [Post] = []
-    private(set) var relatedVideos: [PersonVideo] = []
     private(set) var articles: [PersonArticle] = []
     private(set) var isLoadingOwnPosts = false
     private(set) var isLoadingMoreOwnPosts = false
     private(set) var isLoadingDiscussions = false
-    private(set) var isLoadingRelatedVideos = false
     private(set) var isLoadingArticles = false
     private(set) var ownPostsError: String?
     private(set) var ownPostsLoadMoreError: String?
     private(set) var discussionsError: String?
-    private(set) var relatedVideosError: String?
     private(set) var articlesError: String?
     private(set) var articleSearchResults: [PersonArticle]?
+    private(set) var articleSearchQuery = ""
     private(set) var isSearchingArticles = false
     private(set) var articleSearchError: String?
     private(set) var canLoadMoreOwnPosts = true
@@ -29,6 +27,7 @@ final class PersonDetailStore {
     private let pageSize = 12
     private let baseURL: URL
     private let service: PeopleService
+    @ObservationIgnored private var articleSearchRequestID: UUID?
 
     init(baseURL: URL = ServerConfiguration.currentURL) {
         self.baseURL = baseURL
@@ -38,16 +37,13 @@ final class PersonDetailStore {
     func load(person: SpecialPerson) async {
         async let ownPostsLoad: Void = loadOwnPosts(for: person)
         async let discussionsLoad: Void = loadDiscussions(for: person)
-        async let videosLoad: Void = loadRelatedVideos(for: person)
         async let articlesLoad: Void = loadArticles(for: person)
-        _ = await (ownPostsLoad, discussionsLoad, videosLoad, articlesLoad)
+        _ = await (ownPostsLoad, discussionsLoad, articlesLoad)
     }
 
     private func loadArticles(for person: SpecialPerson) async {
         isLoadingArticles = true
         articlesError = nil
-        articleSearchResults = nil
-        articleSearchError = nil
         defer { isLoadingArticles = false }
         do {
             articles = try await service.articles(personID: person.id)
@@ -61,24 +57,29 @@ final class PersonDetailStore {
 
     func searchArticles(personID: String, query: String) async {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let requestID = UUID()
+        articleSearchRequestID = requestID
+        articleSearchQuery = normalized
+        articleSearchResults = nil
+        articleSearchError = nil
         guard !normalized.isEmpty else {
-            articleSearchResults = nil
-            articleSearchError = nil
             isSearchingArticles = false
             return
         }
 
         isSearchingArticles = true
-        articleSearchError = nil
-        defer { isSearchingArticles = false }
+        defer {
+            if articleSearchRequestID == requestID { isSearchingArticles = false }
+        }
         do {
+            try await Task.sleep(for: .milliseconds(250))
             let results = try await service.articles(personID: personID, query: normalized)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, articleSearchRequestID == requestID else { return }
             articleSearchResults = results
         } catch is CancellationError {
             return
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, articleSearchRequestID == requestID else { return }
             articleSearchResults = []
             articleSearchError = error.localizedDescription
         }
@@ -244,16 +245,5 @@ final class PersonDetailStore {
         }
     }
 
-    private func loadRelatedVideos(for person: SpecialPerson) async {
-        isLoadingRelatedVideos = true
-        relatedVideosError = nil
-        defer { isLoadingRelatedVideos = false }
-        do {
-            relatedVideos = try await service.relatedVideos(personID: person.id)
-        } catch is CancellationError {
-            return
-        } catch {
-            relatedVideosError = error.localizedDescription
-        }
-    }
+
 }

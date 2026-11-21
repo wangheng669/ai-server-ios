@@ -2,6 +2,7 @@ import SwiftUI
 
 struct GlobalAssetsRankingView: View {
     @Environment(\.rootTabIsActive) private var rootTabIsActive
+    @Environment(\.scenePhase) private var scenePhase
     let store: GlobalRankingStore
 
     var body: some View {
@@ -10,6 +11,12 @@ struct GlobalAssetsRankingView: View {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         overview(ranking)
+                        if store.globalAssetsLoadFailed {
+                            Button("更新失败，点击重试") { Task { await store.loadGlobalAssets(force: true) } }
+                                .font(.caption)
+                                .padding(.horizontal, InvestmentDesign.pageInset)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                         rankingSection(ranking)
                         sourceFooter(ranking)
                     }
@@ -17,19 +24,12 @@ struct GlobalAssetsRankingView: View {
                 }
                 .scrollIndicators(.hidden)
             } else if store.isLoadingGlobalAssets || !store.globalAssetsLoadFailed {
-                VStack(spacing: 12) {
-                    ProgressView()
-                    Text("正在读取全球资产排名")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: 320)
+                ContentLoadingPlaceholder(title: "正在读取全球资产排名")
             } else {
                 ContentUnavailableView {
                     Label("全球资产排名暂不可用", systemImage: "chart.bar.xaxis")
                 } description: {
-                    Text("服务器数据库尚未返回可用数据")
+                    Text("排名数据暂不可用，请稍后重试")
                 } actions: {
                     Button("重新加载") { Task { await store.loadGlobalAssets() } }
                         .buttonStyle(.borderedProminent)
@@ -38,8 +38,13 @@ struct GlobalAssetsRankingView: View {
             }
         }
         .background(InvestmentDesign.surface)
-        .task(id: rootTabIsActive) {
-            if rootTabIsActive, store.globalAssets == nil { await store.loadGlobalAssets() }
+        .task(id: rootTabIsActive && scenePhase == .active) {
+            guard rootTabIsActive, scenePhase == .active else { return }
+            while !Task.isCancelled {
+                await store.loadGlobalAssets()
+                do { try await Task.sleep(for: .seconds(300)) }
+                catch { return }
+            }
         }
     }
 
@@ -53,7 +58,7 @@ struct GlobalAssetsRankingView: View {
                     Text("全球资产")
                         .font(.system(size: 16, weight: .bold))
                         .lineLimit(1)
-                    Text("按实时总市值排名")
+                    Text("按采集时的总市值排名")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -62,6 +67,12 @@ struct GlobalAssetsRankingView: View {
                 Spacer()
                 Text("\(ranking.assets.count) 项")
                     .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            if let collectedAt = marketISODate(ranking.fetchedAt) {
+                Label("采集于 \(collectedAt.formatted(date: .abbreviated, time: .shortened))", systemImage: "clock")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
@@ -103,7 +114,7 @@ struct GlobalAssetsRankingView: View {
     }
 
     private func rankingSection(_ ranking: GlobalAssetsRanking) -> some View {
-        VStack(spacing: 0) {
+        LazyVStack(spacing: 0) {
             HStack {
                 Text("资产市值排名").font(.headline)
                 Spacer()
@@ -131,9 +142,9 @@ struct GlobalAssetsRankingView: View {
     private func sourceFooter(_ ranking: GlobalAssetsRanking) -> some View {
         Link(destination: ranking.sourceURL) {
             HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "externaldrive.connected.to.line.below")
+                Image(systemName: "link")
                     .foregroundStyle(InvestmentDesign.accent)
-                Text("数据由服务器定时采集自 \(ranking.sourceName) 并存入数据库；当前页面仅读取服务器接口。")
+                Text("数据来源：\(ranking.sourceName)。点按查看原始数据。")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.leading)
@@ -178,7 +189,7 @@ struct GlobalAssetsRankingView: View {
     }
 
     private func assetIcon(_ asset: GlobalAsset, size: CGFloat) -> some View {
-        AsyncImage(url: asset.iconURL.flatMap { MediaURL.image($0.absoluteString) ?? $0 }) { phase in
+        AsyncImage(url: MediaURL.image(asset.iconURL)) { phase in
             if case let .success(image) = phase {
                 image.resizable().scaledToFit()
             } else {

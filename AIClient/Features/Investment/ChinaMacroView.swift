@@ -12,6 +12,12 @@ private func chinaMacroTimestamp(_ date: Date?, includeYear: Bool = true) -> Str
 }
 
 struct ChinaMacroYear: Identifiable, Equatable {
+    struct Period: Equatable {
+        let label: String
+        let isCumulative: Bool
+        let sourceURL: URL
+    }
+
     let year: Int
     var gdpGrowth: Double?
     var unemployment: Double?
@@ -29,27 +35,32 @@ struct ChinaMacroYear: Identifiable, Equatable {
     var electricityTertiaryGrowth: Double?
     var electricityResidentialGrowth: Double?
     var privateCredit: Double?
+    var periods: [ChinaMacroMetric: Period] = [:]
 
     var id: Int { year }
+
+    func periodLabel(for metric: ChinaMacroMetric) -> String {
+        periods[metric]?.label ?? "\(year) 年"
+    }
 }
 
 enum ChinaMacroMetric: String, CaseIterable, Identifiable {
-    case gdpGrowth
+    case gdpGrowth = "gdp_growth"
     case unemployment
     case inflation
-    case lendingRate
-    case depositRate
-    case mortgageRate
-    case householdLeverage
-    case debtServiceRatio
-    case incomeSurplusRate
-    case consumerConfidence
-    case electricityTotalGrowth
-    case electricityPrimaryGrowth
-    case electricitySecondaryGrowth
-    case electricityTertiaryGrowth
-    case electricityResidentialGrowth
-    case privateCredit
+    case lendingRate = "lending_rate"
+    case depositRate = "deposit_rate"
+    case mortgageRate = "mortgage_rate"
+    case householdLeverage = "household_leverage"
+    case debtServiceRatio = "debt_service_ratio"
+    case incomeSurplusRate = "income_surplus_rate"
+    case consumerConfidence = "consumer_confidence"
+    case electricityTotalGrowth = "electricity_total_growth"
+    case electricityPrimaryGrowth = "electricity_primary_growth"
+    case electricitySecondaryGrowth = "electricity_secondary_growth"
+    case electricityTertiaryGrowth = "electricity_tertiary_growth"
+    case electricityResidentialGrowth = "electricity_residential_growth"
+    case privateCredit = "private_credit"
 
     var id: Self { self }
 
@@ -187,11 +198,39 @@ private struct ChinaMacroAPISnapshot: Decodable {
 struct ChinaMacroAPIObservation: Decodable {
     let metricKey: String
     let period: String
+    let periodDate: String
+    let frequency: String
     let value: Double
+    let sourceURL: URL
+    let metadata: PeriodMetadata?
+
+    struct PeriodMetadata: Decodable {
+        let coverage: String?
+        let selectedQuarter: Int?
+        let selectedMonth: Int?
+        let announcementDate: String?
+
+        enum CodingKeys: String, CodingKey {
+            case coverage
+            case selectedQuarter = "selected_quarter"
+            case selectedMonth = "selected_month"
+            case announcementDate = "announcement_date"
+        }
+    }
 
     enum CodingKeys: String, CodingKey {
         case metricKey = "metric_key"
-        case period, value
+        case periodDate = "period_date"
+        case sourceURL = "source_url"
+        case period, frequency, value, metadata
+    }
+
+    func periodLabel(year: Int) -> String {
+        if let coverage = metadata?.coverage, !coverage.isEmpty { return "\(year) 年 \(coverage)" }
+        if let quarter = metadata?.selectedQuarter { return "\(year) 年第 \(quarter) 季度" }
+        if let month = metadata?.selectedMonth { return "\(year) 年 \(month) 月" }
+        if let announced = metadata?.announcementDate { return announced }
+        return period == String(year) ? "\(year) 年" : period
     }
 }
 
@@ -204,20 +243,18 @@ struct ChinaMacroService {
         self.appBaseURL = appBaseURL
     }
 
-    func history() async throws -> (years: [ChinaMacroYear], generatedAt: Date) {
+    func history(onCached: @escaping @MainActor ((years: [ChinaMacroYear], generatedAt: Date)) -> Void) async throws -> (years: [ChinaMacroYear], generatedAt: Date) {
         let url = appBaseURL.appending(path: "api/ios/v1/economy/china-macro")
-        var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 8)
+        var request = URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData, timeoutInterval: 8)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
+        return try await loadDisplayPage(request: request, session: session, onCached: onCached) { data in
+            let snapshot = try JSONDecoder().decode(ChinaMacroAPIEnvelope.self, from: data).data
+            let years = Self.merge(snapshot.observations)
+            guard !years.isEmpty, let generatedAt = Self.parseServerTimestamp(snapshot.generatedAt) else {
+                throw URLError(.cannotParseResponse)
+            }
+            return (years, generatedAt)
         }
-        let snapshot = try JSONDecoder().decode(ChinaMacroAPIEnvelope.self, from: data).data
-        let years = Self.merge(snapshot.observations)
-        guard !years.isEmpty, let generatedAt = Self.parseServerTimestamp(snapshot.generatedAt) else {
-            throw URLError(.cannotParseResponse)
-        }
-        return (years, generatedAt)
     }
 
     static func parseServerTimestamp(_ value: String) -> Date? {
@@ -228,8 +265,9 @@ struct ChinaMacroService {
 
     static func merge(_ observations: [ChinaMacroAPIObservation]) -> [ChinaMacroYear] {
         var years: [Int: ChinaMacroYear] = [:]
-        for observation in observations {
-            guard let year = Int(observation.period.prefix(4)), year >= 2000 else { continue }
+        for observation in observations.sorted(by: { $0.periodDate > $1.periodDate }) {
+            guard let year = Int(observation.period.prefix(4)), year >= 2000,
+                  let metric = ChinaMacroMetric(rawValue: observation.metricKey) else { continue }
             var item = years[year] ?? ChinaMacroYear(
                     year: year,
                     gdpGrowth: nil,
@@ -249,25 +287,30 @@ struct ChinaMacroService {
                     electricityResidentialGrowth: nil,
                     privateCredit: nil
             )
-            switch observation.metricKey {
-            case "gdp_growth": item.gdpGrowth = observation.value
-            case "unemployment": item.unemployment = observation.value
-            case "inflation": item.inflation = observation.value
-            case "lending_rate": item.lendingRate = observation.value
-            case "deposit_rate": item.depositRate = observation.value
-            case "mortgage_rate": item.mortgageRate = observation.value
-            case "household_leverage": item.householdLeverage = observation.value
-            case "debt_service_ratio": item.debtServiceRatio = observation.value
-            case "income_surplus_rate": item.incomeSurplusRate = observation.value
-            case "consumer_confidence": item.consumerConfidence = observation.value
-            case "electricity_total_growth": item.electricityTotalGrowth = observation.value
-            case "electricity_primary_growth": item.electricityPrimaryGrowth = observation.value
-            case "electricity_secondary_growth": item.electricitySecondaryGrowth = observation.value
-            case "electricity_tertiary_growth": item.electricityTertiaryGrowth = observation.value
-            case "electricity_residential_growth": item.electricityResidentialGrowth = observation.value
-            case "private_credit": item.privateCredit = observation.value
-            default: continue
+            guard item.periods[metric] == nil else { continue }
+            switch metric {
+            case .gdpGrowth: item.gdpGrowth = observation.value
+            case .unemployment: item.unemployment = observation.value
+            case .inflation: item.inflation = observation.value
+            case .lendingRate: item.lendingRate = observation.value
+            case .depositRate: item.depositRate = observation.value
+            case .mortgageRate: item.mortgageRate = observation.value
+            case .householdLeverage: item.householdLeverage = observation.value
+            case .debtServiceRatio: item.debtServiceRatio = observation.value
+            case .incomeSurplusRate: item.incomeSurplusRate = observation.value
+            case .consumerConfidence: item.consumerConfidence = observation.value
+            case .electricityTotalGrowth: item.electricityTotalGrowth = observation.value
+            case .electricityPrimaryGrowth: item.electricityPrimaryGrowth = observation.value
+            case .electricitySecondaryGrowth: item.electricitySecondaryGrowth = observation.value
+            case .electricityTertiaryGrowth: item.electricityTertiaryGrowth = observation.value
+            case .electricityResidentialGrowth: item.electricityResidentialGrowth = observation.value
+            case .privateCredit: item.privateCredit = observation.value
             }
+            item.periods[metric] = ChinaMacroYear.Period(
+                label: observation.periodLabel(year: year),
+                isCumulative: observation.frequency == "cumulative",
+                sourceURL: observation.sourceURL
+            )
             years[year] = item
         }
         return years.values
@@ -290,10 +333,16 @@ final class ChinaMacroStore {
     var isLoading = false
     var loadError = false
     var lastUpdatedAt: Date?
+    private var lastLoadedAt: Date?
     private let service: ChinaMacroService
 
     init(service: ChinaMacroService = ChinaMacroService()) {
         self.service = service
+    }
+
+    func loadIfNeeded() async {
+        if let lastLoadedAt, Date().timeIntervalSince(lastLoadedAt) < 300 { return }
+        await load()
     }
 
     func load() async {
@@ -302,10 +351,15 @@ final class ChinaMacroStore {
         loadError = false
         defer { isLoading = false }
         do {
-            let snapshot = try await service.history()
+            let snapshot = try await service.history { cached in
+                guard self.years.isEmpty else { return }
+                self.years = cached.years
+                self.lastUpdatedAt = cached.generatedAt
+            }
             years = snapshot.years
             loadError = years.isEmpty
             lastUpdatedAt = snapshot.generatedAt
+            lastLoadedAt = Date()
         } catch is CancellationError {
             return
         } catch {
@@ -356,6 +410,7 @@ private struct ChinaMacroPresentation: Identifiable {
 
 struct ChinaMacroView: View {
     @Environment(\.rootTabIsActive) private var rootTabIsActive
+    @Environment(\.scenePhase) private var scenePhase
     @State private var store = ChinaMacroStore()
     @State private var section = ChinaMacroSection.overview
     @State private var metric = ChinaMacroMetric.gdpGrowth
@@ -368,8 +423,7 @@ struct ChinaMacroView: View {
                 header
                 sectionPicker
                 if store.isLoading && store.years.isEmpty {
-                    ProgressView("正在读取中国宏观数据")
-                        .frame(maxWidth: .infinity, minHeight: 260)
+                    ContentLoadingPlaceholder(title: "正在读取宏观数据", layout: .chart)
                 } else if store.loadError && store.years.isEmpty {
                     unavailable
                 } else if section == .overview {
@@ -382,12 +436,13 @@ struct ChinaMacroView: View {
                 }
             }
             .padding(.horizontal, InvestmentDesign.pageInset)
-            .padding(.vertical, 14)
+            .padding(.top, 14)
+            .padding(.bottom, 80)
         }
         .background(InvestmentDesign.canvas)
-        .task(id: rootTabIsActive) {
-            guard rootTabIsActive else { return }
-            if store.years.isEmpty { await store.load() }
+        .task(id: rootTabIsActive && scenePhase == .active) {
+            guard rootTabIsActive, scenePhase == .active else { return }
+            await store.loadIfNeeded()
             if ProcessInfo.processInfo.arguments.contains("--china-macro-household-preview") {
                 presentation = ChinaMacroPresentation(metric: .householdLeverage, year: nil)
             } else if ProcessInfo.processInfo.arguments.contains("--china-macro-confidence-preview") {
@@ -406,22 +461,22 @@ struct ChinaMacroView: View {
             selectedYear = nil
         }
         .onChange(of: metric) { _, _ in selectedYear = nil }
-        .sheet(item: $presentation) { item in
+        .appSheet(item: $presentation) { item in
             ChinaMacroMetricSheet(
                 metric: item.metric,
                 years: store.years,
                 initialYear: item.year,
                 updatedAt: store.lastUpdatedAt
             )
-                .presentationDetents([.fraction(0.72), .large])
-                .presentationDragIndicator(.hidden)
+                .appPresentationDetents([.large])
+                .appPresentationCornerRadius(24)
         }
     }
 
     private var header: some View {
         HStack(spacing: 12) {
             Label(
-                latestYear.map { "最新数据 \(String($0)) 年" } ?? "正在更新数据",
+                latestYear.map { "收录至 \(String($0)) 年" } ?? "正在更新数据",
                 systemImage: "calendar"
             )
             if let updatedAt = store.lastUpdatedAt {
@@ -452,12 +507,14 @@ struct ChinaMacroView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 11))
                 }
                 .buttonStyle(.plain)
+                .accessibilityAddTraits(section == item ? .isSelected : [])
             }
         }
         .padding(4)
         .background(Color.secondary.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 14))
         }
+        .accessibilityIdentifier("macro-category-picker")
     }
 
     private var snapshotBar: some View {
@@ -633,7 +690,7 @@ struct ChinaMacroView: View {
                 .foregroundStyle(item.color)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
-            Text(latest.map { "\(String($0.year)) 年" } ?? "暂无数据")
+            Text(latest.map { $0.periodLabel(for: item) } ?? "暂无数据")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
             Label("点按查看", systemImage: "rectangle.portrait.and.arrow.forward")
@@ -709,7 +766,7 @@ struct ChinaMacroView: View {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(metric.longTitle).font(.headline)
-                    Text("年度值 · 单位 \(metric.unitSuffix)").font(.caption).foregroundStyle(.secondary)
+                    Text("历史走势 · 单位 \(metric.unitSuffix)").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 if let displayed, let value = metric.value(in: displayed) {
@@ -720,7 +777,7 @@ struct ChinaMacroView: View {
                         Text("\(format(value))\(metric.unitSuffix)")
                             .font(.system(size: 25, weight: .bold, design: .rounded))
                             .foregroundStyle(metric.color)
-                        Text("\(String(displayed.year)) 年 · 查看详情")
+                        Text("\(displayed.periodLabel(for: metric)) · 查看详情")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -764,7 +821,7 @@ struct ChinaMacroView: View {
                     presentation = ChinaMacroPresentation(metric: metric, year: item.year)
                 } label: {
                     HStack {
-                    Text("\(String(item.year)) 年")
+                    Text(item.periodLabel(for: metric))
                         .font(.subheadline.weight(.semibold))
                     Spacer()
                     Text(metric.value(in: item).map { "\(format($0))\(metric.unitSuffix)" } ?? "—")
@@ -912,7 +969,11 @@ private struct InteractiveMacroChart: View {
                 .symbolSize(70)
             }
         }
-        .chartXScale(domain: (points.first?.year ?? 2000)...(points.last?.year ?? 2026))
+        .chartXScale(
+            domain: (points.first?.year ?? 2000)...(points.last?.year ?? 2026),
+            range: .plotDimension(startPadding: 8, endPadding: 8)
+        )
+        .chartYScale(range: .plotDimension(padding: 6))
         .chartXAxis {
             AxisMarks(values: .automatic(desiredCount: 5)) {
                 AxisGridLine().foregroundStyle(.secondary.opacity(0.10))
@@ -929,8 +990,7 @@ private struct InteractiveMacroChart: View {
         .chartXSelection(value: $selectedYear)
         .chartPlotStyle { plot in
             plot
-                .background(metric.color.opacity(0.025))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .background(metric.color.opacity(0.025), in: RoundedRectangle(cornerRadius: 8))
         }
         .frame(height: height)
         .onChange(of: selectedYear) { _, candidate in
@@ -970,6 +1030,8 @@ private struct ChinaMacroMetricSheet: View {
 
     private var change: Double? {
         guard let index = selectedIndex, index > points.startIndex,
+              points[index].periods[metric]?.isCumulative != true,
+              points[index - 1].periods[metric]?.isCumulative != true,
               let current = metric.value(in: points[index]),
               let previous = metric.value(in: points[index - 1]) else { return nil }
         return current - previous
@@ -985,40 +1047,41 @@ private struct ChinaMacroMetricSheet: View {
     private var maximum: Double? { points.compactMap { metric.value(in: $0) }.max() }
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 24) {
                     metricIntro
                     selectedValueCard
+                    Divider()
                     chartCard
                     statistics
                     historyList
                     sourceNote
                 }
-                .padding(16)
+                .padding(20)
+                .padding(.bottom, 68)
             }
-            .background(InvestmentDesign.canvas)
-            .navigationTitle(metric.title)
-            .navigationBarTitleDisplayMode(.inline)
-            .overlay(alignment: .bottomTrailing) {
-                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭宏观指标详情")
-                    .padding(16)
-            }
+            .accessibilityIdentifier("macro-metric-scroll")
         }
+        .overlay(alignment: .bottomTrailing) {
+            DetailSheetControls(closeLabel: "关闭宏观指标详情", onClose: dismiss.callAsFunction)
+                .padding(12)
+        }
+        .background(Color(uiColor: .systemBackground))
         .onAppear { selectedYear = initialYear ?? points.last?.year }
     }
 
     private var metricIntro: some View {
         VStack(alignment: .leading, spacing: 7) {
             Text(metric.longTitle)
-                .font(.title3.weight(.bold))
+                .font(.title2.bold())
             Text(metric.shortDescription)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             HStack(spacing: 12) {
                 Label(metric.sourceName, systemImage: "building.columns")
                 Label(
-                    points.last.map { "最新 \(String($0.year)) 年" } ?? "暂无年份",
+                    points.last.map { "最新 \($0.periodLabel(for: metric))" } ?? "暂无年份",
                     systemImage: "calendar"
                 )
             }
@@ -1033,7 +1096,7 @@ private struct ChinaMacroMetricSheet: View {
     private var selectedValueCard: some View {
         HStack(alignment: .bottom) {
             VStack(alignment: .leading, spacing: 5) {
-                Text(selectedPoint.map { "\(String($0.year)) 年" } ?? "暂无数据")
+                Text(selectedPoint.map { $0.periodLabel(for: metric) } ?? "暂无数据")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text(selectedPoint.flatMap { metric.value(in: $0) }.map { "\(format($0))\(metric.unitSuffix)" } ?? "—")
@@ -1055,9 +1118,7 @@ private struct ChinaMacroMetricSheet: View {
                 .clipShape(Capsule())
             }
         }
-        .padding(16)
-        .background(InvestmentDesign.surface)
-        .clipShape(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
+
     }
 
     private var chartCard: some View {
@@ -1073,12 +1134,10 @@ private struct ChinaMacroMetricSheet: View {
                 metric: metric,
                 years: years,
                 selectedYear: $selectedYear,
-                height: 260
+                height: 220
             )
         }
-        .padding(16)
-        .background(InvestmentDesign.surface)
-        .clipShape(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
+
     }
 
     private var statistics: some View {
@@ -1099,16 +1158,14 @@ private struct ChinaMacroMetricSheet: View {
                 .minimumScaleFactor(0.75)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(InvestmentDesign.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.vertical, 12)
     }
 
     private var historyList: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("完整年度明细").font(.headline)
+                    Text("历史明细").font(.headline)
                     Text("共 \(points.count) 年 · \(yearRangeText)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -1122,7 +1179,7 @@ private struct ChinaMacroMetricSheet: View {
                 Divider().padding(.leading, 16)
                 Button { selectedYear = item.year } label: {
                     HStack {
-                        Text("\(String(item.year)) 年")
+                        Text(item.periodLabel(for: metric))
                         Spacer()
                         Text(metric.value(in: item).map { "\(format($0))\(metric.unitSuffix)" } ?? "—")
                             .font(.system(.body, design: .rounded).weight(.semibold))
@@ -1137,17 +1194,20 @@ private struct ChinaMacroMetricSheet: View {
                 .buttonStyle(.plain)
             }
         }
-        .background(InvestmentDesign.surface)
-        .clipShape(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
+        .overlay(alignment: .top) { Divider() }
     }
 
     private var sourceNote: some View {
         VStack(alignment: .leading, spacing: 6) {
             Label("数据来源：\(sourceDetail)", systemImage: "checkmark.shield.fill")
                 .font(.footnote.weight(.semibold))
-            Text("指标数据覆盖 \(yearRangeText)，最新数据年份为 \(points.last.map { String($0.year) } ?? "—") 年。")
+            Text("指标数据覆盖 \(yearRangeText)，最新一期为 \(points.last.map { $0.periodLabel(for: metric) } ?? "—")。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if let url = selectedPoint?.periods[metric]?.sourceURL {
+                Link("查看本期数据来源", destination: url)
+                    .font(.caption)
+            }
             Text("页面本次刷新：\(updatedAtText)。这是 App 获取数据的时间，不代表官方指标发布日期。")
                 .font(.caption)
                 .foregroundStyle(.secondary)

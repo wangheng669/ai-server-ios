@@ -1,111 +1,102 @@
 import Foundation
 import Observation
 
-protocol LearningServing {
-    func fetchCatalog() async throws -> LearningCatalog
-    func fetchTopic(id: String) async throws -> LearningTopic
-    func fetchVideoLessons() async throws -> LearningVideoLibrary
-    func fetchVideoLesson(id: String) async throws -> LearningVideoLesson
+struct LearningResponse<Content: Decodable>: Decodable {
+    let data: Content
 }
 
-struct LearningService: LearningServing {
+struct LearningService {
     static let sourceURL = URL(string: "https://www.futunn.com/learn/wiki")!
+    private static let defaultSession: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 20
+        configuration.urlCache = .shared
+        return URLSession(configuration: configuration)
+    }()
 
     let baseURL: URL
     private let session: URLSession
+    private let allowsSnapshots: Bool
+    private var learningURL: URL { baseURL.appending(path: "api/ios/v1/learning") }
 
     init(baseURL: URL = ServerConfiguration.currentURL, session: URLSession? = nil) {
         self.baseURL = baseURL
-        if let session {
-            self.session = session
-        } else {
-            let configuration = URLSessionConfiguration.default
-            configuration.timeoutIntervalForRequest = 20
-            configuration.requestCachePolicy = .returnCacheDataElseLoad
-            configuration.urlCache = .shared
-            self.session = URLSession(configuration: configuration)
-        }
+        self.session = session ?? Self.defaultSession
+        allowsSnapshots = session == nil
     }
 
-    func fetchCatalog() async throws -> LearningCatalog {
-        let response: LearningCatalogResponse = try await fetch(
-            baseURL.appending(path: "api/ios/v1/learning/catalog")
-        )
-        return response.data
+    func fetchCatalog(onCached: (@MainActor (LearningCatalog) -> Void)? = nil) async throws -> LearningCatalog {
+        try await fetch(learningURL.appending(path: "catalog"), onCached: onCached)
     }
 
     func fetchTopic(id: String) async throws -> LearningTopic {
-        let response: LearningTopicResponse = try await fetch(
-            baseURL.appending(path: "api/ios/v1/learning/topics").appending(path: id),
-            cachePolicy: .reloadRevalidatingCacheData
-        )
-        return response.data
+        try await fetch(learningURL.appending(path: "topics").appending(path: id))
     }
 
-    func fetchBookshelf() async throws -> LearningBookshelf {
-        let response: LearningBookshelfResponse = try await fetch(
-            baseURL.appending(path: "api/ios/v1/learning/bookshelf"),
-            cachePolicy: .reloadIgnoringLocalCacheData
+    func fetchBookshelf(onCached: (@MainActor (LearningBookshelf) -> Void)? = nil) async throws -> LearningBookshelf {
+        try await fetch(
+            learningURL.appending(path: "bookshelf"),
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            onCached: onCached
         )
-        return response.data
     }
 
-    func fetchConcepts() async throws -> KnowledgeConceptLibrary {
-        let response: KnowledgeConceptLibraryResponse = try await fetch(
-            baseURL.appending(path: "api/ios/v1/learning/concepts")
-        )
-        return response.data
+    func fetchConcepts(onCached: (@MainActor (KnowledgeConceptLibrary) -> Void)? = nil) async throws -> KnowledgeConceptLibrary {
+        try await fetch(learningURL.appending(path: "concepts"), onCached: onCached)
     }
 
-    func fetchConcept(id: String) async throws -> KnowledgeConceptDetail {
-        let response: KnowledgeConceptDetailResponse = try await fetch(
-            baseURL.appending(path: "api/ios/v1/learning/concepts").appending(path: id),
-            cachePolicy: .reloadRevalidatingCacheData
-        )
-        return response.data
-    }
-
-    func fetchVideoLessons() async throws -> LearningVideoLibrary {
-        let response: LearningVideoLibraryResponse = try await fetch(
-            baseURL.appending(path: "api/ios/v1/learning/video-lessons")
-        )
-        return response.data
+    func fetchVideoLessons(onCached: (@MainActor (LearningVideoLibrary) -> Void)? = nil) async throws -> LearningVideoLibrary {
+        try await fetch(learningURL.appending(path: "video-lessons"), onCached: onCached)
     }
 
     func fetchVideoLesson(id: String) async throws -> LearningVideoLesson {
-        let response: LearningVideoLessonResponse = try await fetch(
-            baseURL.appending(path: "api/ios/v1/learning/video-lessons").appending(path: id),
-            cachePolicy: .reloadRevalidatingCacheData
-        )
-        return response.data
+        try await fetch(learningURL.appending(path: "video-lessons").appending(path: id))
     }
 
     private func fetch<Value: Decodable>(
         _ url: URL,
-        cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy
+        cachePolicy: URLRequest.CachePolicy = .reloadRevalidatingCacheData,
+        onCached: (@MainActor (Value) -> Void)? = nil
     ) async throws -> Value {
         var request = URLRequest(url: url, cachePolicy: cachePolicy)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await session.data(for: request)
+        let key = url.absoluteString
+        let usesSnapshot = allowsSnapshots && onCached != nil
+        let preparedRequest = request
+        async let reply = session.data(for: preparedRequest)
+        if usesSnapshot, let onCached,
+           let saved = await DisplaySnapshotCache.knowledge.load(Data.self, key: key, maximumAge: 7 * 86_400),
+           let cached: Value = try? decode(saved.value) {
+            try Task.checkCancellation()
+            await onCached(cached)
+        }
+        let (data, response) = try await reply
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw LearningError.invalidResponse
         }
+        let value: Value = try decode(data)
+        if usesSnapshot {
+            await DisplaySnapshotCache.knowledge.save(data, key: key, at: Date(), minimumInterval: 300)
+        }
+        return value
+    }
+
+    private func decode<Value: Decodable>(_ data: Data) throws -> Value {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(Value.self, from: data)
+        return try decoder.decode(LearningResponse<Value>.self, from: data).data
     }
 }
 
 @MainActor
 @Observable
 final class LearningContentRepository {
-    private(set) var topics: [String: LearningTopic] = [:]
-    private(set) var loadingIDs: Set<String> = []
+    private var topics: [String: LearningTopic] = [:]
     private(set) var errorMessages: [String: String] = [:]
-    @ObservationIgnored private let service: any LearningServing
-    @ObservationIgnored private var requests: [String: Task<LearningTopic, Error>] = [:]
+    private let service: LearningService
+    @ObservationIgnored private var requests: [String: Task<Void, Never>] = [:]
 
-    init(service: any LearningServing = LearningService()) {
+    init(service: LearningService = LearningService()) {
         self.service = service
     }
 
@@ -114,30 +105,24 @@ final class LearningContentRepository {
     }
 
     func load(id: String) async {
-        guard topics[id] == nil else { return }
-        errorMessages[id] = nil
-        loadingIDs.insert(id)
-
-        let request: Task<LearningTopic, Error>
-        if let existing = requests[id] {
-            request = existing
-        } else {
-            let service = service
-            request = Task { try await service.fetchTopic(id: id) }
-            requests[id] = request
-        }
-        defer {
-            requests[id] = nil
-            loadingIDs.remove(id)
-        }
-
-        do {
-            topics[id] = try await request.value
-        } catch is CancellationError {
+        guard !Task.isCancelled, topics[id] == nil else { return }
+        if let request = requests[id] {
+            await request.value
             return
-        } catch {
-            errorMessages[id] = error.localizedDescription
         }
+        errorMessages[id] = nil
+        let request = Task {
+            defer { requests[id] = nil }
+            do {
+                topics[id] = try await service.fetchTopic(id: id)
+            } catch is CancellationError {
+                return
+            } catch {
+                errorMessages[id] = error.localizedDescription
+            }
+        }
+        requests[id] = request
+        await request.value
     }
 
     func prefetch(_ topics: ArraySlice<LearningTopic>) async {
@@ -152,10 +137,31 @@ final class LearningContentRepository {
 @MainActor
 @Observable
 final class LearningStore {
+    private enum OverviewSection { case catalog, bookshelf, concepts, videos }
+    private var restoredSections: Set<OverviewSection> = []
     private(set) var catalog: LearningCatalog?
-    private(set) var bookshelf: LearningBookshelf?
-    private(set) var conceptLibrary: KnowledgeConceptLibrary?
-    private(set) var videoLibrary: LearningVideoLibrary?
+    private(set) var bookshelf: LearningBookshelf? {
+        didSet {
+            let covers = bookshelf?.books.prefix(3).compactMap(\.coverURL) ?? []
+            if covers != oldValue?.books.prefix(3).compactMap(\.coverURL) {
+                prepareCovers(covers, size: CGSize(width: 120, height: 128))
+            }
+        }
+    }
+    private(set) var conceptLibrary: KnowledgeConceptLibrary? {
+        didSet {
+            if let cover = conceptLibrary?.concepts.first?.coverURL, cover != oldValue?.concepts.first?.coverURL {
+                prepareCovers([cover], size: CGSize(width: 68, height: 68))
+            }
+        }
+    }
+    private(set) var videoLibrary: LearningVideoLibrary? {
+        didSet {
+            if let cover = videoLibrary?.lessons.first?.coverURL, cover != oldValue?.lessons.first?.coverURL {
+                prepareCovers([cover], size: CGSize(width: 112, height: 74))
+            }
+        }
+    }
     private(set) var isLoading = false
     private(set) var isBookshelfLoading = false
     private(set) var isConceptLibraryLoading = false
@@ -164,17 +170,72 @@ final class LearningStore {
     private(set) var bookshelfErrorMessage: String?
     private(set) var bookshelfFetchedAt: Date?
     private(set) var conceptLibraryErrorMessage: String?
+    private(set) var videoLibraryErrorMessage: String?
+    private(set) var hasLoadedOverview = false
+    private var overviewTask: Task<Void, Never>?
+    private var overviewLoadedAt: Date?
     private let service: LearningService
 
     init(service: LearningService = LearningService()) { self.service = service }
 
+    var hasOverviewContent: Bool {
+        catalog != nil || bookshelf != nil || conceptLibrary != nil || videoLibrary != nil
+    }
+
+    var savedContentNotice: String? {
+        guard !restoredSections.isEmpty else { return nil }
+        let isRefreshing = isLoading || isBookshelfLoading || isConceptLibraryLoading || isVideoLibraryLoading
+        return isRefreshing ? "已显示上次保存的内容 · 正在更新" : "部分内容暂未更新"
+    }
+
+    func loadOverview(force: Bool = false) async {
+        if let overviewTask {
+            await overviewTask.value
+            return
+        }
+        if !force, let overviewLoadedAt, Date().timeIntervalSince(overviewLoadedAt) < 300 { return }
+        let refresh = force || hasLoadedOverview
+        let task = Task {
+            async let catalogRequest: Void = load(force: refresh)
+            async let booksRequest: Void = loadBookshelf(force: refresh)
+            async let conceptsRequest: Void = loadConceptLibrary(force: refresh)
+            async let videosRequest: Void = loadVideoLibrary(force: refresh)
+            _ = await (catalogRequest, booksRequest, conceptsRequest, videosRequest)
+            hasLoadedOverview = true
+            if catalog != nil, bookshelf != nil, conceptLibrary != nil, videoLibrary != nil,
+               errorMessage == nil, bookshelfErrorMessage == nil,
+               conceptLibraryErrorMessage == nil, videoLibraryErrorMessage == nil {
+                overviewLoadedAt = Date()
+            } else {
+                overviewLoadedAt = nil
+            }
+        }
+        overviewTask = task
+        await task.value
+        overviewTask = nil
+    }
+
+    private func prepareCovers(_ urls: [URL], size: CGSize) {
+        guard !urls.isEmpty else { return }
+        Task(priority: .utility) {
+            await runWithLimitedConcurrency(urls, maximumConcurrentRequests: 2) { url in
+                _ = await ImageLoader.load(url, targetSize: size)
+            }
+        }
+    }
+
     func load(force: Bool = false) async {
-        guard force || catalog == nil else { return }
+        guard !isLoading, force || catalog == nil else { return }
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
         do {
-            catalog = try await service.fetchCatalog()
+            catalog = try await service.fetchCatalog { cached in
+                guard self.catalog == nil else { return }
+                self.catalog = cached
+                self.restoredSections.insert(.catalog)
+            }
+            restoredSections.remove(.catalog)
         } catch is CancellationError {
             return
         } catch {
@@ -184,12 +245,17 @@ final class LearningStore {
 
     func loadBookshelf(force: Bool = false) async {
         let isStale = bookshelfFetchedAt.map { Date().timeIntervalSince($0) >= 300 } ?? true
-        guard force || bookshelf == nil || isStale else { return }
+        guard !isBookshelfLoading, force || bookshelf == nil || isStale else { return }
         isBookshelfLoading = true
         bookshelfErrorMessage = nil
         defer { isBookshelfLoading = false }
         do {
-            bookshelf = try await service.fetchBookshelf()
+            bookshelf = try await service.fetchBookshelf { cached in
+                guard self.bookshelf == nil else { return }
+                self.bookshelf = cached
+                self.restoredSections.insert(.bookshelf)
+            }
+            restoredSections.remove(.bookshelf)
             bookshelfFetchedAt = .now
         } catch is CancellationError {
             return
@@ -199,12 +265,17 @@ final class LearningStore {
     }
 
     func loadConceptLibrary(force: Bool = false) async {
-        guard force || conceptLibrary == nil else { return }
+        guard !isConceptLibraryLoading, force || conceptLibrary == nil else { return }
         isConceptLibraryLoading = true
         conceptLibraryErrorMessage = nil
         defer { isConceptLibraryLoading = false }
         do {
-            conceptLibrary = try await service.fetchConcepts()
+            conceptLibrary = try await service.fetchConcepts { cached in
+                guard self.conceptLibrary == nil else { return }
+                self.conceptLibrary = cached
+                self.restoredSections.insert(.concepts)
+            }
+            restoredSections.remove(.concepts)
         } catch is CancellationError {
             return
         } catch {
@@ -213,15 +284,21 @@ final class LearningStore {
     }
 
     func loadVideoLibrary(force: Bool = false) async {
-        guard force || videoLibrary == nil else { return }
+        guard !isVideoLibraryLoading, force || videoLibrary == nil else { return }
         isVideoLibraryLoading = true
+        videoLibraryErrorMessage = nil
         defer { isVideoLibraryLoading = false }
         do {
-            videoLibrary = try await service.fetchVideoLessons()
+            videoLibrary = try await service.fetchVideoLessons { cached in
+                guard self.videoLibrary == nil else { return }
+                self.videoLibrary = cached
+                self.restoredSections.insert(.videos)
+            }
+            restoredSections.remove(.videos)
         } catch is CancellationError {
             return
         } catch {
-            // Investment articles remain usable when the optional video shelf is offline.
+            videoLibraryErrorMessage = error.localizedDescription
         }
     }
 }

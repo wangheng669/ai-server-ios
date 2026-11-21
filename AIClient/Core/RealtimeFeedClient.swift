@@ -2,6 +2,8 @@ import Foundation
 
 @MainActor
 final class RealtimeFeedClient {
+    enum Scope: Equatable { case feed, deployment }
+
     enum Event {
         case post(Post)
         case taskCompleted(String)
@@ -10,10 +12,9 @@ final class RealtimeFeedClient {
 
     private let baseURL: URL
     private let session: URLSession
+    private let decoder = JSONDecoder()
     private var socket: URLSessionWebSocketTask?
     private var connectionTask: Task<Void, Never>?
-    private var isActive = false
-    private var retryAttempt = 0
     var onEvent: ((Event) -> Void)?
 
     init(baseURL: URL, session: URLSession = .shared) {
@@ -21,86 +22,81 @@ final class RealtimeFeedClient {
         self.session = session
     }
 
-    func start() {
-        guard !isActive else { return }
-        isActive = true
-        connect()
+    deinit {
+        connectionTask?.cancel()
+        socket?.cancel(with: .goingAway, reason: nil)
+    }
+
+    func start(scope: Scope = .feed) {
+        guard connectionTask == nil, let url = Self.webSocketURL(from: baseURL) else { return }
+        connectionTask = Task { [weak self, session] in
+            var reconnectDelay = 0.5
+            while !Task.isCancelled, self != nil {
+                let task = session.webSocketTask(with: url)
+                self?.socket = task
+                task.resume()
+
+                do {
+                    if scope == .deployment {
+                        // The server subscribes to live updates after sending its initial snapshot.
+                        try await task.send(.string(#"{"type":"request-deployment-snapshot"}"#))
+                    }
+                    while !Task.isCancelled {
+                        let message = try await task.receive()
+                        guard !Task.isCancelled, let self else { break }
+                        reconnectDelay = 0.5
+                        self.handle(message, scope: scope)
+                    }
+                } catch {
+                    // A closed socket is expected while the app is backgrounded or the server restarts.
+                }
+
+                task.cancel(with: .goingAway, reason: nil)
+                if self?.socket === task { self?.socket = nil }
+                guard !Task.isCancelled, self != nil else { return }
+                try? await Task.sleep(for: .seconds(reconnectDelay))
+                reconnectDelay = min(8, reconnectDelay * 1.5)
+            }
+        }
     }
 
     func stop() {
-        isActive = false
         connectionTask?.cancel()
         connectionTask = nil
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
     }
 
-    private func connect() {
-        guard isActive, connectionTask == nil, let url = Self.webSocketURL(from: baseURL) else { return }
-        connectionTask = Task { [weak self] in
-            guard let self else { return }
-            let task = session.webSocketTask(with: url)
-            socket = task
-            task.resume()
-
-            do {
-                try await task.send(.string(#"{"type":"request-task-snapshot"}"#))
-                try await task.send(.string(#"{"type":"request-deployment-snapshot"}"#))
-                retryAttempt = 0
-                while isActive, !Task.isCancelled {
-                    let message = try await task.receive()
-                    handle(message)
-                }
-            } catch {
-                // A closed socket is expected while the app is backgrounded or the server restarts.
-            }
-
-            task.cancel(with: .goingAway, reason: nil)
-            if socket === task { socket = nil }
-            connectionTask = nil
-            await reconnectAfterDelay()
-        }
-    }
-
-    private func reconnectAfterDelay() async {
-        guard isActive, !Task.isCancelled else { return }
-        let delay = min(8.0, 0.5 * pow(1.5, Double(retryAttempt)))
-        retryAttempt += 1
-        try? await Task.sleep(for: .seconds(delay))
-        guard isActive, !Task.isCancelled else { return }
-        connect()
-    }
-
-    private func handle(_ message: URLSessionWebSocketTask.Message) {
+    private func handle(_ message: URLSessionWebSocketTask.Message, scope: Scope) {
         let data: Data?
         switch message {
         case .data(let value): data = value
         case .string(let value): data = value.data(using: .utf8)
         @unknown default: data = nil
         }
-        guard let data, let header = try? JSONDecoder().decode(MessageHeader.self, from: data) else { return }
+        guard let data, let header = try? decoder.decode(MessageHeader.self, from: data) else { return }
 
-        if header.type == "post", let post = try? JSONDecoder().decode(Post.self, from: data) {
-            onEvent?(.post(post))
-        } else if header.type == "task",
-                  header.state == "idle",
-                  header.skipped != true,
-                  let name = header.name {
-            onEvent?(.taskCompleted(name))
-        } else if header.type == "deployment-status",
-                  let message = try? JSONDecoder().decode(DeploymentStatusMessage.self, from: data),
-                  let snapshot = DeploymentStatusSnapshot(message: message) {
-            onEvent?(.deploymentStatus(snapshot))
+        switch (scope, header.type) {
+        case (.feed, "post"):
+            if let post = try? decoder.decode(Post.self, from: data) { onEvent?(.post(post)) }
+        case (.feed, "task"):
+            if header.state == "idle", header.skipped != true, let name = header.name {
+                onEvent?(.taskCompleted(name))
+            }
+        case (.deployment, "deployment-status"):
+            if let message = try? decoder.decode(DeploymentStatusMessage.self, from: data),
+               let snapshot = DeploymentStatusSnapshot(message: message) {
+                onEvent?(.deploymentStatus(snapshot))
+            }
+        default:
+            break
         }
     }
 
     nonisolated static func webSocketURL(from baseURL: URL) -> URL? {
-        guard var parts = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else { return nil }
-        switch parts.scheme?.lowercased() {
-        case "http": parts.scheme = "ws"
-        case "https": parts.scheme = "wss"
-        default: return nil
-        }
+        guard var parts = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
+              parts.scheme?.lowercased() == "https" else { return nil }
+        parts.scheme = "wss"
         parts.path = "/post"
         parts.query = nil
         parts.fragment = nil
