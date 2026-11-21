@@ -15,46 +15,6 @@ enum RSSDetailSummaryPolicy {
     }
 }
 
-private struct XBrandMark: View {
-    var body: some View {
-        XBrandLogoShape()
-            .fill(.primary, style: FillStyle(eoFill: true))
-            .accessibilityHidden(true)
-    }
-}
-
-private struct XBrandLogoShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        let scaleX = rect.width / 24
-        let scaleY = rect.height / 24
-        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
-            CGPoint(x: rect.minX + x * scaleX, y: rect.minY + y * scaleY)
-        }
-
-        var path = Path()
-        path.move(to: point(18.244, 2.25))
-        path.addLine(to: point(21.552, 2.25))
-        path.addLine(to: point(14.325, 10.51))
-        path.addLine(to: point(22.827, 21.75))
-        path.addLine(to: point(16.17, 21.75))
-        path.addLine(to: point(10.956, 14.933))
-        path.addLine(to: point(4.99, 21.75))
-        path.addLine(to: point(1.68, 21.75))
-        path.addLine(to: point(9.41, 12.915))
-        path.addLine(to: point(1.254, 2.25))
-        path.addLine(to: point(8.08, 2.25))
-        path.addLine(to: point(12.793, 8.481))
-        path.closeSubpath()
-
-        path.move(to: point(17.083, 19.77))
-        path.addLine(to: point(18.916, 19.77))
-        path.addLine(to: point(7.084, 4.126))
-        path.addLine(to: point(5.117, 4.126))
-        path.closeSubpath()
-        return path
-    }
-}
-
 struct PostDetailView: View {
     @ObservedObject private var verificationStore = XAuthorVerificationStore.shared
     private let prefersFullOriginal: Bool

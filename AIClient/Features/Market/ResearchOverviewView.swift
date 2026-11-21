@@ -43,10 +43,8 @@ struct ResearchHomeView: View {
     let store: MarketStore
     @ObservedObject var researchStore: InstitutionResearchStore
     let companyStore: CompanyResearchStore
-    let onOpenMacro: () -> Void
     let onOpenGlobalRanking: () -> Void
     let onOpenInvestors: () -> Void
-    let onOpenIndustries: () -> Void
     let onOpenMarketQuotes: (MarketRegion) -> Void
     let onOpenMarketDetail: (String) -> Void
     let onOpenRetailInvestors: () -> Void
@@ -83,9 +81,9 @@ struct ResearchHomeView: View {
                 sectionContent(.overview) {
                     ResearchOverviewView(
                         store: store,
-                        onOpenMacro: onOpenMacro, onOpenGlobalRanking: onOpenGlobalRanking,
+                        onOpenMacro: { section = .macro }, onOpenGlobalRanking: onOpenGlobalRanking,
                         onOpenInvestors: onOpenInvestors,
-                        onOpenIndustries: onOpenIndustries, onOpenMarketQuotes: onOpenMarketQuotes,
+                        onOpenIndustries: { section = .industry }, onOpenMarketQuotes: onOpenMarketQuotes,
                         onOpenMarketDetail: onOpenMarketDetail, onOpenRetailInvestors: onOpenRetailInvestors
                     )
                 }
@@ -93,7 +91,7 @@ struct ResearchHomeView: View {
                 sectionContent(.industry) { IndustryPanoramaView() }
                 sectionContent(.macro) { ChinaMacroView() }
                 sectionContent(.viewpoints) {
-                    NavigationStack { InstitutionResearchView(store: researchStore, showsCloseButton: false) }
+                    NavigationStack { InstitutionResearchView(store: researchStore) }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

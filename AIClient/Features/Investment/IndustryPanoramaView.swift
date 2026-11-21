@@ -209,7 +209,6 @@ private enum IndustryPane: String, CaseIterable {
 }
 
 struct IndustryPanoramaView: View {
-    var onClose: (() -> Void)?
     @Environment(\.rootTabIsActive) private var rootTabIsActive
     @State private var industries: [IndustryPayload] = []
     @State private var selectedID: String?
@@ -257,12 +256,6 @@ struct IndustryPanoramaView: View {
                     }
                 }
                 .refreshable { await load() }
-            }
-        }
-        .overlay(alignment: .bottomTrailing) {
-            if industries.isEmpty, let onClose {
-                DetailSheetControls(closeLabel: "关闭行业全景", onClose: onClose)
-                    .padding(12)
             }
         }
         .background(IndustryPalette.canvas)
@@ -324,9 +317,6 @@ struct IndustryPanoramaView: View {
             }
             .accessibilityLabel("全部行业")
             .accessibilityIdentifier("industry-directory")
-            if let onClose {
-                DetailSheetCloseButton(action: onClose, accessibilityLabel: "关闭行业全景")
-            }
         }
         .padding(.trailing, 12)
     }

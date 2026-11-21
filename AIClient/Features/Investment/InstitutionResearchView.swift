@@ -222,27 +222,19 @@ final class InstitutionResearchStore: ObservableObject {
 @MainActor
 struct InstitutionResearchView: View {
     @StateObject private var store: InstitutionResearchStore
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.rootTabIsActive) private var rootTabIsActive
     @FocusState private var searchIsFocused: Bool
     @State private var selectedInstitution: String?
     @State private var scope = ResearchScope.all
     @State private var search = ""
     private let accent = InvestmentDesign.accent
-    private let showsCloseButton: Bool
 
     private enum ResearchScope: String, CaseIterable {
         case all = "全部", recent = "近30天", history = "历史"
     }
 
-    init() {
-        _store = StateObject(wrappedValue: InstitutionResearchStore())
-        showsCloseButton = true
-    }
-
-    init(store: InstitutionResearchStore, showsCloseButton: Bool = true) {
+    init(store: InstitutionResearchStore) {
         _store = StateObject(wrappedValue: store)
-        self.showsCloseButton = showsCloseButton
     }
 
     private func filteredItems(_ items: [InstitutionResearchItem]) -> [InstitutionResearchItem] {
@@ -379,9 +371,6 @@ struct InstitutionResearchView: View {
                         .frame(minHeight: 44)
                 }
                 .accessibilityIdentifier("institution-time-filter")
-                if showsCloseButton {
-                    DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭")
-                }
             }
             .padding(.horizontal, 20)
             ScrollView(.horizontal, showsIndicators: false) {

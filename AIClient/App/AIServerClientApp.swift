@@ -451,9 +451,7 @@ private enum EditorialPreview {
     static let opensResearchSheet: Bool = {
         #if DEBUG
         return !arguments.isDisjoint(with: [
-            "--china-macro-preview", "--holdings-preview", "--institution-research-preview",
-            "--industries-preview", "--market-core-stocks-preview", "--market-structure-sheet-preview",
-            "--gdp-preview"
+            "--holdings-preview", "--market-core-stocks-preview", "--gdp-preview"
         ]) || arguments.contains { $0.hasPrefix("--gdp-detail-preview=") }
         #else
         return false
