@@ -770,20 +770,7 @@ private struct RootNavigationBar: View {
         .padding(.horizontal, 4)
         .padding(.vertical, 2)
         .frame(maxWidth: barWidth)
-        .background {
-            Capsule()
-                .fill(.ultraThinMaterial)
-                .overlay {
-                    Capsule().fill(
-                        LinearGradient(
-                            colors: [.white.opacity(0.92), accent.opacity(0.06)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                }
-                .shadow(color: accent.opacity(0.13), radius: 8, y: 4)
-        }
+        .background(.white, in: Capsule())
         .overlay {
             Capsule()
                 .strokeBorder(accent.opacity(0.16), lineWidth: 0.5)
@@ -866,9 +853,7 @@ private struct RootNavigationBar: View {
         .frame(maxWidth: .infinity, minHeight: 52)
         .background {
             if isSelected {
-                Capsule()
-                    .fill(accent.opacity(0.11))
-                    .strokeBorder(.white.opacity(0.72), lineWidth: 0.5)
+                Capsule().fill(Color(red: 0.91, green: 0.94, blue: 0.92))
             }
         }
         .contentShape(Rectangle())
