@@ -294,59 +294,147 @@ private struct TodayBriefCardButtonStyle: PrimitiveButtonStyle {
 }
 
 private struct TodayBriefDeck: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var selectedIndex = 0
+    @GestureState(resetTransaction: Transaction(animation: .spring(response: 0.32, dampingFraction: 0.88)))
+    private var drag: DragAxis? = nil
 
     let brief: TodayBriefProjection
     let viewport: CGSize
     let open: (TodayBriefProjection.Card) -> Void
 
+    private enum DragAxis {
+        case horizontal(CGFloat)
+        case vertical
+
+        var offset: CGFloat {
+            if case let .horizontal(offset) = self { return offset }
+            return 0
+        }
+    }
+
+    private static let layerSpacing: CGFloat = 12
+    private static let maximumBackLayers = 2
     private let shape = RoundedRectangle(cornerRadius: TodayBriefStyle.cardCornerRadius)
 
     var body: some View {
-        let deckPadding: CGFloat = 24
+        let deckPadding: CGFloat = 30
         let toolsHeight = TodayBriefStyle.toolsRowHeight + TodayBriefStyle.toolsSpacing
-        let cardHeight = min(468, max(0, viewport.height - toolsHeight - deckPadding))
-        let deckHeight = cardHeight + deckPadding
+        let backLayers = min(Self.maximumBackLayers, brief.cards.count - 1)
+        let stackHeight = CGFloat(backLayers) * Self.layerSpacing
+        let cardHeight = min(468, max(0, viewport.height - toolsHeight - deckPadding - stackHeight))
         let cardWidth = min(max(0, viewport.width - TodayBriefStyle.horizontalInset * 2), TodayBriefStyle.maximumCardWidth)
+        let travel = max(1, (viewport.width + cardWidth) / 2 + 24)
+        let lastIndex = brief.cards.count - 1
+        let selection = min(selectedIndex, lastIndex)
+        let dragFraction = reduceMotion ? 0 : max(-1, min(1, (drag?.offset ?? 0) / travel))
+        let position = min(CGFloat(lastIndex), max(0, CGFloat(selection) - dragFraction))
+        let firstRendered = max(0, selection - 1)
+        let lastRendered = min(lastIndex, selection + Self.maximumBackLayers + 1)
+        let visibleCards = Array(brief.cards[firstRendered...lastRendered].enumerated())
 
-        cards(
-            width: cardWidth,
-            height: cardHeight,
-            viewport: CGSize(width: viewport.width, height: deckHeight)
-        )
-        .frame(height: deckHeight)
+        ZStack(alignment: .top) {
+            ForEach(visibleCards, id: \.element.id) { offset, card in
+                let index = firstRendered + offset
+                let distance = CGFloat(index) - position
+                let depth = max(0, distance)
+                let departure = min(0, distance)
+                let exitOpacity = min(1, (1 + departure) * 5)
+                let backOpacity = min(1, CGFloat(Self.maximumBackLayers + 1) - depth)
+                let shadowOpacity = 0.06 + 0.08 * max(0, 1 - depth)
+                cardLayer(card, index: index, selection: selection) {
+                    cardSurface(card, width: cardWidth, height: cardHeight, shadowOpacity: shadowOpacity)
+                }
+                    .scaleEffect(1 - 0.046 * depth, anchor: .bottom)
+                    .rotationEffect(.degrees(5 * departure), anchor: .bottom)
+                    .offset(x: travel * departure, y: Self.layerSpacing * depth)
+                    .opacity(max(0, min(exitOpacity, backOpacity)))
+                    .zIndex(-Double(index))
+            }
+        }
+        .padding(.top, 12)
+        .frame(width: viewport.width, height: cardHeight + stackHeight + deckPadding, alignment: .top)
+        .clipped()
+        .contentShape(Rectangle())
+        .simultaneousGesture(swipeGesture(from: selection, cardWidth: cardWidth))
+        .accessibilityIdentifier("today-card-pager")
     }
 
-    private func cards(width: CGFloat, height: CGFloat, viewport: CGSize) -> some View {
-        ScrollView(.horizontal) {
-            LazyHStack(spacing: 0) {
-                ForEach(brief.cards) { card in
-                    Button { open(card) } label: {
-                        TodayBriefCardFace(
-                            card: card,
-                            source: card.postIDs.lazy.compactMap { brief.sources[$0] }.first,
-                            avatars: brief.avatars,
-                            compact: height < 350
-                        )
-                        .frame(width: width, height: height)
-                        .background {
-                            shape.fill(TodayBriefStyle.surface)
-                                .shadow(color: TodayBriefStyle.accent.opacity(0.08), radius: 12, x: 0, y: 5)
-                        }
-                        .overlay { shape.strokeBorder(TodayBriefStyle.surfaceOutline) }
-                        .contentShape(shape)
-                    }
-                    .buttonStyle(TodayBriefCardButtonStyle())
-                    .accessibilityHint("查看原文")
-                    .accessibilityIdentifier("today-card-\(card.id)")
-                    .frame(width: viewport.width, height: viewport.height)
+    private func swipeGesture(from selection: Int, cardWidth: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 14)
+            .updating($drag) { value, axis, _ in
+                switch axis {
+                case .vertical:
+                    break
+                case .horizontal:
+                    axis = .horizontal(value.translation.width)
+                case nil:
+                    axis = abs(value.translation.width) > abs(value.translation.height)
+                        ? .horizontal(value.translation.width)
+                        : .vertical
                 }
             }
-            .scrollTargetLayout()
+            .onEnded { value in
+                if case .vertical = drag { return }
+                let horizontal = value.translation.width
+                guard abs(horizontal) > abs(value.translation.height) else { return }
+                let projected = value.predictedEndTranslation.width
+                let movedFarEnough = abs(horizontal) >= max(48, cardWidth * 0.22)
+                let flicked = abs(horizontal) >= 22 && horizontal * projected > 0 && abs(projected) >= cardWidth * 0.46
+                guard movedFarEnough || flicked else { return }
+                selectCard(at: selection + (horizontal < 0 ? 1 : -1))
+            }
+    }
+
+    private func selectCard(at index: Int) {
+        guard brief.cards.indices.contains(index) else { return }
+        withAnimation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.88)) {
+            selectedIndex = index
         }
-        .scrollIndicators(.hidden)
-        .scrollBounceBehavior(.basedOnSize)
-        .scrollTargetBehavior(.paging)
-        .accessibilityIdentifier("today-card-pager")
+    }
+
+    @ViewBuilder
+    private func cardLayer<Surface: View>(
+        _ card: TodayBriefProjection.Card, index: Int, selection: Int, @ViewBuilder surface: () -> Surface
+    ) -> some View {
+        if index == selection {
+            Button { open(card) } label: { surface() }
+                .buttonStyle(TodayBriefCardButtonStyle())
+                .accessibilityHint("查看原文")
+                .accessibilityValue("第 \(index + 1) 张，共 \(brief.cards.count) 张")
+                .accessibilityAdjustableAction { direction in
+                    switch direction {
+                    case .increment: selectCard(at: index + 1)
+                    case .decrement: selectCard(at: index - 1)
+                    @unknown default: break
+                    }
+                }
+                .accessibilityIdentifier("today-card-\(card.id)")
+                .transition(.identity)
+        } else {
+            surface()
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+                .transition(.identity)
+        }
+    }
+
+    private func cardSurface(
+        _ card: TodayBriefProjection.Card, width: CGFloat, height: CGFloat, shadowOpacity: CGFloat
+    ) -> some View {
+        TodayBriefCardFace(
+            card: card,
+            source: card.postIDs.lazy.compactMap { brief.sources[$0] }.first,
+            avatars: brief.avatars,
+            compact: height < 350 || width < 290
+        )
+        .frame(width: width, height: height)
+        .background {
+            shape.fill(TodayBriefStyle.surface)
+                .shadow(color: TodayBriefStyle.accent.opacity(shadowOpacity), radius: 13, x: 0, y: 6)
+        }
+        .overlay { shape.strokeBorder(TodayBriefStyle.surfaceOutline) }
+        .contentShape(shape)
     }
 }
 
@@ -374,13 +462,6 @@ private struct TodayBriefCardFace: View {
         .multilineTextAlignment(.leading)
         .padding(compact ? 18 : 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background {
-            LinearGradient(
-                colors: [TodayBriefStyle.accent.opacity(0.065), .clear],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
         .clipShape(RoundedRectangle(cornerRadius: TodayBriefStyle.cardCornerRadius))
         .accessibilityElement(children: .combine)
     }
