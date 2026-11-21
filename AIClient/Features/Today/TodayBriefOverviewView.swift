@@ -187,51 +187,43 @@ struct TodayBriefOverviewView: View {
 
 private struct TodayOriginalsPanel: View {
     @AccessibilityFocusState private var headingFocused: Bool
-    @State private var headerHeight: CGFloat = 62
-    @State private var contentHeight: CGFloat = 148
+    @State private var headerHeight: CGFloat?
+    @State private var contentHeight: CGFloat?
 
     let sources: [TodaySourcePresentation]
     let avatars: [URL: UIImage]
     let referenceCount: Int
     let width: CGFloat
-    let maximumHeight: CGFloat
     let isCurrent: Bool
     let isRefreshing: Bool
     let retryReport: () async -> Void
-    let close: () -> Void
+    let measure: (CGFloat) -> Void
 
     private var singleSource: TodaySourcePresentation? {
         referenceCount == 1 ? sources.first : nil
     }
 
+    private var naturalHeight: CGFloat? {
+        guard let headerHeight, let contentHeight else { return nil }
+        return ceil(headerHeight + 1 + contentHeight)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Group {
-                    if let singleSource {
-                        TodaySourceAuthorView(source: singleSource, image: singleSource.avatarURL.flatMap { avatars[$0] })
-                    } else {
-                        Text("原文").font(.headline)
-                    }
+            Group {
+                if let singleSource {
+                    TodaySourceAuthorView(source: singleSource, image: singleSource.avatarURL.flatMap { avatars[$0] })
+                } else {
+                    Text("原文").font(.headline)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityElement(children: .combine)
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityFocused($headingFocused)
-
-                Button(action: close) {
-                    Image(systemName: "xmark")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("关闭原文")
-                .accessibilityIdentifier("today-close-originals")
             }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .padding(.trailing, 44)
             .padding(.horizontal, TodayBriefStyle.horizontalInset)
             .padding(.vertical, 9)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityFocused($headingFocused)
             .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { headerHeight = $0 }
             TodayBriefStyle.rule.frame(height: 1)
                 .padding(.horizontal, TodayBriefStyle.horizontalInset)
@@ -258,13 +250,13 @@ private struct TodayOriginalsPanel: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { contentHeight = $0 }
             }
-            .frame(height: min(contentHeight, max(0, maximumHeight - headerHeight - 1)))
             .scrollBounceBehavior(.basedOnSize)
             .scrollIndicators(.hidden)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("today-originals-panel")
-        .accessibilityAction(.escape) { close() }
+        .onChange(of: naturalHeight, initial: true) { _, height in
+            if let height { measure(height) }
+        }
         .onChange(of: isCurrent, initial: true) { _, current in headingFocused = current }
     }
 
@@ -314,6 +306,7 @@ private struct TodayBriefDeck: View {
     @State private var selectedIndex = 0
     @State private var showsOriginals = false
     @State private var originalsHeights: [String: CGFloat] = [:]
+    @State private var readingHeight: CGFloat?
     @State private var dragAxis: DragAxis?
     @State private var shuffle: Shuffle?
     @State private var isSettling = false
@@ -346,32 +339,18 @@ private struct TodayBriefDeck: View {
         let cardHeight = min(468, maximumHeight)
         let cardWidth = min(max(0, viewport.width - TodayBriefStyle.horizontalInset * 2), TodayBriefStyle.maximumCardWidth)
         let selection = min(selectedIndex, brief.cards.count - 1)
-        let peek = shuffle.map { adjacentIndex(from: selection, direction: $0.direction) }
-        let activeHeight = min(maximumHeight, originalsHeights[brief.cards[selection].id] ?? 211)
-
-        TodayBriefDeckLayers(
-            selection: selection,
-            cardCount: brief.cards.count,
-            cardWidth: cardWidth,
-            direction: shuffle?.direction ?? 1,
-            progress: shuffle?.progress ?? 0
-        ) { index, contentOpacity, shadowOpacity in
-            let card = brief.cards[index]
-            Group {
-                if showsOriginals {
-                    if index == selection || index == peek {
-                        originalsLayer(
-                            card, width: cardWidth, maximumHeight: index == selection ? maximumHeight : activeHeight,
-                            isCurrent: index == selection, contentOpacity: contentOpacity, shadowOpacity: shadowOpacity
-                        )
-                    } else {
-                        Color.clear
-                            .frame(height: activeHeight)
-                            .modifier(CardSurface(shape: shape, width: cardWidth, shadowOpacity: shadowOpacity))
-                            .allowsHitTesting(false)
-                            .accessibilityHidden(true)
-                    }
-                } else {
+        Group {
+            if showsOriginals {
+                originalsDeck(selection: selection, width: cardWidth, maximumHeight: maximumHeight, backLayers: backLayers)
+            } else {
+                TodayBriefDeckLayers(
+                    selection: selection,
+                    cardCount: brief.cards.count,
+                    cardWidth: cardWidth,
+                    direction: shuffle?.direction ?? 1,
+                    progress: shuffle?.progress ?? 0
+                ) { index, contentOpacity, shadowOpacity in
+                    let card = brief.cards[index]
                     cardLayer(card, index: index, selection: selection) {
                         TodayBriefCardFace(
                             card: card,
@@ -383,9 +362,9 @@ private struct TodayBriefDeck: View {
                         .frame(height: cardHeight)
                         .modifier(CardSurface(shape: shape, width: cardWidth, shadowOpacity: shadowOpacity))
                     }
+                    .id(card.id)
                 }
             }
-            .id(card.id)
         }
         .padding(.top, 12)
         .frame(width: viewport.width, height: (showsOriginals ? maximumHeight : cardHeight) + stackHeight + deckPadding, alignment: .top)
@@ -406,7 +385,7 @@ private struct TodayBriefDeck: View {
             }
         }
         .onChange(of: rootTabIsActive) { _, active in
-            if !active { showsOriginals = false }
+            if !active { endOriginals() }
         }
         .accessibilityIdentifier("today-card-pager")
     }
@@ -448,7 +427,21 @@ private struct TodayBriefDeck: View {
     private func setOriginals(_ visible: Bool) {
         guard shuffle == nil else { return }
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
-            showsOriginals = visible
+            if visible { showsOriginals = true }
+            else { endOriginals() }
+        }
+    }
+
+    private func endOriginals() {
+        showsOriginals = false
+        readingHeight = nil
+        originalsHeights.removeAll(keepingCapacity: true)
+    }
+
+    private func growReader(to height: CGFloat) {
+        guard showsOriginals, height > (readingHeight ?? 0) else { return }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
+            readingHeight = height
         }
     }
 
@@ -460,20 +453,26 @@ private struct TodayBriefDeck: View {
         let target: CGFloat = commit ? 1 : 0
 
         if reduceMotion || abs(target - shuffle.progress) < 0.001 {
-            if commit { selectedIndex = next }
-            self.shuffle = nil
+            completeShuffle(commit ? next : nil)
             return
         }
 
         isSettling = true
-        let duration = 0.62 * max(0.36, abs(target - shuffle.progress))
+        let duration = (showsOriginals ? 0.29 : 0.62) * max(0.36, abs(target - shuffle.progress))
         withAnimation(.easeInOut(duration: duration), completionCriteria: .logicallyComplete) {
             self.shuffle?.progress = target
         } completion: {
-            if commit { selectedIndex = next }
-            self.shuffle = nil
-            isSettling = false
+            completeShuffle(commit ? next : nil)
         }
+    }
+
+    private func completeShuffle(_ next: Int?) {
+        if let next { selectedIndex = next }
+        shuffle = nil
+        isSettling = false
+        if showsOriginals, readingHeight == nil { readingHeight = 211 }
+        let selection = min(selectedIndex, brief.cards.count - 1)
+        if let height = originalsHeights[brief.cards[selection].id] { growReader(to: height) }
     }
 
     @ViewBuilder
@@ -502,31 +501,66 @@ private struct TodayBriefDeck: View {
         }
     }
 
-    private func originalsLayer(
-        _ card: TodayBriefProjection.Card, width: CGFloat, maximumHeight: CGFloat, isCurrent: Bool,
-        contentOpacity: CGFloat, shadowOpacity: CGFloat
-    ) -> some View {
-        TodayOriginalsPanel(
-            sources: card.postIDs.compactMap { brief.sources[$0] },
-            avatars: brief.avatars,
-            referenceCount: card.postIDs.count,
-            width: width,
-            maximumHeight: maximumHeight,
-            isCurrent: isCurrent,
-            isRefreshing: isRefreshing,
-            retryReport: retryReport,
-            close: { setOriginals(false) }
-        )
-        .environment(\.preparedReadingMedia, brief.previews)
-        .opacity(contentOpacity)
-        .modifier(CardSurface(shape: shape, width: width, shadowOpacity: shadowOpacity))
-        .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { height in
-            originalsHeights[card.id] = height
+    private func originalsDeck(selection: Int, width: CGFloat, maximumHeight: CGFloat, backLayers: Int) -> some View {
+        let height = min(maximumHeight, readingHeight ?? 211)
+        let next = shuffle.map { adjacentIndex(from: selection, direction: $0.direction) }
+
+        return ZStack(alignment: .top) {
+            ForEach((1..<(backLayers + 1)).reversed(), id: \.self) { layer in
+                let depth = CGFloat(layer)
+                Color.clear.frame(height: height)
+                    .modifier(CardSurface(shape: shape, width: width, shadowOpacity: 0.06))
+                    .scaleEffect(1 - 0.03 * depth, anchor: .bottom)
+                    .offset(x: 16 * depth, y: Self.layerSpacing * depth)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+
+            OriginalsPages(
+                selection: selection, next: next, direction: shuffle?.direction ?? 1,
+                width: width, height: height, progress: shuffle?.progress ?? 0
+            ) { index in
+                let card = brief.cards[index]
+                TodayOriginalsPanel(
+                    sources: card.postIDs.compactMap { brief.sources[$0] },
+                    avatars: brief.avatars,
+                    referenceCount: card.postIDs.count,
+                    width: width,
+                    isCurrent: index == selection,
+                    isRefreshing: isRefreshing,
+                    retryReport: retryReport,
+                    measure: { reportedHeight in
+                        guard showsOriginals else { return }
+                        originalsHeights[card.id] = reportedHeight
+                        if index == selection && shuffle == nil { growReader(to: reportedHeight) }
+                    }
+                )
+                .environment(\.preparedReadingMedia, brief.previews)
+                .id(card.id)
+            }
+            .clipShape(shape)
+            .modifier(CardSurface(shape: shape, width: width, shadowOpacity: 0.14))
+            .overlay(alignment: .topTrailing) {
+                Button { setOriginals(false) } label: {
+                    Image(systemName: "xmark")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .padding(.top, 9)
+                .padding(.trailing, TodayBriefStyle.horizontalInset)
+                .accessibilityLabel("关闭原文")
+                .accessibilityIdentifier("today-close-originals")
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("today-originals-panel")
+            .accessibilityAction(.escape) { setOriginals(false) }
+            .accessibilityAction(named: Text("下一张原文")) { advance(1) }
+            .accessibilityAction(named: Text("上一张原文")) { advance(-1) }
         }
-        .allowsHitTesting(isCurrent)
-        .accessibilityHidden(!isCurrent)
-        .accessibilityAction(named: Text("下一张原文")) { advance(1) }
-        .accessibilityAction(named: Text("上一张原文")) { advance(-1) }
+        .offset(x: -CGFloat(backLayers) * 4)
     }
 
     private struct CardSurface: ViewModifier {
@@ -543,6 +577,35 @@ private struct TodayBriefDeck: View {
                 }
                 .overlay { shape.strokeBorder(TodayBriefStyle.surfaceOutline).allowsHitTesting(false) }
                 .contentShape(shape)
+        }
+    }
+}
+
+private struct OriginalsPages<Page: View>: View, Animatable {
+    let selection: Int
+    let next: Int?
+    let direction: Int
+    let width: CGFloat
+    let height: CGFloat
+    var progress: CGFloat
+    @ViewBuilder let page: (Int) -> Page
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            ForEach([selection] + [next].compactMap { $0 }, id: \.self) { index in
+                let isCurrent = index == selection
+                page(index)
+                    .frame(width: width, height: height, alignment: .top)
+                    .offset(x: (isCurrent ? -progress : 1 - progress) * CGFloat(direction) * width)
+                    .allowsHitTesting(isCurrent)
+                    .accessibilityHidden(!isCurrent)
+                    .transition(.identity)
+            }
         }
     }
 }
