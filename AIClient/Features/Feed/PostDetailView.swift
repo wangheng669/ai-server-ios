@@ -15,49 +15,9 @@ enum RSSDetailSummaryPolicy {
     }
 }
 
-private struct XBrandMark: View {
-    var body: some View {
-        XBrandLogoShape()
-            .fill(.primary, style: FillStyle(eoFill: true))
-            .accessibilityHidden(true)
-    }
-}
-
-private struct XBrandLogoShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        let scaleX = rect.width / 24
-        let scaleY = rect.height / 24
-        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
-            CGPoint(x: rect.minX + x * scaleX, y: rect.minY + y * scaleY)
-        }
-
-        var path = Path()
-        path.move(to: point(18.244, 2.25))
-        path.addLine(to: point(21.552, 2.25))
-        path.addLine(to: point(14.325, 10.51))
-        path.addLine(to: point(22.827, 21.75))
-        path.addLine(to: point(16.17, 21.75))
-        path.addLine(to: point(10.956, 14.933))
-        path.addLine(to: point(4.99, 21.75))
-        path.addLine(to: point(1.68, 21.75))
-        path.addLine(to: point(9.41, 12.915))
-        path.addLine(to: point(1.254, 2.25))
-        path.addLine(to: point(8.08, 2.25))
-        path.addLine(to: point(12.793, 8.481))
-        path.closeSubpath()
-
-        path.move(to: point(17.083, 19.77))
-        path.addLine(to: point(18.916, 19.77))
-        path.addLine(to: point(7.084, 4.126))
-        path.addLine(to: point(5.117, 4.126))
-        path.closeSubpath()
-        return path
-    }
-}
-
 struct PostDetailView: View {
     @ObservedObject private var verificationStore = XAuthorVerificationStore.shared
-    private let presentedAsSheet: Bool
+    private let prefersFullOriginal: Bool
     private let loadsStoredDetail: Bool
     private let shouldRefreshNewYorkTimesArticle: Bool
     private let rssAvatarURL: URL?
@@ -71,7 +31,7 @@ struct PostDetailView: View {
     @State private var bilibiliPlaybackStartedAt: Date?
     @State private var bilibiliPlaybackRetryTask: Task<Void, Never>?
     @State private var bilibiliPlaybackRetryCount = 0
-    @State private var bilibiliSubtitleCues: [PersonVideoSubtitleCue] = []
+    @State private var bilibiliSubtitleCues: [VideoSubtitleCue] = []
     @State private var bilibiliSubtitleStatus = "loading"
     @State private var bilibiliSubtitleError: String?
     @State private var bilibiliSummary: BilibiliVideoSummary?
@@ -90,6 +50,8 @@ struct PostDetailView: View {
     @State private var bilibiliInterpretationTask: Task<Void, Never>?
     @State private var newYorkTimesArticle: NewYorkTimesArticle?
     @State private var isLoadingNewYorkTimesBody = true
+    @State private var rssOriginalArticleHTML: String?
+    @State private var storedRSSArticleBlocks: [RSSArticleBlock]?
     @State private var qbitAIArticleBlocks: [RSSArticleBlock]?
     @State private var isLoadingQbitAIArticle: Bool
     @State private var wikipediaEntitiesByParagraph: [Int: [WikipediaEntity]] = [:]
@@ -114,23 +76,18 @@ struct PostDetailView: View {
     @State private var isLoadingXReplyContext = false
     @State private var isLoadingXFullText: Bool
     @State private var weiboImageSelection: ImageGallerySelection?
-    @State private var speechPlayer: AVPlayer?
-    @State private var isSpeechLoading = false
-    @State private var isSpeechPlaying = false
-    @State private var speechErrorMessage: String?
-    @State private var presentedXueqiuLink: InAppBrowserDestination?
-    @State private var presentedNewYorkTimesLink: InAppBrowserDestination?
-    @Environment(\.openURL) private var openURL
+    @State private var xueqiuOpenFailed = false
+    @State private var presentedArticleLink: InAppBrowserDestination?
     @Environment(\.dismiss) private var dismiss
 
     init(
         post: Post,
         preloadedNewYorkTimesArticle: NewYorkTimesArticle? = nil,
         rssAvatarURL: URL? = nil,
-        presentedAsSheet: Bool = false,
-        loadsStoredDetail: Bool = true
+        loadsStoredDetail: Bool = true,
+        prefersFullOriginal: Bool = false
     ) {
-        self.presentedAsSheet = presentedAsSheet
+        self.prefersFullOriginal = prefersFullOriginal
         self.loadsStoredDetail = loadsStoredDetail
         self.rssAvatarURL = rssAvatarURL
         self.shouldRefreshNewYorkTimesArticle = post.isNewYorkTimes && preloadedNewYorkTimesArticle == nil
@@ -149,23 +106,8 @@ struct PostDetailView: View {
         )
     }
 
-    private var usesCustomDismissControl: Bool {
-        post.isRSS
-            || isWeChatArticle
-            || ["知乎", "Truth", "雪球"].contains(post.sourceName)
-            || post.isYouTube
-            || post.isWeiboRSS
-    }
-
-    private var dismissIconName: String {
-        presentedAsSheet ? "xmark" : "chevron.left"
-    }
-
-    private var dismissAccessibilityLabel: String {
-        presentedAsSheet ? "关闭动态详情" : "返回"
-    }
-
     var body: some View {
+        let readerInput = rssReaderInput
         Group {
             if post.isNewYorkTimes { newYorkTimesDetail }
             else if isWeChatArticle { weChatDetail }
@@ -179,41 +121,31 @@ struct PostDetailView: View {
             else if post.isRSS { rssDetail }
             else { standardDetail }
         }
-        .overlay {
-            if let destination = presentedXueqiuLink {
-                xueqiuBrowserOverlay(destination)
-            }
-        }
         .overlay(alignment: .bottomTrailing) {
-            if presentedAsSheet && presentedXueqiuLink == nil {
-                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭动态详情")
-                    .padding(.trailing, 16)
-                    .padding(.bottom, sheetCloseBottomPadding)
-            }
+            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭动态详情")
+                .padding(.trailing, 16)
+                .padding(.bottom, sheetCloseBottomPadding)
         }
         .navigationDestination(item: $selectedXAuthor) { author in
             XAuthorPostsView(author: author)
         }
-        .navigationDestination(item: $selectedXContextPost) { contextPost in
-            PostDetailView(post: contextPost, loadsStoredDetail: false)
+        .appSheet(item: $selectedXContextPost) { contextPost in
+            NavigationStack {
+                PostDetailView(post: contextPost, loadsStoredDetail: false, prefersFullOriginal: true)
+            }
+            .readingSheetPresentation()
         }
-        .navigationTitle(presentedAsSheet ? "" : navigationTitle)
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(hidesNavigationBar ? .hidden : .visible, for: .navigationBar)
         .navigationBarBackButtonHidden(hidesNavigationBar)
         .toolbar(.hidden, for: .tabBar)
-        .sheet(item: $presentedWikipediaEntity) { entity in
+        .appSheet(item: $presentedWikipediaEntity) { entity in
             WikipediaReaderView(entity: entity)
                 .wikipediaReaderPresentation()
         }
-        .inAppBrowserCover(item: $presentedNewYorkTimesLink)
+        .inAppBrowserCover(item: $presentedArticleLink)
         .imageGallery(item: $weiboImageSelection)
-        // The Bilibili web player uses horizontal drags for seeking. Disabling the
-        // navigation pop recognizer on this screen prevents a scrub from popping
-        // the detail view; the visible back button remains available.
-        .background(InteractivePopGestureEnabler(
-            isEnabled: !post.isBilibili && weiboImageSelection == nil
-        ))
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if post.isWeiboRSS {
                 weiboBottomBar
@@ -234,19 +166,18 @@ struct PostDetailView: View {
             }
         }
         .task {
-            let commentsTask: Task<Void, Never>? = if post.sourceName == "X" {
-                Task { await loadXComments() }
+            if post.sourceName == "X" {
+                await loadXComments()
             } else if post.isWeiboRSS {
-                Task { await loadWeiboComments() }
-            } else {
-                nil
+                await loadWeiboComments()
             }
+        }
+        .task {
             if post.isNewYorkTimes {
                 await loadNewYorkTimesDetail()
             } else {
                 await loadDetail()
             }
-            await commentsTask?.value
             if post.isBilibili {
                 await loadBilibiliSubtitles()
                 await loadBilibiliSummary()
@@ -255,53 +186,36 @@ struct PostDetailView: View {
         .task(id: "\(post.id)-\(post.needsXServerContextRefresh)") {
             await refreshServerContextsIfNeeded()
         }
+        .task(id: readerInput, priority: .userInitiated) {
+            guard let readerInput else { return }
+            let blocks = await Task.detached(priority: .userInitiated) {
+                readerInput.post.rssArticleBlocks(overridingContent: readerInput.originalHTML)
+            }.value
+            guard !Task.isCancelled else { return }
+            storedRSSArticleBlocks = blocks
+        }
         .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime)) { notification in
-            if notification.object as? AVPlayerItem === speechPlayer?.currentItem {
-                speechPlayer = nil
-                isSpeechPlaying = false
-                speechErrorMessage = "音频播放失败，请稍后重试"
-                return
-            }
             guard let failedItem = notification.object as? AVPlayerItem, failedItem === player?.currentItem else { return }
             player = nil
             videoPlaybackFailed = true
             isVideoReady = false
         }
-        .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { notification in
-            guard notification.object as? AVPlayerItem === speechPlayer?.currentItem else { return }
-            speechPlayer = nil
-            isSpeechPlaying = false
-        }
         .onDisappear {
             player?.pause()
-            speechPlayer?.pause()
             bilibiliPlaybackRetryTask?.cancel()
             bilibiliInterpretationTask?.cancel()
-        }
-        .alert("朗读失败", isPresented: Binding(
-            get: { speechErrorMessage != nil },
-            set: { if !$0 { speechErrorMessage = nil } }
-        )) {
-            Button("好", role: .cancel) {}
-        } message: {
-            Text(speechErrorMessage ?? "请稍后重试")
         }
     }
 
     private var sheetCloseBottomPadding: CGFloat {
         post.isWeiboRSS || isWeChatArticle
-            || ["知乎", "Truth", "雪球"].contains(post.sourceName) ? 72 : 16
+            || ["知乎", "Truth"].contains(post.sourceName) ? 72 : 16
     }
 
     private var hidesNavigationBar: Bool {
         post.isRSS
             || ["X", "知乎", "Truth", "雪球"].contains(post.sourceName)
             || post.isYouTube
-    }
-
-    private var navigationTitle: String {
-        if hidesNavigationBar { return "" }
-        return "详情"
     }
 
     @ViewBuilder
@@ -318,12 +232,12 @@ struct PostDetailView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        Text(post.title?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? post.displayTitle)
+                        LocalTranslatedText(original: post.rssOriginalTitle ?? post.title?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? post.displayTitle, detail: true)
                             .font(.system(size: 30, weight: .bold, design: .serif))
                             .lineSpacing(3)
 
                         if let lead = post.newYorkTimesLead, lead != post.displayTitle {
-                            Text(lead)
+                            LocalTranslatedText(original: lead, detail: true)
                                 .font(.system(size: 18, design: .serif))
                                 .foregroundStyle(.secondary)
                                 .lineSpacing(5)
@@ -350,6 +264,9 @@ struct PostDetailView: View {
                                     switch block {
                                     case .paragraph(let text):
                                         VStack(alignment: .leading, spacing: 12) {
+                                            if LocalTranslatedText.sourceLanguage(text) != nil {
+                                                LocalTranslatedText(original: text, detail: true, translationOnly: true)
+                                            }
                                             WikipediaLinkedParagraph(
                                                 text: text,
                                                 entities: wikipediaEntitiesByParagraph[index] ?? []
@@ -374,12 +291,15 @@ struct PostDetailView: View {
                                         }
                                     case .linkedParagraph(let text, let links):
                                         VStack(alignment: .leading, spacing: 12) {
+                                            if LocalTranslatedText.sourceLanguage(text) != nil {
+                                                LocalTranslatedText(original: text, detail: true, translationOnly: true)
+                                            }
                                             WikipediaLinkedParagraph(
                                                 text: text,
                                                 entities: wikipediaEntitiesByParagraph[index] ?? [],
                                                 articleLinks: links,
                                                 openArticleLink: { url in
-                                                    presentedNewYorkTimesLink = InAppBrowserDestination(url: url)
+                                                    presentedArticleLink = InAppBrowserDestination(url: url)
                                                 }
                                             ) { entity in
                                                 withAnimation(.easeOut(duration: 0.18)) {
@@ -432,7 +352,7 @@ struct PostDetailView: View {
             LazyVStack(alignment: .leading, spacing: 14) {
                 PostAuthorHeader(post: post)
                 if post.displayTitle != post.displayContent {
-                    Text(post.displayTitle).font(.title3.bold())
+                    LocalTranslatedText(original: post.rssOriginalTitle ?? post.displayTitle, serverChinese: post.rssOriginalTitle == nil ? nil : post.displayTitle, detail: true, enabled: post.isRSS).font(.title3.bold())
                 }
                 Text(post.displayContent).font(.system(size: 17, weight: .regular)).lineSpacing(2).textSelection(.enabled)
 
@@ -444,7 +364,7 @@ struct PostDetailView: View {
 
                 if let link = post.linkURL {
                     HStack(spacing: 10) {
-                        Button { openURL(link) } label: { Label("打开原文", systemImage: "safari").frame(maxWidth: .infinity) }
+                        Button { openArticleLink(link) } label: { Label("打开原文", systemImage: "safari").frame(maxWidth: .infinity) }
                             .buttonStyle(.borderedProminent)
                         ShareLink(item: link) { Image(systemName: "square.and.arrow.up").frame(width: 42, height: 30) }
                             .buttonStyle(.bordered)
@@ -465,7 +385,7 @@ struct PostDetailView: View {
 
                     rssSourceHeader
 
-                    Text(post.displayTitle)
+                    LocalTranslatedText(original: post.rssOriginalTitle ?? post.displayTitle, serverChinese: post.rssOriginalTitle == nil ? nil : post.displayTitle, detail: true, enabled: post.isRSS)
                         .font(.system(size: 24, weight: .bold))
                         .tracking(-0.25)
                         .lineSpacing(3)
@@ -473,7 +393,7 @@ struct PostDetailView: View {
                         .padding(.top, 18)
 
                     if let summary = rssDetailSummary {
-                        Text(summary)
+                        LocalTranslatedText(original: summary, detail: true)
                             .font(.system(size: 16.5))
                             .foregroundStyle(.secondary)
                             .lineSpacing(5)
@@ -487,10 +407,13 @@ struct PostDetailView: View {
                     Divider()
                         .padding(.vertical, 22)
 
-                    LazyVStack(alignment: .leading, spacing: 24) {
-                        ForEach(Array(post.rssArticleBlocks.enumerated()), id: \.offset) { _, block in
-                            rssArticleBlock(block, isWeChat: false)
+                    if let storedRSSArticleBlocks {
+                        ForEach(storedRSSArticleBlocks.indices, id: \.self) { index in
+                            rssArticleBlock(storedRSSArticleBlocks[index], isWeChat: false)
+                                .padding(.top, index == 0 ? 0 : 24)
                         }
+                    } else {
+                        rssBodyLoading
                     }
                 }
                 .padding(.horizontal, 22)
@@ -532,13 +455,9 @@ struct PostDetailView: View {
 
     private var weChatDetail: some View {
         VStack(spacing: 0) {
-            if !presentedAsSheet {
-                weChatDetailHeader
-            }
-
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    Text(post.displayTitle)
+                    LocalTranslatedText(original: post.rssOriginalTitle ?? post.displayTitle, serverChinese: post.rssOriginalTitle == nil ? nil : post.displayTitle, detail: true, enabled: post.isRSS)
                         .font(.system(size: 25, weight: .semibold))
                         .tracking(-0.25)
                         .lineSpacing(4)
@@ -554,21 +473,13 @@ struct PostDetailView: View {
                     .padding(.top, 12)
                     .padding(.bottom, 28)
 
-                    if isLoadingQbitAIArticle {
-                        HStack(spacing: 10) {
-                            ProgressView()
-                            Text("正在加载完整文章…")
-                                .foregroundStyle(.secondary)
+                    if !isLoadingQbitAIArticle, let blocks = qbitAIArticleBlocks ?? storedRSSArticleBlocks {
+                        ForEach(blocks.indices, id: \.self) { index in
+                            rssArticleBlock(blocks[index], isWeChat: true)
+                                .padding(.top, index == 0 ? 0 : 20)
                         }
-                        .font(.system(size: 15))
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.vertical, 28)
                     } else {
-                        LazyVStack(alignment: .leading, spacing: 20) {
-                            ForEach(Array(weChatArticleBlocks.enumerated()), id: \.offset) { _, block in
-                                rssArticleBlock(block, isWeChat: true)
-                            }
-                        }
+                        rssBodyLoading
                     }
 
                 }
@@ -580,35 +491,24 @@ struct PostDetailView: View {
         .background(Color(uiColor: .systemBackground))
     }
 
-    private var weChatArticleBlocks: [RSSArticleBlock] {
-        qbitAIArticleBlocks ?? post.rssArticleBlocks
+    private struct RSSReaderInput: Equatable {
+        let post: Post
+        let originalHTML: String?
     }
 
-    private var weChatDetailHeader: some View {
+    private var rssReaderInput: RSSReaderInput? {
+        guard isGenericRSSDetail || isWeChatArticle else { return nil }
+        return RSSReaderInput(post: post, originalHTML: rssOriginalArticleHTML)
+    }
+
+    private var rssBodyLoading: some View {
         HStack(spacing: 10) {
-            Button { dismiss() } label: {
-                Image(systemName: dismissIconName)
-                    .font(.system(size: 19, weight: .semibold))
-                    .frame(width: 44, height: 44)
-            }
-            .accessibilityLabel(dismissAccessibilityLabel)
-            .opacity(presentedAsSheet ? 0 : 1)
-            .disabled(presentedAsSheet)
-            .accessibilityHidden(presentedAsSheet)
-
-            Spacer(minLength: 0)
-            Text(post.sourceName)
-                .font(.system(size: 16, weight: .medium))
-            Spacer(minLength: 0)
-
-            Color.clear
-                .frame(width: 44, height: 44)
-                .accessibilityHidden(true)
+            ProgressView()
+            Text("正在加载完整文章…").foregroundStyle(.secondary)
         }
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 8)
-        .frame(height: 52)
-        .background(.background)
+        .font(.system(size: 15))
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.vertical, 28)
     }
 
     @ViewBuilder
@@ -616,13 +516,14 @@ struct PostDetailView: View {
         switch block {
         case .paragraph(let text, let emojis):
             if emojis.isEmpty {
-                Text(rssReaderParagraphText(text))
+                LocalTranslatedText(original: rssReaderParagraphText(text), detail: true, enabled: !isWeChat)
                     .font(.system(size: isWeChat ? 17 : 18))
                     .foregroundStyle(isWeChat ? Color(uiColor: .label).opacity(0.9) : .primary)
                     .lineSpacing(isWeChat ? 8 : 8)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
+                LocalTranslatedText(original: rssReaderParagraphText(text), detail: true, enabled: !isWeChat, translationOnly: true)
                 InlineEmojiText(
                     text: rssReaderParagraphText(text),
                     emojis: emojis,
@@ -746,7 +647,7 @@ struct PostDetailView: View {
                         if post.videoURLs.isEmpty,
                            post.hasWeiboVideoReference,
                            let link = post.linkURL {
-                            Button { openURL(link) } label: {
+                            Button { openArticleLink(link) } label: {
                                 HStack(spacing: 11) {
                                     Image(systemName: "play.fill")
                                         .font(.system(size: 17))
@@ -778,11 +679,13 @@ struct PostDetailView: View {
 
                     Divider()
                     weiboEngagementRow
-                    Rectangle()
-                        .fill(Color(uiColor: .secondarySystemBackground))
-                        .frame(height: 10)
+                    if isLoadingWeiboComments || weiboCommentsError != nil || !weiboComments.isEmpty {
+                        Rectangle()
+                            .fill(Color(uiColor: .secondarySystemBackground))
+                            .frame(height: 10)
 
-                    weiboCommentsSection
+                        weiboCommentsSection
+                    }
                 }
             }
         }
@@ -806,17 +709,7 @@ struct PostDetailView: View {
     private var weiboNavigationBar: some View {
         ZStack {
             HStack(spacing: 12) {
-                Button { dismiss() } label: {
-                    Image(systemName: dismissIconName)
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 40, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(dismissAccessibilityLabel)
-                .opacity(presentedAsSheet ? 0 : 1)
-                .disabled(presentedAsSheet)
-                .accessibilityHidden(presentedAsSheet)
+                Color.clear.frame(width: 40)
 
                 Spacer()
 
@@ -847,11 +740,6 @@ struct PostDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("更多")
-            }
-
-            if !presentedAsSheet {
-                Text("微博正文")
-                    .font(.system(size: 17, weight: .semibold))
             }
         }
         .foregroundStyle(.primary)
@@ -975,16 +863,6 @@ struct PostDetailView: View {
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 24)
             .padding(.vertical, 28)
-        } else if weiboComments.isEmpty {
-            VStack(spacing: 7) {
-                Image(systemName: "bubble.left.and.bubble.right")
-                    .font(.title3)
-                Text("暂无评论")
-                    .font(.subheadline.weight(.medium))
-            }
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 32)
         } else {
             ForEach(weiboComments) { comment in
                 WeiboCommentRow(comment: comment)
@@ -1059,17 +937,17 @@ struct PostDetailView: View {
     }
 
     private var xueqiuDetail: some View {
-        VStack(spacing: 0) {
+        let presentation = post.xueqiuPresentation
+        return VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
+                LazyVStack(alignment: .leading, spacing: 22) {
                     xueqiuDetailAuthor
 
-                    if let emoji = post.xueqiuStandaloneInlineEmoji {
+                    if let emoji = presentation.standaloneInlineEmoji {
                         InlineEmojiImage(emoji: emoji)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                    } else if post.xueqiuBodyInlineEmojis.isEmpty {
-                        xueqiuRichText(post.xueqiuBodyContent, links: post.xueqiuBodyLinks)
-                            .environment(\.openURL, xueqiuLinkOpenAction)
+                    } else if presentation.bodyInlineEmojis.isEmpty {
+                        xueqiuRichText(presentation.bodyContent, links: presentation.bodyLinks)
                             .font(.system(size: 20))
                             .lineSpacing(10)
                             .textSelection(.enabled)
@@ -1077,83 +955,50 @@ struct PostDetailView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
                         InlineEmojiText(
-                            text: post.xueqiuBodyContent,
-                            emojis: post.xueqiuBodyInlineEmojis,
+                            text: presentation.bodyContent,
+                            emojis: presentation.bodyInlineEmojis,
                             fontSize: 20,
                             lineSpacing: 10
                         )
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    if !post.xueqiuBodyImageURLs.isEmpty {
+                    if !presentation.bodyImageURLs.isEmpty {
                         PostMediaGrid(
                             post: post,
-                            imageURLs: post.xueqiuBodyImageURLs,
+                            imageURLs: presentation.bodyImageURLs,
                             singleImageMaxHeight: 620,
                             availableWidth: UIScreen.main.bounds.width - 32,
                             cornerRadius: 8
                         )
                     }
 
-                    if post.xueqiuQuoteBody != nil {
-                        Button { openXueqiuOriginal() } label: {
-                            HStack(spacing: 9) {
-                                Image(systemName: "bubble.left.and.bubble.right")
-                                Text("查看对话")
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 12, weight: .semibold))
+                    if let quoteBody = presentation.quoteBody {
+                        VStack(alignment: .leading, spacing: 14) {
+                            (Text(presentation.quoteAuthor.map { "@\($0)： " } ?? "")
+                                .foregroundStyle(Color.blue) + xueqiuRichText(quoteBody, links: presentation.quoteLinks))
+                                .font(.system(size: 16.5))
+                                .lineSpacing(7)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                            if !presentation.quoteImageURLs.isEmpty {
+                                PostMediaGrid(
+                                    post: post,
+                                    imageURLs: presentation.quoteImageURLs,
+                                    singleImageMaxHeight: 520,
+                                    availableWidth: UIScreen.main.bounds.width - 60,
+                                    cornerRadius: 7
+                                )
                             }
-                            .font(.system(size: 15.5))
-                            .foregroundStyle(.secondary)
                         }
-                        .buttonStyle(.plain)
-                        .disabled(post.linkURL == nil)
-                        .accessibilityIdentifier("xueqiu-view-conversation")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 14)
+                        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 9))
                     }
 
-                    if let quoteBody = post.xueqiuQuoteBody {
-                        Button { openXueqiuOriginal() } label: {
-                            VStack(alignment: .leading, spacing: 14) {
-                                (Text(post.xueqiuQuoteAuthor.map { "@\($0)： " } ?? "")
-                                    .foregroundStyle(Color.blue) + xueqiuRichText(quoteBody, links: post.xueqiuQuoteLinks))
-                                    .font(.system(size: 16.5))
-                                    .lineSpacing(7)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                                if !post.xueqiuQuoteImageURLs.isEmpty {
-                                    PostMediaGrid(
-                                        post: post,
-                                        imageURLs: post.xueqiuQuoteImageURLs,
-                                        singleImageMaxHeight: 520,
-                                        availableWidth: UIScreen.main.bounds.width - 60,
-                                        cornerRadius: 7
-                                    )
-                                }
-
-                                HStack(spacing: 4) {
-                                    Text("相关讨论")
-                                    if let replies = post.meta?.metrics?.replies, replies > 0 {
-                                        Text(replies.formattedFeedCount)
-                                    }
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 10, weight: .semibold))
-                                }
-                                .font(.system(size: 14))
-                                .foregroundStyle(.secondary)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 14)
-                            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 9))
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(post.linkURL == nil)
-                        .accessibilityLabel("打开相关讨论")
-                        .accessibilityIdentifier("xueqiu-related-discussion")
-                    }
-
-                    if !post.videoURLs.isEmpty || !post.xueqiuUnplacedImageURLs.isEmpty {
+                    if !post.videoURLs.isEmpty || !presentation.unplacedImageURLs.isEmpty {
                         xMedia
                     }
 
@@ -1169,44 +1014,18 @@ struct PostDetailView: View {
                 .padding(.top, 18)
                 .padding(.bottom, 24)
             }
+            .accessibilityIdentifier("xueqiu-post-detail-\(post.id)")
         }
         .background(Color(uiColor: .systemBackground))
-        .safeAreaInset(edge: .bottom, spacing: 0) { xueqiuDetailBottomBar }
-        .accessibilityIdentifier("xueqiu-post-detail-\(post.id)")
-    }
-
-    private func xueqiuBrowserOverlay(_ destination: InAppBrowserDestination) -> some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Button { presentedXueqiuLink = nil } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 17, weight: .semibold))
-                        .frame(width: 34, height: 34)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("返回雪球详情")
-
-                Text(destination.url.host ?? "网页")
-                    .font(.system(size: 16, weight: .semibold))
-                    .lineLimit(1)
-
-                Spacer(minLength: 34)
-            }
-            .padding(.horizontal, 8)
-            .frame(height: 50)
-            .background(.bar)
-
-            Divider().opacity(0.55)
-
-            InAppBrowserSheet(
-                url: destination.url,
-                showsTitleHeader: false,
-                onDismiss: { presentedXueqiuLink = nil }
-            )
+        .environment(\.openURL, OpenURLAction { url in
+            openArticleLink(url)
+            return .handled
+        })
+        .alert("无法打开雪球 App", isPresented: $xueqiuOpenFailed) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text("请确认已安装雪球 App。")
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(uiColor: .systemBackground))
-        .accessibilityIdentifier("xueqiu-browser-overlay")
     }
 
     private var xueqiuDetailAuthor: some View {
@@ -1231,19 +1050,25 @@ struct PostDetailView: View {
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Spacer(minLength: 0)
 
-            if post.linkURL != nil {
-                Button { openXueqiuOriginal() } label: {
+            if let link = post.linkURL, link.scheme == "https", link.host()?.lowercased() == "xueqiu.com" {
+                Button {
+                    Task {
+                        let opened = await UIApplication.shared.open(link, options: [.universalLinksOnly: true])
+                        xueqiuOpenFailed = !opened
+                    }
+                } label: {
                     Image("XueqiuMark")
                         .resizable()
-                        .renderingMode(.original)
                         .scaledToFit()
-                        .frame(width: 34, height: 34)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .frame(width: 32, height: 32)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("在雪球中打开")
+                .accessibilityLabel("在雪球 App 中打开原帖")
+                .accessibilityIdentifier("xueqiu-open-original-app")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1257,65 +1082,12 @@ struct PostDetailView: View {
         return time.isEmpty ? "来自雪球" : "修改于 \(time) · 来自雪球"
     }
 
-    private var xueqiuDetailBottomBar: some View {
-        HStack {
-            Spacer()
-            Button { Task { await toggleXueqiuSpeech() } } label: {
-                if isSpeechLoading {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Image(systemName: isSpeechPlaying ? "speaker.wave.2.fill" : "speaker.wave.2")
-                }
-            }
-            .disabled(isSpeechLoading)
-            .accessibilityLabel(isSpeechPlaying ? "暂停朗读" : "朗读正文")
-            Spacer()
-            Image(systemName: "hand.thumbsup")
-            Spacer()
-            Image(systemName: "star")
-            Spacer()
-        }
-        .font(.system(size: 23, weight: .medium))
-        .padding(.horizontal, 16)
-        .padding(.vertical, 9)
-        .background(.bar)
-        .overlay(alignment: .top) { Divider().opacity(0.55) }
-    }
-
-    @MainActor
-    private func toggleXueqiuSpeech() async {
-        if let speechPlayer {
-            if speechPlayer.timeControlStatus == .playing {
-                speechPlayer.pause()
-                isSpeechPlaying = false
-            } else {
-                speechPlayer.play()
-                isSpeechPlaying = true
-            }
-            return
-        }
-        isSpeechLoading = true
-        defer { isSpeechLoading = false }
-        do {
-            let url = try await APIClient(baseURL: ServerConfiguration.currentURL)
-                .synthesizeSpeech(text: post.xueqiuBodyContent)
-            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
-            try? AVAudioSession.sharedInstance().setActive(true)
-            let newPlayer = AVPlayer(url: url)
-            speechPlayer = newPlayer
-            newPlayer.play()
-            isSpeechPlaying = true
-        } catch is CancellationError {
-            return
-        } catch {
-            speechErrorMessage = NetworkErrorPresentation.message(for: error)
-        }
-    }
+    private static let xueqiuMentionPattern = try? NSRegularExpression(pattern: #"@[^\s:：，,。/]+|\$[^$\n]{2,40}\$"#)
 
     private func xueqiuRichText(_ value: String, links: [XueqiuTextLink] = []) -> Text {
         let nsValue = value as NSString
-        let matches = (try? NSRegularExpression(pattern: #"@[^\s:：，,。/]+|\$[^$\n]{2,40}\$"#)
-            .matches(in: value, range: NSRange(location: 0, length: nsValue.length))) ?? []
+        let matches = Self.xueqiuMentionPattern?
+            .matches(in: value, range: NSRange(location: 0, length: nsValue.length)) ?? []
         var attributed = AttributedString(value)
         for match in matches {
             guard let stringRange = Range(match.range, in: value),
@@ -1343,18 +1115,6 @@ struct PostDetailView: View {
         return Text(attributed)
     }
 
-    private var xueqiuLinkOpenAction: OpenURLAction {
-        OpenURLAction { url in
-            presentedXueqiuLink = InAppBrowserDestination(url: url)
-            return .handled
-        }
-    }
-
-    private func openXueqiuOriginal() {
-        guard let url = post.linkURL else { return }
-        presentedXueqiuLink = InAppBrowserDestination(url: url)
-    }
-
     private var youtubeDetail: some View {
         YouTubeVideoDetailView(
             video: YouTubeVideoDetailModel(
@@ -1369,32 +1129,10 @@ struct PostDetailView: View {
                 avatarURL: post.avatarURL,
                 originalURL: post.linkURL
             ),
-            subtitleLoader: youtubeSubtitleLoader,
-            playbackLoader: youtubePlaybackLoader,
-            presentedAsSheet: presentedAsSheet,
-            startsAutomatically: true
+            presentedAsSheet: true,
+            startsAutomatically: true,
+            translatesRSSLocally: true
         )
-    }
-
-    private var youtubeSubtitleLoader: YouTubeVideoDetailView.SubtitleLoader? {
-        guard let videoID = post.youtubeVideoID else { return nil }
-        return {
-            let payload = try await APIClient(baseURL: ServerConfiguration.currentURL)
-                .fetchYouTubeSubtitles(videoID: videoID)
-            return YouTubeSubtitleResult(status: payload.status, cues: payload.cues)
-        }
-    }
-
-    private var youtubePlaybackLoader: YouTubeVideoDetailView.PlaybackLoader? {
-        guard let url = post.linkURL else { return nil }
-        let title = post.displayTitle
-        return {
-            try await YouTubePlaybackSourceCache.shared.source(
-                url: url,
-                title: title,
-                baseURL: ServerConfiguration.currentURL
-            )
-        }
     }
 
     private var youtubeDescription: String? {
@@ -1417,7 +1155,7 @@ struct PostDetailView: View {
                         .opacity(0.55)
                         .padding(.top, 18)
 
-                    Text(post.truthFeedContent)
+                    TruthLocalTranslationView(post: post, detail: true)
                         .font(.system(size: 18, weight: .regular))
                         .lineSpacing(6)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1471,22 +1209,6 @@ struct PostDetailView: View {
 
     private var truthDetailToolbar: some View {
         HStack {
-            Button { dismiss() } label: {
-                Image(systemName: dismissIconName)
-                    .font(.system(size: 20, weight: .semibold))
-                    .frame(width: 44, height: 44, alignment: .leading)
-            }
-            .foregroundStyle(.primary)
-            .accessibilityLabel(dismissAccessibilityLabel)
-            .opacity(presentedAsSheet ? 0 : 1)
-            .disabled(presentedAsSheet)
-            .accessibilityHidden(presentedAsSheet)
-
-            Spacer()
-            if !presentedAsSheet {
-                Text("Truth")
-                    .font(.system(size: 17, weight: .semibold))
-            }
             Spacer()
 
             if let link = post.linkURL {
@@ -1539,7 +1261,8 @@ struct PostDetailView: View {
                 TruthBookmarkStore.set(isTruthBookmarked, postID: post.id)
             } label: {
                 Label("收藏", systemImage: isTruthBookmarked ? "bookmark.fill" : "bookmark")
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .contentShape(Rectangle())
             }
 
             Divider().frame(height: 28)
@@ -1547,19 +1270,22 @@ struct PostDetailView: View {
             if let link = post.linkURL {
                 ShareLink(item: link) {
                     Label("分享", systemImage: "square.and.arrow.up")
-                        .frame(maxWidth: .infinity)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                    .contentShape(Rectangle())
                 }
             } else {
                 Label("分享", systemImage: "square.and.arrow.up")
                     .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .contentShape(Rectangle())
             }
 
             Divider().frame(height: 28)
 
             Button { openOriginal() } label: {
                 Label("打开原帖", systemImage: "arrow.up.right.square")
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .disabled(post.linkURL == nil)
         }
@@ -1644,32 +1370,6 @@ struct PostDetailView: View {
 
     private var zhihuContentToolbar: some View {
         HStack(spacing: 8) {
-            Button { dismiss() } label: {
-                Image(systemName: dismissIconName)
-                    .font(.system(size: 20, weight: .semibold))
-                    .frame(width: 36, height: 44, alignment: .leading)
-            }
-            .foregroundStyle(.primary)
-            .accessibilityLabel(dismissAccessibilityLabel)
-            .opacity(presentedAsSheet ? 0 : 1)
-            .disabled(presentedAsSheet)
-            .accessibilityHidden(presentedAsSheet)
-
-            if !presentedAsSheet {
-                HStack(spacing: 5) {
-                    Text("知乎")
-                        .foregroundStyle(.blue)
-                        .fontWeight(.semibold)
-                    if let hotMeta = post.zhihuHotMeta {
-                        Text("· \(hotMeta)")
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-                .font(.system(size: 14))
-                .minimumScaleFactor(0.82)
-            }
-
             Spacer(minLength: 4)
 
             if let link = post.linkURL {
@@ -1952,6 +1652,12 @@ struct PostDetailView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            } else if bilibiliSummaryStatus == "no_subtitles" {
+                ContentUnavailableView(
+                    "该视频暂不支持字幕总结",
+                    systemImage: "captions.bubble",
+                    description: Text("视频没有可用的中文字幕，暂时无法生成总结。")
+                )
             } else if let bilibiliSummaryError {
                 VStack(alignment: .leading, spacing: 10) {
                     ContentUnavailableView(
@@ -2110,6 +1816,8 @@ struct PostDetailView: View {
             bilibiliSummaryStatus = payload.status
         } catch is CancellationError {
             return
+        } catch APIError.httpStatus(422) {
+            bilibiliSummaryStatus = "no_subtitles"
         } catch {
             bilibiliSummaryStatus = "failed"
             bilibiliSummaryError = NetworkErrorPresentation.message(for: error)
@@ -2209,15 +1917,9 @@ struct PostDetailView: View {
 
     private var xDetail: some View {
         VStack(spacing: 0) {
-            if !presentedAsSheet {
-                xNavigationBar
-            }
-
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    if presentedAsSheet {
-                        xNavigationBar
-                    }
+                    xNavigationBar
                     VStack(alignment: .leading, spacing: 0) {
                         xAuthorHeader
                         Group {
@@ -2284,13 +1986,15 @@ struct PostDetailView: View {
                                         avatarURL: quote.author?.profileImageURL
                                     )
                                 }
+                                .accessibilityElement(children: .combine)
                                 .accessibilityAddTraits(.isButton)
                                 .accessibilityHint("打开引用的原帖")
+                                .accessibilityIdentifier("x-quoted-post")
                         }
 
                         if let link = post.externalURL,
                            XPostTextFormatter.shouldShowExternalURL(link) {
-                            Button { openURL(link) } label: {
+                            Button { openArticleLink(link) } label: {
                                 Text("阅读更多：\(link.host() ?? link.absoluteString)")
                                     .font(.system(size: 16, weight: .semibold))
                                     .foregroundStyle(.blue)
@@ -2331,19 +2035,20 @@ struct PostDetailView: View {
                     )
                         .padding(.horizontal, 15)
                         .frame(height: 44)
-                    Divider()
+                    if isLoadingXComments || xCommentsError != nil || !xComments.isEmpty {
+                        Divider()
+                        HStack {
+                            Text("回复").font(.system(size: 17, weight: .bold))
+                            Spacer()
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.top, 18)
+                        .padding(.bottom, 8)
 
-                    HStack {
-                        Text("回复").font(.system(size: 17, weight: .bold))
-                        Spacer()
+                        xCommentsSection
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.top, 18)
-                    .padding(.bottom, 8)
-
-                    xCommentsSection
                 }
-                .padding(.bottom, presentedAsSheet ? 76 : 16)
+                .padding(.bottom, 76)
             }
             // Keep scrolled content inside the viewport, below the status bar.
             .clipped()
@@ -2353,12 +2058,7 @@ struct PostDetailView: View {
 
     private var xNavigationBar: some View {
         HStack(spacing: 0) {
-            Button { dismiss() } label: {
-                Image(systemName: "arrow.left")
-                    .font(.system(size: 19, weight: .medium))
-                    .frame(width: 44, height: 44)
-            }
-            .accessibilityLabel("返回")
+            Color.clear.frame(width: 44)
             Spacer()
             Text("帖子")
                 .font(.system(size: 18, weight: .bold))
@@ -2436,8 +2136,10 @@ struct PostDetailView: View {
                 screenName: handle, avatarURL: xDetailAuthorAvatarURL
             )
         }
+        .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("查看该作者的帖子")
+        .accessibilityIdentifier("x-detail-author-\(post.id)")
     }
 
     private var xDetailAuthorName: String {
@@ -2501,16 +2203,6 @@ struct PostDetailView: View {
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 24)
             .padding(.vertical, 28)
-        } else if xComments.isEmpty {
-            VStack(spacing: 7) {
-                Image(systemName: "bubble.left.and.bubble.right")
-                    .font(.title3)
-                Text("暂无评论")
-                    .font(.subheadline.weight(.medium))
-            }
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 32)
         } else {
             ForEach(xComments) { comment in
                 XCommentRow(
@@ -2659,21 +2351,25 @@ struct PostDetailView: View {
         return value.formatted()
     }
 
+    private func openArticleLink(_ url: URL) {
+        presentedArticleLink = InAppBrowserDestination(url: url)
+    }
+
     private func openOriginal() {
-        if let link = post.linkURL { openURL(link) }
+        if let link = post.linkURL { openArticleLink(link) }
     }
 
     private func openXOriginal() {
         guard let link = post.linkURL else { return }
         guard let appURL = xAppURL(for: link) else {
-            openURL(link)
+            openArticleLink(link)
             return
         }
 
         UIApplication.shared.open(appURL, options: [:]) { didOpen in
             guard !didOpen else { return }
             DispatchQueue.main.async {
-                openURL(link)
+                openArticleLink(link)
             }
         }
     }
@@ -2705,19 +2401,8 @@ struct PostDetailView: View {
             return
         }
 
-        if !post.isYouTube,
-           !post.isBilibili,
-           !post.isWeiboRSS,
-           post.sourceName != "X",
-           player == nil,
-           let video = post.videoURLs.first {
-            startVideoPlayback(url: video)
-            await detectVideoAspectRatio(url: video)
-        } else if post.sourceName == "X",
-                  xVideoMetadataAspectRatio == nil,
-                  let video = post.videoURLs.first {
-            await detectVideoAspectRatio(url: video)
-        }
+        let initialPost = post
+        async let initialVideoLayout: Void = prepareInitialVideoLayout(for: initialPost)
 
         if loadsStoredDetail, post.sourceName != "X" || post.needsXStoredDetailRefresh,
            let detail = try? await client.fetchPost(id: post.id) {
@@ -2735,6 +2420,8 @@ struct PostDetailView: View {
         }
         if post.isQbitAIArticle {
             await loadQbitAIArticle(using: client)
+        } else if isGenericRSSDetail {
+            await loadRSSOriginalArticle(using: client)
         }
         let replyContextTask: Task<Void, Never>? = if post.sourceName == "X" {
             Task { await loadXReplyContext(using: client) }
@@ -2751,7 +2438,7 @@ struct PostDetailView: View {
                    xVideoMetadataAspectRatio == nil {
                     await detectVideoAspectRatio(url: videoURL)
                 }
-                if !presentedAsSheet,
+                if prefersFullOriginal,
                    XPostTextFormatter.shouldPreferFullOriginal(
                     displayed: xDisplayedDetailText,
                     fullOriginal: liveDetail.fullText
@@ -2778,6 +2465,8 @@ struct PostDetailView: View {
             isLoadingXFullText = false
         }
         await replyContextTask?.value
+        await initialVideoLayout
+        guard !Task.isCancelled else { return }
         if post.isYouTube || post.isBilibili || post.isWeiboRSS {
             player?.pause()
             player = nil
@@ -2787,6 +2476,22 @@ struct PostDetailView: View {
             startVideoPlayback(url: video)
             await detectVideoAspectRatio(url: video)
         } else if let video = post.videoURLs.first, detectedVideoAspectRatio == nil {
+            await detectVideoAspectRatio(url: video)
+        }
+    }
+
+    private func prepareInitialVideoLayout(for post: Post) async {
+        if !post.isYouTube,
+           !post.isBilibili,
+           !post.isWeiboRSS,
+           post.sourceName != "X",
+           player == nil,
+           let video = post.videoURLs.first {
+            startVideoPlayback(url: video)
+            await detectVideoAspectRatio(url: video)
+        } else if post.sourceName == "X",
+                  xVideoMetadataAspectRatio == nil,
+                  let video = post.videoURLs.first {
             await detectVideoAspectRatio(url: video)
         }
     }
@@ -2821,6 +2526,26 @@ struct PostDetailView: View {
         }
     }
 
+    private nonisolated static let rssPreviewPageChrome = #"(?is)<!doctype\s+html\b|<(?:html|head|body)(?=[\s>])|<link\b(?:[^"'<>]|"[^"]*"|'[^']*')*?\srel\s*=\s*(?:"stylesheet"|'stylesheet'|stylesheet(?=[\s/>]))"#
+
+    private func loadRSSOriginalArticle(using client: APIClient) async {
+        // Read the original article only. This endpoint does not enqueue a cloud translation.
+        guard let link = post.linkURL,
+              let payload = try? await client.fetchArticlePreview(url: link, preferRemote: true).data,
+              !Task.isCancelled else { return }
+        let article = post
+        let html = await Task.detached(priority: .userInitiated) { () -> String? in
+            let content = payload.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Page chrome identifies a website shell that cannot replace the stored article.
+            guard !content.isEmpty,
+                  content.range(of: Self.rssPreviewPageChrome, options: .regularExpression) == nil,
+                  payload.textContent.count >= article.originalDisplayContent.count else { return nil }
+            return content
+        }.value
+        guard let html, !Task.isCancelled else { return }
+        rssOriginalArticleHTML = html
+    }
+
     private func loadQbitAIArticle(using client: APIClient) async {
         defer { isLoadingQbitAIArticle = false }
         guard let link = post.linkURL,
@@ -2829,8 +2554,14 @@ struct PostDetailView: View {
         let html = payload.contentZH.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? payload.content
             : payload.contentZH
-        guard let articleHTML = QbitAIArticleParser.extractBodyHTML(from: html) else { return }
-        qbitAIArticleBlocks = post.rssArticleBlocks(overridingContent: articleHTML)
+        let article = post
+        let blocks = await Task.detached(priority: .userInitiated) {
+            QbitAIArticleParser.extractBodyHTML(from: html).map {
+                article.rssArticleBlocks(overridingContent: $0)
+            }
+        }.value
+        guard !Task.isCancelled else { return }
+        qbitAIArticleBlocks = blocks
     }
 
     nonisolated private static func containsHanCharacters(_ value: String) -> Bool {
@@ -2899,14 +2630,9 @@ struct PostDetailView: View {
 
     @MainActor
     private func detectVideoAspectRatio(url: URL) async {
-        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
-        generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: 1_200, height: 1_200)
-        guard let (image, _) = try? await generator.image(at: .zero),
-              image.width > 0,
-              image.height > 0,
-              !Task.isCancelled else { return }
-        detectedVideoAspectRatio = CGFloat(image.width) / CGFloat(image.height)
+        guard let aspectRatio = await videoTrackAspectRatio(for: url), !Task.isCancelled,
+              post.videoURLs.contains(url) || xLiveDetail?.videoURL == url else { return }
+        detectedVideoAspectRatio = aspectRatio
     }
 
     @MainActor
@@ -2928,6 +2654,7 @@ struct PostDetailView: View {
                 .fetchXComments(tweetID: tweetID)
             guard !Task.isCancelled else { return }
             xComments = comments
+            await ImageLoader.prefetchAvatars(comments.prefix(4).compactMap(\.author.avatarURL))
         } catch is CancellationError {
             return
         } catch {
@@ -2950,6 +2677,7 @@ struct PostDetailView: View {
             guard !Task.isCancelled else { return }
             weiboComments = payload.items
             weiboCommentCount = payload.commentCount
+            await ImageLoader.prefetchAvatars(payload.items.prefix(4).compactMap(\.avatarURL))
         } catch is CancellationError {
             return
         } catch {
@@ -3430,10 +3158,6 @@ final class YouTubeWarmPlayerPool: NSObject, WKScriptMessageHandler {
     private var prewarmedIDs: Set<String> = []
     private var fullscreenObservations: [ObjectIdentifier: NSKeyValueObservation] = [:]
 
-    func prewarm(videoID: String) -> WKWebView {
-        playerView(videoID: videoID, instanceID: "default", options: .standard)
-    }
-
     func start(
         videoID: String,
         instanceID: String,
@@ -3684,7 +3408,9 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
                 : ["AVURLAssetHTTPHeaderFieldsKey": source.httpHeaders]
         )
         let item = AVPlayerItem(asset: asset)
+        item.preferredForwardBufferDuration = 3
         let player = AVPlayer(playerItem: item)
+        player.automaticallyWaitsToMinimizeStalling = false
         #if targetEnvironment(simulator)
         player.isMuted = true
         #endif
@@ -3693,11 +3419,12 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
         if startsAt > 0 {
             player.seek(to: CMTime(seconds: startsAt, preferredTimescale: 600))
         }
-        player.play()
         return controller
     }
 
-    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {}
+    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
+        controller.view.setNeedsLayout()
+    }
 
     static func dismantleUIViewController(_ controller: AVPlayerViewController, coordinator: Coordinator) {
         controller.player?.pause()
@@ -3712,7 +3439,10 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
         private var failureObserver: NSObjectProtocol?
         private var timeObserver: Any?
         private weak var observedPlayer: AVPlayer?
-        private var deliveredState = false
+        private var deliveredReady = false
+        private var deliveredFailure = false
+        private var isStopped = false
+        private var startupTimeout: DispatchWorkItem?
 
         init(
             onReady: @escaping () -> Void,
@@ -3726,6 +3456,9 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
 
         func observe(item: AVPlayerItem, player: AVPlayer) {
             observedPlayer = player
+            let timeout = DispatchWorkItem { [weak self] in self?.failPlayback() }
+            startupTimeout = timeout
+            DispatchQueue.main.asyncAfter(deadline: .now() + 25, execute: timeout)
             timeObserver = player.addPeriodicTimeObserver(
                 forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
                 queue: .main
@@ -3733,23 +3466,9 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
                 guard time.seconds.isFinite else { return }
                 self?.onTime(time.seconds)
             }
-            statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self, weak player] item, _ in
+            statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
                 DispatchQueue.main.async {
-                    guard let self, !self.deliveredState else { return }
-                    switch item.status {
-                    case .readyToPlay:
-                        self.deliveredState = true
-                        self.onReady()
-                        player?.play()
-                    case .failed:
-                        self.deliveredState = true
-                        #if DEBUG
-                        print("YouTube AVPlayer failed: \(item.error?.localizedDescription ?? "unknown")")
-                        #endif
-                        self.onFailed()
-                    default:
-                        break
-                    }
+                    self?.handleStatus(item.status)
                 }
             }
             failureObserver = NotificationCenter.default.addObserver(
@@ -3757,16 +3476,42 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
                 object: item,
                 queue: .main
             ) { [weak self] notification in
-                guard let self, !self.deliveredState else { return }
-                self.deliveredState = true
+                guard let self, !self.isStopped else { return }
                 #if DEBUG
                 print("YouTube AVPlayer ended with error: \(notification.userInfo ?? [:])")
                 #endif
-                self.onFailed()
+                self.failPlayback()
             }
         }
 
+        func handleStatus(_ status: AVPlayerItem.Status) {
+            guard !isStopped, !deliveredFailure else { return }
+            switch status {
+            case .readyToPlay:
+                guard !deliveredReady else { return }
+                deliveredReady = true
+                startupTimeout?.cancel()
+                onReady()
+                observedPlayer?.play()
+            case .failed:
+                failPlayback()
+            default:
+                break
+            }
+        }
+
+        private func failPlayback() {
+            guard !isStopped, !deliveredFailure else { return }
+            deliveredFailure = true
+            startupTimeout?.cancel()
+            observedPlayer?.pause()
+            onFailed()
+        }
+
         func stopObserving() {
+            isStopped = true
+            startupTimeout?.cancel()
+            startupTimeout = nil
             statusObservation?.invalidate()
             statusObservation = nil
             if let timeObserver, let observedPlayer {
@@ -4066,7 +3811,7 @@ struct XAuthorPostsView: View {
                     .padding(16)
                     Text("帖子").font(.headline).padding(.horizontal, 16).padding(.bottom, 12)
                     Divider()
-                    if isResolvingAuthor || (model.isLoading && model.posts.isEmpty) {
+                    if (isResolvingAuthor || model.isLoading) && model.posts.isEmpty {
                         ProgressView("正在加载帖子…").frame(maxWidth: .infinity).padding(32)
                     } else if let error = model.errorMessage, model.posts.isEmpty {
                         ContentUnavailableView {
@@ -4114,14 +3859,17 @@ struct XAuthorPostsView: View {
                     }
                 }
             }
+            .accessibilityIdentifier("x-author-posts")
             .clipped()
-            .refreshable {
-                await loadAuthor()
-            }
         }
         .background(Color(uiColor: .systemBackground))
         .toolbar(.hidden, for: .navigationBar)
-        .navigationDestination(item: $selectedPost) { post in PostDetailView(post: post) }
+        .appSheet(item: $selectedPost) { post in
+            NavigationStack {
+                PostDetailView(post: post, prefersFullOriginal: true)
+            }
+            .readingSheetPresentation()
+        }
         .task { await loadAuthor() }
     }
 

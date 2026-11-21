@@ -1,10 +1,6 @@
 import SwiftUI
 import Observation
 
-enum GDPDesign {
-    static let porcelain = InvestmentDesign.surface
-}
-
 struct CountryGDPRankingResponse: Decodable {
     let success: Bool
     let data: CountryGDPRanking
@@ -77,19 +73,17 @@ struct CountryGDPService {
         self.session = session
     }
 
-    func ranking() async throws -> CountryGDPRanking {
+    func ranking(onCached: @escaping @MainActor (CountryGDPRanking) -> Void) async throws -> CountryGDPRanking {
         let url = baseURL.appending(path: "api/ios/v1/economy/gdp-ranking")
         var request = URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData, timeoutInterval: 10)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
+        return try await loadDisplayPage(request: request, session: session, onCached: onCached) { data in
+            let payload = try JSONDecoder().decode(CountryGDPRankingResponse.self, from: data)
+            guard payload.success, !payload.data.countries.isEmpty else {
+                throw URLError(.cannotParseResponse)
+            }
+            return payload.data
         }
-        let payload = try JSONDecoder().decode(CountryGDPRankingResponse.self, from: data)
-        guard payload.success, !payload.data.countries.isEmpty else {
-            throw URLError(.cannotParseResponse)
-        }
-        return payload.data
     }
 
     func history(countryCode: String) async throws -> CountryGDPHistory {
@@ -141,7 +135,7 @@ struct GlobalAsset: Decodable, Identifiable {
     let priceUSD: Double
     let change24HPercent: Double
     let change7DPercent: Double
-    let iconURL: URL?
+    let iconURL: String
 
     var id: String { symbol }
 
@@ -164,19 +158,18 @@ struct GlobalAssetsService {
         self.session = session
     }
 
-    func ranking() async throws -> GlobalAssetsRanking {
+    func ranking(onCached: @escaping @MainActor (GlobalAssetsRanking) -> Void) async throws -> GlobalAssetsRanking {
         let url = baseURL.appending(path: "api/ios/v1/economy/global-assets")
-        var request = URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData, timeoutInterval: 10)
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        return try await loadDisplayPage(request: request, session: session, onCached: onCached) { data in
+            let payload = try JSONDecoder().decode(GlobalAssetsRankingResponse.self, from: data)
+            guard payload.success, !payload.data.assets.isEmpty else {
+                throw URLError(.cannotParseResponse)
+            }
+            return payload.data
         }
-        let payload = try JSONDecoder().decode(GlobalAssetsRankingResponse.self, from: data)
-        guard payload.success, !payload.data.assets.isEmpty else {
-            throw URLError(.cannotParseResponse)
-        }
-        return payload.data
     }
 }
 
@@ -189,6 +182,7 @@ final class GlobalRankingStore {
     private(set) var isLoadingGlobalAssets = false
     private(set) var countryGDPLoadFailed = false
     private(set) var globalAssetsLoadFailed = false
+    private var globalAssetsLoadedAt: Date?
 
     private let countryGDPService: CountryGDPService
     private let globalAssetsService: GlobalAssetsService
@@ -198,19 +192,15 @@ final class GlobalRankingStore {
         globalAssetsService = GlobalAssetsService(baseURL: baseURL, session: session)
     }
 
-    func loadSummary() async {
-        async let countryGDP: Void = loadCountryGDP()
-        async let globalAssets: Void = loadGlobalAssets()
-        _ = await (countryGDP, globalAssets)
-    }
-
     func loadCountryGDP() async {
         guard !isLoadingCountryGDP else { return }
         isLoadingCountryGDP = true
         countryGDPLoadFailed = false
         defer { isLoadingCountryGDP = false }
         do {
-            countryGDP = try await countryGDPService.ranking()
+            countryGDP = try await countryGDPService.ranking { cached in
+                if self.countryGDP == nil { self.countryGDP = cached }
+            }
         } catch is CancellationError {
             return
         } catch {
@@ -218,17 +208,21 @@ final class GlobalRankingStore {
         }
     }
 
-    func loadGlobalAssets() async {
+    func loadGlobalAssets(force: Bool = false) async {
         guard !isLoadingGlobalAssets else { return }
+        if !force, let globalAssetsLoadedAt, Date().timeIntervalSince(globalAssetsLoadedAt) < 60 { return }
         isLoadingGlobalAssets = true
         globalAssetsLoadFailed = false
         defer { isLoadingGlobalAssets = false }
         do {
-            globalAssets = try await globalAssetsService.ranking()
+            globalAssets = try await globalAssetsService.ranking { cached in
+                if self.globalAssets == nil { self.globalAssets = cached }
+            }
+            globalAssetsLoadedAt = Date()
         } catch is CancellationError {
             return
         } catch {
-            if globalAssets == nil { globalAssetsLoadFailed = true }
+            globalAssetsLoadFailed = true
         }
     }
 }
@@ -239,16 +233,16 @@ struct CountryGDPRankingView: View {
     @State private var category: GlobalRankingCategory
     @State private var selectedCountry: CountryGDPRoute?
 
-    init(store: GlobalRankingStore) {
+    init(store: GlobalRankingStore, initialCategory: GlobalRankingCategory = .countryGDP) {
         self.store = store
         #if DEBUG
         _category = State(
             initialValue: ProcessInfo.processInfo.arguments.contains("--global-assets-preview")
                 ? .globalAssets
-                : .countryGDP
+                : initialCategory
         )
         #else
-        _category = State(initialValue: .countryGDP)
+        _category = State(initialValue: initialCategory)
         #endif
     }
 
@@ -266,7 +260,7 @@ struct CountryGDPRankingView: View {
                                 rankingSection(ranking)
                                 sourceFooter(ranking)
                             }
-                            .padding(.bottom, 28)
+                            .padding(.bottom, 88)
                         }
                         .background(InvestmentDesign.surface)
                         .scrollIndicators(.hidden)
@@ -282,12 +276,11 @@ struct CountryGDPRankingView: View {
             }
         }
         .background(InvestmentDesign.surface)
-        .sheet(item: $selectedCountry) { route in
+        .appSheet(item: $selectedCountry) { route in
             CountryGDPDetailView(route: route)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.hidden)
-                .presentationCornerRadius(28)
-                .presentationBackground(InvestmentDesign.surface)
+                .appPresentationDetents([.large])
+                .appPresentationCornerRadius(28)
+                .appPresentationBackground(InvestmentDesign.surface)
         }
         .task(id: "\(rootTabIsActive):\(category.rawValue)") {
             if rootTabIsActive, category == .countryGDP, store.countryGDP == nil {
@@ -510,7 +503,7 @@ struct CountryGDPRankingView: View {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "checkmark.shield.fill")
                     .foregroundStyle(InvestmentDesign.accent)
-                Text("数据来自世界银行 GDP 总量与人均 GDP 指标，按数据库中的 \(ranking.year) 年现价美元总量排序。点击查看原始口径。")
+                Text("数据来自世界银行，按 \(ranking.year) 年现价美元 GDP 总量排序。点按查看原始口径。")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.leading)
@@ -529,21 +522,14 @@ struct CountryGDPRankingView: View {
     }
 
     private var loadingState: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-            Text("正在读取 GDP 排名")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: 320)
+        ContentLoadingPlaceholder(title: "正在读取 GDP 排名")
     }
 
     private var errorState: some View {
         ContentUnavailableView {
             Label("GDP 排名暂不可用", systemImage: "chart.bar.xaxis")
         } description: {
-            Text("服务器未返回可用的排名数据")
+            Text("排名数据暂不可用，请稍后重试")
         } actions: {
             Button("重新加载") {
                 Task { await store.loadCountryGDP() }

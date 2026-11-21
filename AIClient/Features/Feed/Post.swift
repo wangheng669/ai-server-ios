@@ -84,10 +84,10 @@ struct RSSFeedPostsResponse: Decodable {
 }
 struct RSSFeedsResponse: Decodable {
     let data: Payload
-    let meta: Meta?
+    let meta: Meta
     struct Payload: Decodable { let feeds: [RSSFeedSource] }
     struct Meta: Decodable {
-        let pagination: Pagination?
+        let pagination: Pagination
         struct Pagination: Decodable {
             let page: Int
             let size: Int
@@ -131,6 +131,16 @@ struct RSSFeedSource: Decodable, Identifiable, Equatable {
             .contains { value in
                 value.range(of: #"(?:^|/)weibo/user/\d+(?:/|$)"#, options: .regularExpression) != nil
             }
+    }
+
+    var isXueqiuUserFeed: Bool {
+        guard let feedURL, let path = URLComponents(string: feedURL)?.path else { return false }
+        return path.range(of: #"^/xueqiu/user/[0-9]+(?:/[0-9]+)?/?$"#, options: .regularExpression) != nil
+    }
+
+    var xueqiuAuthorName: String {
+        let prefix = "雪球-"
+        return name.hasPrefix(prefix) ? String(name.dropFirst(prefix.count)) : name
     }
 
     var iconURL: URL? {
@@ -485,6 +495,28 @@ struct HotTopicsResponse: Decodable {
     struct DataPayload: Decodable { let topics: [HotTopic] }
 }
 
+struct ZhihuHotTopicsResponse: Decodable {
+    let success: Bool
+    let data: Payload
+    struct Payload: Decodable { let topics: [ZhihuHotTopic] }
+}
+
+struct ZhihuHotTopic: Decodable {
+    let rank: Int
+    let title, url: String
+    let heat, summary, thumbnailURL: String?
+    let answerCount, followerCount, postID: Int?
+    let answerExcerpt, answerContent: String?
+    let answerAuthor: ZhihuAnswerAuthor?
+    let answerVoteupCount, answerCommentCount: Int?
+    enum CodingKeys: String, CodingKey {
+        case rank, title, url, heat, summary
+        case thumbnailURL = "thumbnail_url", answerCount = "answer_count", followerCount = "follower_count", postID = "post_id"
+        case answerExcerpt = "zhihu_answer_excerpt", answerContent = "zhihu_answer_content", answerAuthor = "zhihu_answer_author"
+        case answerVoteupCount = "zhihu_answer_voteup_count", answerCommentCount = "zhihu_answer_comment_count"
+    }
+}
+
 struct HotTopic: Decodable {
     let id: Int?
     let keyword, summary, reason, searchLink: String?
@@ -621,6 +653,7 @@ struct Post: Codable, Identifiable, Hashable {
     let videos: [PostVideo]?
     let feedRank: Int?
     let meta: PostMeta?
+    var rssOriginalTitle: String? = nil
     // Runtime-only card translations. The backend payload and offline cache remain unchanged.
     var rssTitleZH: String? = nil
     var rssExcerptZH: String? = nil
@@ -813,6 +846,7 @@ struct Post: Codable, Identifiable, Hashable {
             postLink: postLink, articlePostAt: articlePostAt, user: user,
             postTags: postTags, images: images, videos: videos, feedRank: feedRank, meta: meta
         )
+        replaced.rssOriginalTitle = rssOriginalTitle
         replaced.xReposterName = xReposterName
         return replaced
     }
@@ -932,8 +966,9 @@ struct Post: Codable, Identifiable, Hashable {
             .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
         return ["in this article", "comments", "comment"].contains(normalized)
     }
+    var truthChineseContent: String? { htmlText(contentZH) }
     var truthFeedContent: String {
-        guard let translated = htmlText(contentZH) else { return "翻译处理中" }
+        guard let translated = truthChineseContent else { return originalDisplayContent }
         let markers = ["https://", "http://", "https：//", "http：//"]
         let firstLink = markers.compactMap { translated.range(of: $0, options: .caseInsensitive) }.min { $0.lowerBound < $1.lowerBound }
         guard let firstLink else { return translated }
@@ -1155,7 +1190,10 @@ struct Post: Codable, Identifiable, Hashable {
         feedContentImages.compactMap { MediaURL.image($0.url) }
     }
     var feedImageURLs: [URL] {
-        let variant = feedContentImages.count == 1 ? "medium" : "small"
+        if source == "truth" {
+            return feedContentImages.compactMap { MediaURL.image(clean($0.preview) ?? $0.url) }
+        }
+        let variant: MediaURL.XPhotoSize = feedContentImages.count == 1 ? .single : .tile
         return feedContentImages.compactMap { MediaURL.feedImage($0.url, variant: variant) }
     }
     private var feedContentImages: [PostImage] {
@@ -1503,7 +1541,23 @@ struct Post: Codable, Identifiable, Hashable {
     }
     var xFeedVideoPoster: URL? {
         let cover = videos?.lazy.compactMap { $0.coverURL ?? $0.previewImageURL ?? $0.preview }.first
-        return (cover ?? feedContentImages.first?.url).flatMap { MediaURL.feedImage($0, variant: "small") }
+        return (cover ?? feedContentImages.first?.url).flatMap { MediaURL.feedImage($0, variant: .tile) }
+    }
+    var weChatCardPreviewURL: URL? {
+        guard let previewURL else { return nil }
+        var source = ImageLoader.sourceImageURL(from: previewURL)
+        if source.host == "wechat2rss.bestblogs.dev", source.path == "/img-proxy",
+           let original = URLComponents(url: source, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == "u" })?.value,
+           let url = URL(string: original) {
+            source = url
+        }
+        guard source.scheme == "https", source.host == "mmbiz.qpic.cn",
+              var parts = URLComponents(url: source, resolvingAgainstBaseURL: false),
+              let items = parts.queryItems,
+              items.contains(where: { $0.name == "wx_fmt" && $0.value?.lowercased() == "png" }) else { return previewURL }
+        parts.queryItems = items.filter { $0.name != "tp" } + [URLQueryItem(name: "tp", value: "webp")]
+        return parts.string.flatMap(MediaURL.image)
     }
 
     var youtubeCoverURL: URL? {
@@ -1867,6 +1921,7 @@ struct Post: Codable, Identifiable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case id, title, text, summary, content, source, weight, user, images, videos, feedRank, meta
+        case rssOriginalTitle = "original_title"
         case contentZH = "content_zh"
         case formattedTime = "formatted_time"
         case weightReason = "weight_reason"
@@ -1874,6 +1929,26 @@ struct Post: Codable, Identifiable, Hashable {
         case postLink = "post_link"
         case articlePostAt = "article_post_at"
         case postTags
+    }
+
+    static func zhihuTopic(_ topic: ZhihuHotTopic) -> Post {
+        let metadata = PostMeta(
+            metrics: nil, lang: nil, urls: nil, rawText: nil, noteText: nil,
+            inReplyToScreenName: nil, inReplyToStatusID: nil, replyContext: nil, quotedTweet: nil, photoCredit: nil,
+            zhihuRank: topic.rank, zhihuHeat: topic.heat, zhihuAnswers: topic.answerCount, zhihuFollowerCount: topic.followerCount,
+            zhihuQuestionID: URL(string: topic.url)?.lastPathComponent, zhihuURL: topic.url, zhihuAnswerExcerpt: topic.answerExcerpt,
+            zhihuAnswerContent: topic.answerContent, zhihuAnswerAuthor: topic.answerAuthor,
+            zhihuAnswerVoteupCount: topic.answerVoteupCount, zhihuAnswerCommentCount: topic.answerCommentCount,
+            rssFeedName: nil, rssFeedIcon: nil, rssArticleLink: nil,
+            flashCategory: nil, flashSimilarityGroupId: nil, flashSimilarityScore: nil, flashSimilarCount: nil, flashPlatformCount: nil, flashPlatforms: nil
+        )
+        return Post(
+            id: topic.postID ?? syntheticID("zhihu:\(topic.url)"), title: topic.title, text: topic.title,
+            summary: topic.summary, content: topic.answerContent, contentZH: nil, source: "zhihu",
+            formattedTime: topic.heat, weightReason: nil, finalScore: nil, weight: nil, postLink: topic.url, articlePostAt: nil,
+            user: .init(userName: "知乎热榜", userScreenName: "知乎热榜", avatarURL: nil, userDesc: nil), postTags: [],
+            images: topic.thumbnailURL.map { [.init(url: $0, width: nil, height: nil)] } ?? [], videos: [], feedRank: topic.rank, meta: metadata
+        )
     }
 
     static func hotTopic(_ topic: HotTopic, source: FeedSource, displayRank: Int? = nil) -> Post {
@@ -2127,7 +2202,8 @@ struct XQuotedMedia: Codable, Hashable {
 
     var displayURL: URL? { (thumbnailURL ?? url).flatMap(MediaURL.image) }
     var feedDisplayURL: URL? {
-        (thumbnailURL ?? url).flatMap { MediaURL.feedImage($0, variant: "medium") }
+        let raw = isVideo ? thumbnailURL : (thumbnailURL ?? url)
+        return raw.flatMap { MediaURL.feedImage($0, variant: isVideo ? .tile : .single) }
     }
     var isVideo: Bool {
         ["video", "animated_gif", "gif"].contains(type?.lowercased() ?? "")
@@ -2276,6 +2352,7 @@ struct PostUser: Codable, Hashable {
 struct PostTag: Codable, Hashable { let id: Int; let name: String }
 struct PostImage: Codable, Hashable {
     let url: String
+    var preview: String? = nil
     let width, height: Int?
     let altText: String?
     let kind: String?
@@ -2307,7 +2384,7 @@ struct PostImage: Codable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case url, width, height, kind
+        case url, preview, width, height, kind
         case altText = "alt_text"
     }
 
@@ -2322,6 +2399,7 @@ struct PostImage: Codable, Hashable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         url = try container.decode(String.self, forKey: .url)
+        preview = try container.decodeIfPresent(String.self, forKey: .preview)
         width = Self.decodeDimension(.width, from: container)
         height = Self.decodeDimension(.height, from: container)
         altText = try container.decodeIfPresent(String.self, forKey: .altText)
@@ -2356,7 +2434,7 @@ enum MediaURL {
         return resolvedImage(decoded)
     }
 
-    static func feedImage(_ raw: String, variant: String = "small") -> URL? {
+    static func feedImage(_ raw: String, variant: XPhotoSize) -> URL? {
         let decoded = feedSizedXMediaURL(highResolutionXueqiuImageURL(
             raw.replacingOccurrences(of: "&amp;", with: "&")
         ), variant: variant)
@@ -2385,16 +2463,44 @@ enum MediaURL {
         return resolved(decoded, proxy: "image-proxy")
     }
 
-    private static func feedSizedXMediaURL(_ raw: String, variant: String) -> String {
+    enum XPhotoSize: String {
+        case single = "900x900"
+        case tile = "small"
+
+        var maxPixels: CGFloat { self == .single ? 900 : 680 }
+    }
+
+    private static func isXTimelineMediaPath(_ path: String) -> Bool {
+        ["/media/", "/amplify_video_thumb/", "/ext_tw_video_thumb/", "/tweet_video_thumb/"].contains {
+            path.hasPrefix($0)
+        }
+    }
+
+    private static func feedSizedXMediaURL(_ raw: String, variant: XPhotoSize) -> String {
         guard var components = URLComponents(string: raw),
               components.host?.lowercased() == "pbs.twimg.com",
-              components.path.hasPrefix("/media/") else { return raw }
+              isXTimelineMediaPath(components.path) else { return raw }
 
-        var queryItems = components.queryItems ?? []
-        queryItems.removeAll { $0.name.caseInsensitiveCompare("name") == .orderedSame }
-        queryItems.append(URLQueryItem(name: "name", value: variant == "medium" ? "medium" : "small"))
-        components.queryItems = queryItems
+        let path = components.path as NSString
+        if !path.pathExtension.isEmpty {
+            guard ["jpg", "jpeg", "png", "webp"].contains(path.pathExtension.lowercased()) else { return raw }
+            components.path = path.deletingPathExtension
+        }
+        var items = (components.queryItems ?? []).filter {
+            !["name", "format"].contains($0.name.lowercased())
+        }
+        items.append(URLQueryItem(name: "format", value: "webp"))
+        items.append(URLQueryItem(name: "name", value: variant.rawValue))
+        components.queryItems = items
         return components.string ?? raw
+    }
+
+    static func feedPhotoSize(for source: URL) -> XPhotoSize? {
+        guard source.host?.lowercased() == "pbs.twimg.com", isXTimelineMediaPath(source.path),
+              let items = URLComponents(url: source, resolvingAgainstBaseURL: false)?.queryItems,
+              items.contains(URLQueryItem(name: "format", value: "webp")),
+              let name = items.first(where: { $0.name == "name" })?.value else { return nil }
+        return XPhotoSize(rawValue: name)
     }
 
     private static func highResolutionXueqiuImageURL(_ raw: String) -> String {
@@ -2516,22 +2622,25 @@ enum FeedSource: String, CaseIterable, Identifiable {
         case .flash: "快讯"
         }
     }
+}
 
-    var hotTopicPageTitle: String {
-        switch self {
-        case .weibo: "微博热搜"
-        case .douyin: "抖音热榜"
-        case .baidu: "百度热搜"
-        default: title
-        }
-    }
 
-    var hotTopicMarkAssetName: String {
-        switch self {
-        case .weibo: "WeiboMark"
-        case .douyin: "TikTokMark"
-        case .baidu: "BaiduMark"
-        default: ""
+enum BilibiliFeedDisplay {
+    static func uniquePosts(_ posts: [Post]) -> [Post] {
+        var identities = Set<String>()
+        return posts.filter { post in
+            var identity = "post:\(post.id)"
+            if let url = post.bilibiliPlaybackPageURL,
+               let host = url.host?.lowercased(),
+               host == "bilibili.com" || host.hasSuffix(".bilibili.com"),
+               let bvid = url.pathComponents.first(where: {
+                   $0.range(of: #"^BV[0-9A-Za-z]{10}$"#, options: .regularExpression) != nil
+               }) {
+                let part = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                    .queryItems?.first(where: { $0.name == "p" })?.value ?? "1"
+                identity = "video:\(bvid):\(part)"
+            }
+            return identities.insert(identity).inserted
         }
     }
 }

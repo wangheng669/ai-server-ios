@@ -2,8 +2,12 @@ import CryptoKit
 import Foundation
 
 actor DisplaySnapshotCache {
+    static let pages = DisplaySnapshotCache(name: "page-snapshots", capacity: 96)
     static let billing = DisplaySnapshotCache(name: "today-billing", capacity: 4)
     static let editions = DisplaySnapshotCache(name: "today-editions", capacity: 4)
+    static let charts = DisplaySnapshotCache(name: "market-charts", capacity: 24)
+    static let knowledge = DisplaySnapshotCache(name: "knowledge-overview", capacity: 12)
+    static let companies = DisplaySnapshotCache(name: "company-research", capacity: 4)
 
     struct Entry<Value: Codable & Sendable>: Codable, Sendable {
         let value: Value
@@ -36,9 +40,16 @@ actor DisplaySnapshotCache {
         return entry
     }
 
-    func save<Value: Codable & Sendable>(_ value: Value, key: String, at date: Date) {
+    func save<Value: Codable & Sendable>(
+        _ value: Value, key: String, at date: Date, minimumInterval: TimeInterval = 0
+    ) {
         let fileManager = FileManager.default
         let destination = fileURL(key)
+        if minimumInterval > 0,
+           let modifiedAt = try? destination.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+           (0..<minimumInterval).contains(date.timeIntervalSince(modifiedAt)) {
+            return
+        }
         do {
             let data = try JSONEncoder().encode(Entry(value: value, savedAt: date))
             guard data.count <= maximumEntrySize else {
@@ -71,4 +82,27 @@ actor DisplaySnapshotCache {
         let digest = SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
         return directory.appending(path: digest + ".json")
     }
+}
+
+/// Start the authoritative request while restoring the last validated response for this URL.
+func loadDisplayPage<Value>(
+    request: URLRequest, session: URLSession,
+    onCached: @escaping @MainActor (Value) -> Void,
+    decode: (Data) throws -> Value
+) async throws -> Value {
+    guard let key = request.url?.absoluteString else { throw URLError(.badURL) }
+    async let response = session.data(for: request)
+    if let saved = await DisplaySnapshotCache.pages.load(Data.self, key: key, maximumAge: 7 * 86400),
+       let page = try? decode(saved.value) {
+        try Task.checkCancellation()
+        await onCached(page)
+    }
+    let (data, metadata) = try await response
+    try Task.checkCancellation()
+    guard let http = metadata as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        throw URLError(.badServerResponse)
+    }
+    let page = try decode(data)
+    await DisplaySnapshotCache.pages.save(data, key: key, at: Date())
+    return page
 }

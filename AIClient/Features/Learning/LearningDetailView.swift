@@ -6,17 +6,20 @@ struct LearningDetailView: View {
     let topic: LearningTopic
     let repository: LearningContentRepository
     let progressStore: LearningProgressStore
-    var lessonTitle: String?
-    var lessonNumber: Int?
-    var lessonCount: Int?
+    let position: LearningLessonPosition?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
 
     var body: some View {
         VStack(spacing: 0) {
-            detailBar
-            if hasLessonPosition {
-                progressRule
+            if let position {
+                progressRule(position.progress)
+                Text(position.text)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
             }
 
             if let loaded = repository.topic(id: topic.id), let detail = loaded.detail {
@@ -40,75 +43,38 @@ struct LearningDetailView: View {
                 LearningDetailPlaceholder(topic: topic)
             }
         }
+        .overlay(alignment: .bottomTrailing) { detailActions.padding(12) }
         .background(LearningDetailPalette.canvas.ignoresSafeArea())
-        .overlay(alignment: .bottomTrailing) {
-            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭学习详情")
-                .padding(16)
-        }
         .toolbar(.hidden, for: .navigationBar)
         .background(InteractivePopGestureEnabler())
         .simultaneousGesture(edgeBackGesture)
         .task { await repository.load(id: topic.id) }
     }
 
-    private var detailBar: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("股票入门路径")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.primary)
-                Text(lessonPositionText)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
+    private var detailActions: some View {
+        DetailSheetControls(
+            closeLabel: "关闭学习详情",
+            onClose: dismiss.callAsFunction
+        ) {
             Button { openURL(topic.url) } label: {
                 Image(systemName: "safari")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .frame(width: 40, height: 40)
-                    .background(LearningDetailPalette.surface, in: Circle())
-                    .overlay {
-                        Circle().stroke(LearningDetailPalette.stroke, lineWidth: 0.8)
-                    }
+                    .frame(width: 44, height: 44)
             }
-            .buttonStyle(.plain)
             .accessibilityLabel("查看内容来源")
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
     }
 
-    private var progressRule: some View {
+    private func progressRule(_ progress: CGFloat) -> some View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
                 Rectangle().fill(LearningDetailPalette.stroke)
                 Rectangle()
                     .fill(LearningDetailPalette.accent)
-                    .frame(width: geometry.size.width * lessonProgress)
+                    .frame(width: geometry.size.width * progress)
             }
         }
         .frame(height: 2)
         .accessibilityHidden(true)
-    }
-
-    private var hasLessonPosition: Bool {
-        lessonNumber != nil && lessonCount != nil
-    }
-
-    private var lessonProgress: CGFloat {
-        guard let lessonNumber, let lessonCount, lessonCount > 0 else { return 0 }
-        return CGFloat(min(max(lessonNumber, 0), lessonCount)) / CGFloat(lessonCount)
-    }
-
-    private var lessonPositionText: String {
-        guard let lessonNumber, let lessonCount else { return "延伸阅读" }
-        if let lessonTitle, !lessonTitle.isEmpty {
-            return "第 \(lessonNumber)/\(lessonCount) 节 · \(lessonTitle)"
-        }
-        return "第 \(lessonNumber)/\(lessonCount) 节"
     }
 
     private func completeLesson() {
@@ -131,22 +97,14 @@ struct LearningDetailView: View {
 }
 
 private enum LearningDetailPalette {
-    static let accent = Color(red: 0.76, green: 0.29, blue: 0.12)
+    static let accent = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.94, green: 0.57, blue: 0.35, alpha: 1)
+            : UIColor(red: 0.76, green: 0.29, blue: 0.12, alpha: 1)
+    })
     static let sage = Color(red: 0.40, green: 0.48, blue: 0.39)
-    static let canvas = Color(
-        uiColor: UIColor { traits in
-            traits.userInterfaceStyle == .dark
-                ? UIColor.systemBackground
-                : UIColor(red: 0.98, green: 0.965, blue: 0.94, alpha: 1)
-        }
-    )
-    static let surface = Color(
-        uiColor: UIColor { traits in
-            traits.userInterfaceStyle == .dark
-                ? UIColor.secondarySystemBackground
-                : UIColor(red: 0.995, green: 0.985, blue: 0.965, alpha: 1)
-        }
-    )
+    static let canvas = Color(uiColor: .systemBackground)
+    static let surface = Color(uiColor: .secondarySystemBackground)
     static let stroke = Color.primary.opacity(0.10)
 }
 
@@ -172,13 +130,8 @@ private struct LearningDetailPlaceholder: View {
                         .padding(.bottom, 22)
                 }
 
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(LearningDetailPalette.surface)
-                    .frame(height: 104)
-                    .overlay {
-                        ProgressView("正在载入本节内容")
-                            .font(.system(size: 13, weight: .medium))
-                    }
+                ContentLoadingPlaceholder(title: "正在载入本节内容", rowCount: 1)
+                    .background(LearningDetailPalette.surface, in: RoundedRectangle(cornerRadius: 14))
                     .overlay {
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
                             .stroke(LearningDetailPalette.stroke, lineWidth: 0.8)
@@ -219,7 +172,10 @@ private struct LearningArticleView: View {
     let detail: LearningDetail
     let isCompleted: Bool
     let onComplete: () -> Void
-    @State private var player: AVPlayer?
+    private enum PlaybackState { case idle, loading, playing, failed }
+    @State private var playbackState = PlaybackState.idle
+    @State private var playbackGeneration = 0
+    @State private var playbackSeconds = 0
 
     var body: some View {
         ScrollView {
@@ -243,12 +199,14 @@ private struct LearningArticleView: View {
 
                 metadata
 
-                lessonObjective
-                    .padding(.top, 22)
-                    .padding(.bottom, 26)
+                if objectiveText != detail.subtitle.trimmingCharacters(in: .whitespacesAndNewlines) {
+                    lessonObjective.padding(.top, 20)
+                }
 
-                if let examples = detail.companyExamples, !examples.isEmpty {
+                if !detail.uniqueCompanyExamples.isEmpty {
+                    let examples = detail.uniqueCompanyExamples
                     LearningCompanyExamplesView(examples: examples)
+                        .padding(.top, 24)
                         .padding(.bottom, 28)
                 }
 
@@ -278,15 +236,15 @@ private struct LearningArticleView: View {
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity)
                     .padding(.top, 18)
-                    .padding(.bottom, 42)
+                    .padding(.bottom, 92)
             }
             .padding(.horizontal, 20)
             .padding(.top, 24)
         }
         .scrollIndicators(.hidden)
+        .accessibilityIdentifier("learning-article-scroll")
         .onDisappear {
-            player?.pause()
-            player = nil
+            playbackState = .idle
         }
     }
 
@@ -398,7 +356,7 @@ private struct LearningArticleView: View {
     }
 
     private var objectiveText: String {
-        if !topic.summary.isEmpty { return topic.summary }
+        if !topic.summary.isEmpty { return topic.summary.trimmingCharacters(in: .whitespacesAndNewlines) }
         if !detail.subtitle.isEmpty { return detail.subtitle }
         return "理解这一概念的含义、适用场景与常见误区。"
     }
@@ -427,32 +385,61 @@ private struct LearningArticleView: View {
         ZStack {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color.black)
-            if let player {
-                VideoPlayer(player: player)
-            } else {
-                AsyncImage(url: topic.imageURL(detail.videoPosterURLValue)) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                    } else {
-                        Color.black
+            if playbackState == .loading || playbackState == .playing {
+                NativeVideoPlayer(
+                    source: VideoPlaybackSource(
+                        url: url,
+                        label: nil,
+                        httpHeaders: ["Referer": topic.url.absoluteString]
+                    ),
+                    onReady: { playbackState = .playing },
+                    onFailed: { playbackState = .failed },
+                    onTime: { seconds in
+                        let value = Int(seconds)
+                        if value != playbackSeconds { playbackSeconds = value }
+                    }
+                )
+                .id(playbackGeneration)
+            }
+            if playbackState != .playing {
+                Color.black.overlay {
+                    AsyncImage(url: topic.imageURL(detail.videoPosterURLValue)) { phase in
+                        if let image = phase.image { image.resizable().scaledToFill() }
                     }
                 }
-                Button {
-                    let newPlayer = AVPlayer(url: url)
-                    player = newPlayer
-                    newPlayer.play()
-                } label: {
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 23, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 58, height: 58)
-                        .background(LearningDetailPalette.accent.opacity(0.92), in: Circle())
-                        .shadow(color: .black.opacity(0.22), radius: 8, y: 4)
+                Color.black.opacity(0.5)
+                VStack(spacing: 10) {
+                    if playbackState == .loading {
+                        ProgressView("正在加载课程视频…").tint(.white)
+                    } else {
+                        if playbackState == .failed {
+                            Text("课程视频暂时无法播放")
+                                .font(.headline)
+                            Text("视频源加载失败，请重试或查看内容来源。")
+                                .font(.caption)
+                        }
+                        Button {
+                            playbackSeconds = 0
+                            playbackGeneration += 1
+                            playbackState = .loading
+                        } label: {
+                            Label(playbackState == .failed ? "重试课程视频" : "播放课程视频",
+                                  systemImage: playbackState == .failed ? "arrow.clockwise" : "play.fill")
+                                .font(.system(size: 15, weight: .semibold))
+                                .padding(14)
+                                .background(LearningDetailPalette.accent, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("播放课程视频")
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+                .padding(16)
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("learning-course-player")
+        .accessibilityValue("\(playbackSeconds)")
         .aspectRatio(16 / 9, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(alignment: .topLeading) {
@@ -638,13 +625,10 @@ private struct LearningCompanyExamplesView: View {
                     }
                     .foregroundStyle(.secondary)
                 }
-                .padding(16)
-                .background(LearningDetailPalette.surface)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(LearningDetailPalette.accent.opacity(0.24), lineWidth: 0.9)
-                }
+                .padding(.vertical, 18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(alignment: .top) { Divider() }
+                .accessibilityIdentifier("learning-company-example")
             }
         }
     }

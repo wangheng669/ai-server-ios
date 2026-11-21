@@ -23,7 +23,11 @@
 		<key>NSExtensionAttributes</key>
 		<dict>
 			<key>UNNotificationExtensionCategory</key>
-			<string>person-post</string>
+			<array>
+				<string>person-post</string>
+				<string>focus-post</string>
+				<string>focus-report</string>
+			</array>
 			<key>UNNotificationExtensionDefaultContentHidden</key>
 			<true/>
 			<key>UNNotificationExtensionInitialContentSizeRatio</key>
