@@ -348,7 +348,9 @@ private struct TodayBriefCardFace: View {
         return HStack(spacing: 10) {
             switch card.content {
             case let .event(event):
-                if let source {
+                if let logo = TodaySystemAvatar.Source(companySystemKey: event.companySystemKey) {
+                    TodaySystemAvatar(source: logo, name: event.sourceLabel, size: size)
+                } else if let source {
                     AvatarView(url: source.avatarURL, name: source.author, size: size)
                         .accessibilityHidden(true)
                 } else {
@@ -861,12 +863,16 @@ private struct TodaySystemAvatar: View {
         case asset(String)
         case remote(URL?)
 
-        init(_ system: TodayWorldFinalReportSystem) {
-            if let asset = TodaySystemAvatar.companyAssets[system.systemKey] {
-                self = .asset(asset)
-            } else {
-                self = .remote(system.sourceKeys.first.flatMap(todayWorldSourceAvatarURL))
+        init?(companySystemKey: String?) {
+            guard let companySystemKey, let asset = TodaySystemAvatar.companyAssets[companySystemKey] else {
+                return nil
             }
+            self = .asset(asset)
+        }
+
+        init(_ system: TodayWorldFinalReportSystem) {
+            self = Self(companySystemKey: system.systemKey)
+                ?? .remote(system.sourceKeys.first.flatMap(todayWorldSourceAvatarURL))
         }
     }
 

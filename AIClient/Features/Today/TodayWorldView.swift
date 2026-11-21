@@ -523,6 +523,7 @@ struct TodayReadingEvent: Identifiable, Sendable {
     let id: String
     let text: String
     let sourceLabel: String
+    let companySystemKey: String?
     let postIDs: [Int]
 
     static func canonical(_ text: String) -> String {
@@ -571,8 +572,10 @@ struct TodayReadingEvent: Identifiable, Sendable {
         }
         let ids = item.postIDs.isEmpty ? related.flatMap(\.postIDs) : item.postIDs
         let sourceIDs = Set(ids.filter { $0 > 0 })
+        let systemKeys = Set(item.systemKeys)
         return Self(id: item.id, text: item.text,
                     sourceLabel: unique(related.map { todayBriefSystemName($0.systemName) }).joined(separator: " · "),
+                    companySystemKey: systemKeys.count == 1 ? systemKeys.first : nil,
                     postIDs: sourceIDs.sorted())
     }
 }
