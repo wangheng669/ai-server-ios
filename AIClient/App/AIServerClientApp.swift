@@ -755,8 +755,8 @@ private struct NotificationNavigationTaskID: Equatable {
 private struct RootNavigationBar: View {
     @Binding var selection: EditorialTab
     let dynamicTarget: EditorialTab
-    @ScaledMetric(relativeTo: .caption2) private var barWidth: CGFloat = 265
-    @ScaledMetric(relativeTo: .caption2) private var iconSize: CGFloat = 16
+    @ScaledMetric(relativeTo: .footnote) private var barWidth: CGFloat = 344
+    @ScaledMetric(relativeTo: .footnote) private var iconSize: CGFloat = 19
 
     private let accent = Color(red: 0.22, green: 0.36, blue: 0.27)
 
@@ -767,8 +767,8 @@ private struct RootNavigationBar: View {
             item(.investment, title: "研究", icon: "chart.bar")
             item(.learning, title: "知识", icon: "book")
         }
-        .padding(.horizontal, 3)
-        .padding(.vertical, 1)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
         .frame(maxWidth: barWidth)
         .background {
             Capsule()
@@ -850,12 +850,12 @@ private struct RootNavigationBar: View {
     }
 
     private func itemLabel(title: String, icon: String, isSelected: Bool) -> some View {
-        HStack(spacing: 3) {
+        HStack(spacing: 5) {
             Image(systemName: icon)
                 .font(.system(size: iconSize, weight: isSelected ? .semibold : .regular))
                 .accessibilityHidden(true)
             Text(title)
-                .font(.caption2.weight(isSelected ? .semibold : .medium))
+                .font(.footnote.weight(isSelected ? .semibold : .medium))
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
         }
@@ -863,7 +863,7 @@ private struct RootNavigationBar: View {
         .padding(.horizontal, 2)
         .padding(.vertical, 4)
         .foregroundStyle(isSelected ? accent : Color.primary.opacity(0.66))
-        .frame(maxWidth: .infinity, minHeight: 44)
+        .frame(maxWidth: .infinity, minHeight: 52)
         .background {
             if isSelected {
                 Capsule()
