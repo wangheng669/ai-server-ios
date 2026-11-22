@@ -163,10 +163,8 @@ final class NewsFeedViewModel: ObservableObject {
     @Published private(set) var canLoadMore = true
     @Published private(set) var isSwitchingSource = false
     @Published private(set) var pendingRealtimePosts: [Post] = []
-    @Published private(set) var xTranslations: [Int: String] = [:]
-    @Published private(set) var xQuotedTranslations: [Int: String] = [:]
-    @Published private(set) var xReplyContexts: [Int: XReplyContext] = [:]
-    @Published private(set) var xLiveDetails: [Int: XTweetDetailItem] = [:]
+    @Published private var xPresentations: [Int: XPresentation] = [:]
+    let xTimelineActivity = XTimelineActivity()
     @Published private(set) var rssFeeds: [RSSFeedSource] = []
     @Published private(set) var selectedRSSFeedID: Int?
     @Published private(set) var selectedRSSPosts: [Post] = []
@@ -204,8 +202,19 @@ final class NewsFeedViewModel: ObservableObject {
 
     @Published private var preparedPages: [FeedSource: PreparedPage] = [:]
     private var openingRequests: [FeedSource: (id: UUID, task: Task<Snapshot, Error>)] = [:]
-    private var pendingXTranslations: [Int: String] = [:]
-    private var xTranslationPublishTask: Task<Void, Never>?
+    private struct XPresentation {
+        var translation: String?
+        var quotedTranslation: String?
+        var reply: XReplyContext?
+        var detail: XTweetDetailItem?
+    }
+
+    private var pendingXPresentations: [Int: XPresentation] = [:]
+    private var pendingXPostUpdates: [Int: Post] = [:]
+    private var xPresentationPublishTask: Task<Void, Never>?
+    private var xTimelinePrefetchTask: Task<Void, Never>?
+    private var xTimelinePrefetchIDs: [Int] = []
+    private var isCheckingXTimelineUpdates = false
     private var page = 1
     private let defaultPageSize = 5
     private var realtimeClient: RealtimeFeedClient?
@@ -671,21 +680,29 @@ final class NewsFeedViewModel: ObservableObject {
         }
     }
 
-    func postForDisplay(_ post: Post) -> Post {
+    func postForDisplay(_ post: Post, includePending: Bool = false) -> Post {
+        guard let presentation = includePending ? xPresentation(for: post.id) : xPresentations[post.id] else {
+            return post
+        }
         var displayed = post
-        if let detail = xLiveDetails[post.id] {
-            displayed = displayed.replacingXLiveDetail(with: detail)
-        }
-        if let translation = xTranslations[post.id] {
-            displayed = displayed.replacingTranslation(with: translation)
-        }
-        if let translation = xQuotedTranslations[post.id] {
+        if let detail = presentation.detail { displayed = displayed.replacingXLiveDetail(with: detail) }
+        if let translation = presentation.translation { displayed = displayed.replacingTranslation(with: translation) }
+        if let translation = presentation.quotedTranslation {
             displayed = displayed.replacingXQuotedTranslation(with: translation)
         }
-        if let reply = xReplyContexts[post.id] {
-            displayed = displayed.replacingXReplyContext(with: reply)
-        }
+        if let reply = presentation.reply { displayed = displayed.replacingXReplyContext(with: reply) }
         return displayed
+    }
+
+    private func xPresentation(for postID: Int) -> XPresentation? {
+        pendingXPresentations[postID] ?? xPresentations[postID]
+    }
+
+    private func stageXPresentation(for postID: Int, update: (inout XPresentation) -> Void) {
+        var presentation = xPresentation(for: postID) ?? XPresentation()
+        update(&presentation)
+        pendingXPresentations[postID] = presentation
+        scheduleXPresentationPublish()
     }
 
     func preloadedNewYorkTimesArticle(for postID: Int) -> NewYorkTimesArticle? {
@@ -722,8 +739,7 @@ final class NewsFeedViewModel: ObservableObject {
     private func translateXMainPostIfNeeded(_ post: Post) async {
         guard post.needsXTranslation,
               let tweetID = post.xTweetID,
-              xTranslations[post.id] == nil,
-              pendingXTranslations[post.id] == nil,
+              xPresentation(for: post.id)?.translation == nil,
               !loadingXTranslationIDs.contains(post.id) else { return }
         loadingXTranslationIDs.insert(post.id)
         defer { loadingXTranslationIDs.remove(post.id) }
@@ -732,8 +748,7 @@ final class NewsFeedViewModel: ObservableObject {
             guard !Task.isCancelled else { return }
             let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !normalized.isEmpty, normalized != post.originalDisplayContent, Self.containsHanCharacters(normalized) else { return }
-            pendingXTranslations[post.id] = normalized
-            scheduleXTranslationPublish()
+            stageXPresentation(for: post.id) { $0.translation = normalized }
         } catch is CancellationError {
             return
         } catch {
@@ -746,7 +761,7 @@ final class NewsFeedViewModel: ObservableObject {
               let quote = post.meta?.quotedTweet,
               let tweetID = quote.id,
               let sourceText = quote.originalText,
-              xQuotedTranslations[post.id] == nil,
+              xPresentation(for: post.id)?.quotedTranslation == nil,
               !loadingXQuotedTranslationIDs.contains(post.id) else { return }
         loadingXQuotedTranslationIDs.insert(post.id)
         defer { loadingXQuotedTranslationIDs.remove(post.id) }
@@ -755,7 +770,7 @@ final class NewsFeedViewModel: ObservableObject {
             guard !Task.isCancelled else { return }
             let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !normalized.isEmpty, normalized != sourceText, Self.containsHanCharacters(normalized) else { return }
-            xQuotedTranslations[post.id] = normalized
+            stageXPresentation(for: post.id) { $0.quotedTranslation = normalized }
         } catch is CancellationError {
             return
         } catch {
@@ -768,7 +783,7 @@ final class NewsFeedViewModel: ObservableObject {
               let replyID = post.meta?.inReplyToStatusID?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
               !replyID.isEmpty,
-              xReplyContexts[post.id] == nil,
+              xPresentation(for: post.id)?.reply == nil,
               !loadingXReplyContextIDs.contains(post.id) else { return }
         loadingXReplyContextIDs.insert(post.id)
         defer { loadingXReplyContextIDs.remove(post.id) }
@@ -788,7 +803,7 @@ final class NewsFeedViewModel: ObservableObject {
                 try await resolvedXTranslation(tweetID: detail?.id ?? replyID, sourceText: sourceText)
             }
             guard !Task.isCancelled else { return }
-            xReplyContexts[post.id] = XReplyContext(
+            let reply = XReplyContext(
                 id: detail?.id ?? stored?.id ?? replyID,
                 authorName: detail?.author?.name ?? stored?.authorName,
                 screenName: detail?.author?.screenName ?? stored?.screenName
@@ -797,6 +812,7 @@ final class NewsFeedViewModel: ObservableObject {
                 text: detail?.fullText ?? stored?.text,
                 textZH: translatedText ?? stored?.textZH
             )
+            stageXPresentation(for: post.id) { $0.reply = reply }
         } catch is CancellationError {
             return
         } catch {
@@ -808,7 +824,7 @@ final class NewsFeedViewModel: ObservableObject {
         guard !post.isXRetweetWrapper,
               (post.meta?.metrics == nil || post.needsXLiveDetail),
               let tweetID = post.xTweetID,
-              xLiveDetails[post.id] == nil,
+              xPresentation(for: post.id)?.detail == nil,
               !loadingXLiveDetailIDs.contains(post.id) else { return }
         loadingXLiveDetailIDs.insert(post.id)
         defer { loadingXLiveDetailIDs.remove(post.id) }
@@ -816,7 +832,7 @@ final class NewsFeedViewModel: ObservableObject {
             let detail = try await fetchXTweetDetail(tweetID)
             guard !Task.isCancelled else { return }
             XAuthorVerificationStore.shared.recordLive(handle: detail.author?.screenName, verified: detail.author?.verified)
-            xLiveDetails[post.id] = detail
+            stageXPresentation(for: post.id) { $0.detail = detail }
         } catch is CancellationError {
             return
         } catch {
@@ -826,7 +842,7 @@ final class NewsFeedViewModel: ObservableObject {
 
     private func loadXRetweetPresentationIfNeeded(_ post: Post) async {
         guard let tweetID = post.xTweetID,
-              xLiveDetails[post.id] == nil,
+              xPresentation(for: post.id)?.detail == nil,
               !loadingXTranslationIDs.contains(post.id) else { return }
         loadingXTranslationIDs.insert(post.id)
         defer { loadingXTranslationIDs.remove(post.id) }
@@ -834,16 +850,15 @@ final class NewsFeedViewModel: ObservableObject {
             let detail = try await fetchXTweetDetail(tweetID)
             guard !Task.isCancelled else { return }
             XAuthorVerificationStore.shared.recordLive(handle: detail.author?.screenName, verified: detail.author?.verified)
-            xLiveDetails[post.id] = detail
+            stageXPresentation(for: post.id) { $0.detail = detail }
 
             guard detail.lang?.lowercased().hasPrefix("zh") != true,
-                  xTranslations[post.id] == nil else { return }
+                  xPresentation(for: post.id)?.translation == nil else { return }
             let value = try await resolvedXTranslation(tweetID: detail.id, sourceText: detail.fullText)
             guard !Task.isCancelled else { return }
             let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !normalized.isEmpty, normalized != detail.fullText else { return }
-            pendingXTranslations[post.id] = normalized
-            scheduleXTranslationPublish()
+            stageXPresentation(for: post.id) { $0.translation = normalized }
         } catch is CancellationError {
             return
         } catch {
@@ -876,16 +891,34 @@ final class NewsFeedViewModel: ObservableObject {
         value.unicodeScalars.contains { (0x4E00...0x9FFF).contains(Int($0.value)) }
     }
 
-    private func scheduleXTranslationPublish() {
-        guard xTranslationPublishTask == nil else { return }
-        xTranslationPublishTask = Task { @MainActor [weak self] in
-            await Task.yield()
+    func setXTimelineScrolling(_ isScrolling: Bool) {
+        guard xTimelineActivity.isScrolling != isScrolling else { return }
+        xTimelineActivity.isScrolling = isScrolling
+        if !isScrolling { scheduleXPresentationPublish() }
+    }
+
+    private func scheduleXPresentationPublish() {
+        guard !xTimelineActivity.isScrolling, xPresentationPublishTask == nil,
+              !pendingXPresentations.isEmpty || !pendingXPostUpdates.isEmpty else { return }
+        xPresentationPublishTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(120))
             guard let self else { return }
-            let updates = pendingXTranslations
-            pendingXTranslations.removeAll(keepingCapacity: true)
-            xTranslationPublishTask = nil
-            guard !updates.isEmpty else { return }
-            xTranslations.merge(updates) { _, latest in latest }
+            xPresentationPublishTask = nil
+            guard !xTimelineActivity.isScrolling else { return }
+            if !pendingXPresentations.isEmpty {
+                xPresentations.merge(pendingXPresentations) { _, latest in latest }
+                pendingXPresentations.removeAll(keepingCapacity: true)
+            }
+            if !pendingXPostUpdates.isEmpty {
+                let changes = pendingXPostUpdates
+                pendingXPostUpdates.removeAll(keepingCapacity: true)
+                if source == .x {
+                    posts = posts.map { changes[$0.id] ?? $0 }
+                    cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
+                    persistCurrentSnapshot()
+                    pretranslateTimeline(Array(changes.values))
+                }
+            }
         }
     }
 
@@ -949,6 +982,11 @@ final class NewsFeedViewModel: ObservableObject {
 
     func select(_ next: FeedSource) {
         guard next != source else { return }
+        if source == .x {
+            pendingXPostUpdates.removeAll(keepingCapacity: true)
+            cancelXTimelinePrefetch()
+            setXTimelineScrolling(false)
+        }
         requestGeneration = UUID()
         firstPageTask?.cancel()
         firstPageTask = nil
@@ -1132,6 +1170,10 @@ final class NewsFeedViewModel: ObservableObject {
         requestGeneration = generation
         firstPageTask?.cancel()
         if !restoringSnapshot {
+            if source == .x {
+                pendingXPostUpdates.removeAll(keepingCapacity: true)
+                cancelXTimelinePrefetch()
+            }
             openingRequests.removeValue(forKey: source)?.task.cancel()
             if preparedPages[source] != nil { preparedPages[source] = nil }
         }
@@ -1183,6 +1225,18 @@ final class NewsFeedViewModel: ObservableObject {
             await restoration
             guard !Task.isCancelled, requestGeneration == generation else { return }
             let result = snapshot.posts
+            if requestedSource == .x, restoringSnapshot, !posts.isEmpty {
+                if preparedPages[requestedSource] != nil { preparedPages[requestedSource] = nil }
+                cache[requestedSource] = Snapshot(posts: posts, page: page, canLoadMore: canLoadMore)
+                isSwitchingSource = false
+                enqueueNewXTimelinePosts(result)
+                return
+            }
+            if requestedSource == .x {
+                pendingXPostUpdates.removeAll(keepingCapacity: true)
+                pretranslateTimeline(result)
+                schedulePresentationPrewarm(for: result)
+            }
             posts = result
             pendingRealtimePosts = []
             page = snapshot.page
@@ -1191,8 +1245,7 @@ final class NewsFeedViewModel: ObservableObject {
             cache[requestedSource] = snapshot
             if preparedPages[requestedSource] != nil { preparedPages[requestedSource] = nil }
             persistCurrentSnapshot()
-            schedulePresentationPrewarm(for: result)
-            pretranslateTimeline(result)
+            if requestedSource != .x { schedulePresentationPrewarm(for: result) }
             if requestedSource == .newYorkTimes {
                 scheduleNewYorkTimesPrefetch(for: result, cancelsPrevious: true)
             }
@@ -1240,14 +1293,15 @@ final class NewsFeedViewModel: ObservableObject {
             )
             guard !Task.isCancelled, requestGeneration == generation else { return }
             var ids = Set(posts.map(\.id))
-            posts += result.filter { ids.insert($0.id).inserted }
+            let added = result.filter { ids.insert($0.id).inserted }
+            schedulePresentationPrewarm(for: added)
+            pretranslateTimeline(added)
+            posts += added
             page += 1
             canLoadMore = hasMorePages(requestedSource, count: result.count)
             errorMessage = nil
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
             persistCurrentSnapshot()
-            schedulePresentationPrewarm(for: result)
-            pretranslateTimeline(result)
             if requestedSource == .newYorkTimes {
                 scheduleNewYorkTimesPrefetch(for: result, cancelsPrevious: false)
             }
@@ -1288,25 +1342,42 @@ final class NewsFeedViewModel: ObservableObject {
         return result
     }
 
+    var xTimelineNextPage: Int { page + 1 }
+
     private func pretranslateTimeline(_ posts: [Post]) {
-        guard source == .x else { return }
-        let visible = Array(posts.prefix(10))
-        var savedTranslations: [Int: String] = [:]
-        for post in visible where post.needsXTranslation && xTranslations[post.id] == nil {
+        guard source == .x, !posts.isEmpty else { return }
+        let candidates = Array(posts.prefix(10))
+        for post in candidates where post.needsXTranslation && xPresentation(for: post.id)?.translation == nil {
             guard let tweetID = post.xTweetID else { continue }
             let original = post.xStoredOriginalContent
             let key = FeedTranslationCache.key(original, language: "x/" + tweetID)
             if let saved = FeedTranslationCache.shared.text(key),
                let value = LocalTranslatedText.validTranslation(saved, original: original) {
-                savedTranslations[post.id] = value
+                stageXPresentation(for: post.id) { $0.translation = value }
             }
         }
-        if !savedTranslations.isEmpty { xTranslations.merge(savedTranslations) { existing, _ in existing } }
-        Task {
-            await runWithLimitedConcurrency(visible, maximumConcurrentRequests: 2) { post in
-                await self.translateXPostIfNeeded(post)
+        Task(priority: .utility) { [weak self] in
+            await runWithLimitedConcurrency(candidates, maximumConcurrentRequests: 2) { post in
+                await self?.translateXPostIfNeeded(post)
             }
         }
+    }
+
+    func prefetchXTimelineImages(for upcoming: [Post]) {
+        guard source == .x, !upcoming.isEmpty else { return }
+        let ids = upcoming.map(\.id)
+        guard ids != xTimelinePrefetchIDs else { return }
+        xTimelinePrefetchIDs = ids
+        xTimelinePrefetchTask?.cancel()
+        xTimelinePrefetchTask = Task(priority: .utility) {
+            await ImageLoader.prefetchXTimelineImages(for: upcoming)
+        }
+    }
+
+    private func cancelXTimelinePrefetch() {
+        xTimelinePrefetchTask?.cancel()
+        xTimelinePrefetchTask = nil
+        xTimelinePrefetchIDs.removeAll(keepingCapacity: true)
     }
 
     private func schedulePresentationPrewarm(for posts: [Post], source: FeedSource? = nil) {
@@ -1380,10 +1451,34 @@ final class NewsFeedViewModel: ObservableObject {
         case .taskCompleted(let name):
             guard task(name, updates: source) else { return }
             guard pendingRealtimePosts.isEmpty else { return }
-            Task { await refresh() }
+            if source == .x, !posts.isEmpty {
+                Task { await checkForXTimelineUpdates() }
+            } else {
+                Task { await refresh() }
+            }
         case .deploymentStatus:
             break
         }
+    }
+
+    func checkForXTimelineUpdates() async {
+        guard source == .x, !isCheckingXTimelineUpdates, !isLoading else { return }
+        isCheckingXTimelineUpdates = true
+        defer { isCheckingXTimelineUpdates = false }
+        let generation = requestGeneration
+        guard let latest = try? await fetchPage(
+            1, limit: pageSize(for: .x), source: .x, xAuthor: selectedXUserID, bypassCache: true
+        ), !Task.isCancelled, requestGeneration == generation else { return }
+        enqueueNewXTimelinePosts(latest)
+    }
+
+    private func enqueueNewXTimelinePosts(_ latest: [Post]) {
+        var knownIDs = Set(posts.map(\.id) + pendingRealtimePosts.map(\.id))
+        let additions = latest.filter { knownIDs.insert($0.id).inserted }
+        guard !additions.isEmpty else { return }
+        schedulePresentationPrewarm(for: additions)
+        pretranslateTimeline(additions)
+        pendingRealtimePosts.insert(contentsOf: additions, at: 0)
     }
 
     func receiveRealtimePost(_ post: Post) {
@@ -1397,9 +1492,16 @@ final class NewsFeedViewModel: ObservableObject {
         if source == .xueqiu, let selectedXueqiuFeedID {
             guard post.source?.lowercased() == "rss:\(selectedXueqiuFeedID)" else { return }
         }
+        let existingIndex = posts.firstIndex(where: { $0.id == post.id })
+        if source == .x, existingIndex != nil {
+            pendingXPostUpdates[post.id] = post
+            scheduleXPresentationPublish()
+            return
+        }
         schedulePresentationPrewarm(for: [post])
+        pretranslateTimeline([post])
         errorMessage = nil
-        if let index = posts.firstIndex(where: { $0.id == post.id }) {
+        if let index = existingIndex {
             posts[index] = post
         } else if let index = pendingRealtimePosts.firstIndex(where: { $0.id == post.id }) {
             pendingRealtimePosts[index] = post

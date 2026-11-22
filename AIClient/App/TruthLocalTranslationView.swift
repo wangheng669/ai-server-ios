@@ -170,6 +170,16 @@ struct TruthLocalTranslationView: View {
     }
 }
 
+@MainActor
+@Observable
+final class XTimelineActivity {
+    var isScrolling = false
+}
+
+extension EnvironmentValues {
+    @Entry var xTimelineActivity: XTimelineActivity? = nil
+}
+
 enum FeedTranslationField: String {
     case title = "标题"
     case summary = "摘要"
@@ -283,7 +293,9 @@ private struct FeedDeviceTranslatedText: View {
     let field: FeedTranslationField?
     private let key: String
     @State private var display: FeedTranslationCache.DisplayState
+    @State private var timelineTranslation: String?
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.xTimelineActivity) private var xTimelineActivity
     @State private var configuration: TranslationSession.Configuration?
     @State private var phase = Phase.preparing
     @State private var permitsDownload = false
@@ -299,15 +311,18 @@ private struct FeedDeviceTranslatedText: View {
         self.translationOnly = translationOnly
         self.field = field
         key = FeedTranslationCache.key(original, language: sourceIdentifier)
-        _display = State(initialValue: FeedTranslationCache.shared.displayState(for: key))
+        let state = FeedTranslationCache.shared.displayState(for: key)
+        _display = State(initialValue: state)
+        _timelineTranslation = State(initialValue: state.text)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: detail ? 8 : 0) {
-            if let translated = display.text {
+            if let translated = xTimelineActivity == nil ? display.text : timelineTranslation {
                 Text(translated)
             } else if let field {
                 Text(status(for: field))
+                    .lineLimit(xTimelineActivity == nil ? nil : 1)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("feed-translation-status")
             } else if !translationOnly {
@@ -337,6 +352,14 @@ private struct FeedDeviceTranslatedText: View {
             }
         }
         .task(id: cache.languageState.revision) { await prepare() }
+        .onChange(of: display.text) { _, text in
+            guard xTimelineActivity?.isScrolling == false else { return }
+            timelineTranslation = text
+        }
+        .onChange(of: xTimelineActivity?.isScrolling) { _, isScrolling in
+            guard isScrolling == false else { return }
+            timelineTranslation = display.text
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active, configuration == nil { Task { await prepare() } }
             else if phase == .background { configuration = nil }

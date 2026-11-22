@@ -989,7 +989,9 @@ struct RemoteImage: View {
     var body: some View {
         let screen = UIScreen.main
         let size = CGSize(width: targetWidth ?? screen.bounds.width, height: height ?? screen.bounds.height)
-        let request = ImageLoader.request(for: url, targetSize: size, scale: screen.scale)
+        let request = ImageLoader.request(
+            for: url, targetSize: size, scale: screen.scale, isTimelinePreview: usesTimelinePlaceholder
+        )
         let image = if let preparedReadingMedia {
             preparedReadingMedia[url]
         } else {
@@ -1256,6 +1258,7 @@ actor ImageLoader {
         let width: CGFloat
         let height: CGFloat
         let prefersCompactXAvatar: Bool
+        var isTimelinePreview = false
     }
 
     // NSCache synchronizes its own access, so views can read decoded images during rendering.
@@ -1295,12 +1298,15 @@ actor ImageLoader {
         return await shared.image(for: request(for: url, targetSize: targetSize, scale: UIScreen.main.scale))
     }
 
-    static func request(for url: URL, targetSize: CGSize?, scale: CGFloat) -> Request {
+    static func request(
+        for url: URL, targetSize: CGSize?, scale: CGFloat, isTimelinePreview: Bool = false
+    ) -> Request {
         let source = highResolutionAvatarURL(sourceImageURL(from: url))
         let relay = MediaURL.image(source.absoluteString) ?? source
         // A timeline rendition is already bounded. Prewarming and every card layout
         // can share one decoded image, including while the download is in flight.
-        let limit = MediaURL.feedPhotoSize(for: source)?.maxPixels ?? cachePixelLimit(targetSize: targetSize, scale: scale)
+        let limit = MediaURL.feedPhotoSize(for: source)?.maxPixels
+            ?? (isTimelinePreview ? MediaURL.XPhotoSize.single.maxPixels : cachePixelLimit(targetSize: targetSize, scale: scale))
         return Request(url: relay, pixelLimit: limit, scale: scale)
     }
 
@@ -1380,25 +1386,25 @@ actor ImageLoader {
     }
 
     static func prefetchXTimelineImages(for posts: [Post]) async {
-        let screenWidth = await MainActor.run { UIScreen.main.bounds.width }
         var requests: [PrefetchRequest] = []
-        for post in posts.prefix(4) {
-            let media = post.videos?.isEmpty == false
-                ? [post.xFeedVideoPoster].compactMap { $0 }
-                : Array(post.feedImageURLs.prefix(4))
-            let quoteMedia = post.xQuotedPost?.media?.compactMap(\.feedDisplayURL).prefix(2)
-            for url in media {
-                requests.append(.init(url: url, width: screenWidth, height: 280, prefersCompactXAvatar: false))
-            }
+        for post in posts.prefix(7) {
             if let avatar = post.avatarURL {
                 requests.append(.init(url: avatar, width: 38, height: 38, prefersCompactXAvatar: true))
             }
-            for url in quoteMedia ?? [] {
-                requests.append(.init(url: url, width: screenWidth, height: 240, prefersCompactXAvatar: false))
+            let media: [URL]
+            if post.feedPlaybackURL != nil {
+                media = [post.xFeedVideoPoster].compactMap { $0 }
+            } else {
+                let photos = post.feedImageURLs
+                media = photos.isEmpty ? [post.previewURL].compactMap { $0 } : Array(photos.prefix(4))
+            }
+            let quotedMedia = post.xQuotedPost?.media?.compactMap(\.feedDisplayURL) ?? []
+            requests += (media + quotedMedia).map {
+                .init(url: $0, width: 0, height: 0, prefersCompactXAvatar: false, isTimelinePreview: true)
             }
         }
-        var seen = Set<URL>()
-        await prefetch(requests.filter { seen.insert($0.url).inserted }, maximumConcurrentLoads: 4)
+        var seen = Set<PrefetchRequest>()
+        await prefetch(requests.filter { seen.insert($0).inserted }, maximumConcurrentLoads: 4)
     }
 
     static func prefetchAvatars(_ urls: [URL], maximumCount: Int = 12) async {
@@ -1585,7 +1591,7 @@ actor ImageLoader {
         _ requests: [PrefetchRequest],
         maximumConcurrentLoads: Int
     ) async {
-        guard !requests.isEmpty else { return }
+        guard !requests.isEmpty, !Task.isCancelled else { return }
         await withTaskGroup(of: Void.self) { group in
             var iterator = requests.makeIterator()
             let limit = min(max(1, maximumConcurrentLoads), requests.count)
@@ -1600,13 +1606,22 @@ actor ImageLoader {
         }
     }
 
+    @MainActor
     private static func load(_ request: PrefetchRequest) async {
+        guard !Task.isCancelled else { return }
+        let imageRequest: Request
         if request.prefersCompactXAvatar {
-            guard let avatar = await avatarRequest(request.url, size: request.width) else { return }
-            _ = await shared.image(for: avatar)
+            guard let avatar = avatarRequest(request.url, size: request.width) else { return }
+            imageRequest = avatar
         } else {
-            _ = await load(request.url, targetSize: CGSize(width: request.width, height: request.height))
+            imageRequest = Self.request(
+                for: request.url,
+                targetSize: CGSize(width: request.width, height: request.height),
+                scale: UIScreen.main.scale,
+                isTimelinePreview: request.isTimelinePreview
+            )
         }
+        _ = await shared.image(for: imageRequest)
     }
 
     private static func download(_ url: URL) async -> Data? {
@@ -1971,7 +1986,8 @@ struct PostMediaGrid: View {
                         targetWidth: availableWidth,
                         height: resolvedSingleImageHeight,
                         cornerRadius: cornerRadius,
-                        contentMode: singleImageContentMode
+                        contentMode: singleImageContentMode,
+                        usesTimelinePlaceholder: isXTimelinePreview
                     )
                 }
                 .buttonStyle(.plain)
@@ -2055,6 +2071,7 @@ struct XFeedMediaView: View {
                     url: videoURL,
                     fallbackURL: post.feedPlaybackFallbackURL,
                     thumbnailURL: post.xFeedVideoPoster,
+                    usesTimelinePoster: timelineWidth != nil,
                     generatesThumbnailWhenMissing: timelineWidth == nil,
                     reportsPlaybackEvents: true,
                     observationSurface: "x-feed"
@@ -2198,6 +2215,7 @@ struct XFeedQuotedPostCard: View {
                 url: videoURL,
                 fallbackURL: nil,
                 thumbnailURL: isDetail ? media.previewURL : media.feedDisplayURL,
+                usesTimelinePoster: !isDetail,
                 generatesThumbnailWhenMissing: false,
                 reportsPlaybackEvents: true,
                 observationSurface: "x-quoted"
@@ -2307,6 +2325,7 @@ struct XVideoPlayerView: View {
     private let contentMode: ContentMode
     private let chromeStyle: XVideoPlayerChromeStyle
     private let isPlaybackActive: Bool
+    private let usesTimelinePoster: Bool
     private let generatesThumbnailWhenMissing: Bool
     private let reportsPlaybackEvents: Bool
     private let onAspectRatioResolved: ((CGFloat) -> Void)?
@@ -2324,11 +2343,27 @@ struct XVideoPlayerView: View {
         return thumbnail
     }
 
+    private var cachedTimelinePoster: UIImage? {
+        guard usesTimelinePoster, let thumbnailURL else { return nil }
+        return ImageLoader.shared.cachedImage(for: posterRequest(for: thumbnailURL))
+    }
+
+    private func posterRequest(for url: URL) -> ImageLoader.Request {
+        let screen = UIScreen.main
+        return ImageLoader.request(
+            for: url,
+            targetSize: CGSize(width: screen.bounds.width, height: min(screen.bounds.height, 440)),
+            scale: screen.scale,
+            isTimelinePreview: usesTimelinePoster
+        )
+    }
+
     init(
         url: URL,
         fallbackURL: URL? = nil,
         thumbnailURL: URL? = nil,
         fallbackThumbnailURL: URL? = nil,
+        usesTimelinePoster: Bool = false,
         contentMode: ContentMode = .fit,
         chromeStyle: XVideoPlayerChromeStyle = .standard,
         isPlaybackActive: Bool = true,
@@ -2340,6 +2375,7 @@ struct XVideoPlayerView: View {
         _playbackURL = State(initialValue: url)
         self.fallbackURL = fallbackURL == url ? nil : fallbackURL
         self.thumbnailURL = thumbnailURL
+        self.usesTimelinePoster = usesTimelinePoster
         self.fallbackThumbnailURL = fallbackThumbnailURL == thumbnailURL ? nil : fallbackThumbnailURL
         self.contentMode = contentMode
         self.chromeStyle = chromeStyle
@@ -2621,13 +2657,7 @@ struct XVideoPlayerView: View {
             }
         for thumbnailURL in thumbnailURLs {
             guard !Task.isCancelled else { return }
-            guard let remoteThumbnail = await ImageLoader.load(
-                thumbnailURL,
-                targetSize: CGSize(
-                    width: UIScreen.main.bounds.width,
-                    height: min(UIScreen.main.bounds.height, 440)
-                )
-            ) else { continue }
+            guard let remoteThumbnail = await ImageLoader.shared.image(for: posterRequest(for: thumbnailURL)) else { continue }
             guard !Task.isCancelled else { return }
             Self.thumbnailCache.setObject(remoteThumbnail, forKey: playbackURL as NSURL)
             thumbnail = remoteThumbnail
