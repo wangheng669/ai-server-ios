@@ -50,6 +50,18 @@ struct CompanyNewsItem: Codable, Sendable, Identifiable, Equatable {
     }
     var displayTitle: String { title.isEmpty ? String(originalContent.prefix(100)) : title }
     var displayAuthor: String { authorName.isEmpty ? source : authorName }
+
+    fileprivate var usesXBodyForTitle: Bool {
+        guard source == "x", !originalContent.isEmpty else { return false }
+        if title.isEmpty { return true }
+        let excerpt = Self.singleLine(title)
+        let prefix = String(excerpt.dropLast(excerpt.hasSuffix("…") ? 1 : 0))
+        return !prefix.isEmpty && Self.singleLine(originalContent).hasPrefix(prefix)
+    }
+
+    fileprivate static func singleLine(_ text: String) -> String {
+        text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
     var sentimentTitle: String { GoogleSignalSentimentFilter(rawValue: sentiment)?.title ?? "待判断" }
 
     fileprivate var displayContentIdentity: String? {
@@ -341,7 +353,9 @@ struct GoogleSignalView: View {
                             Button { selected = item } label: {
                                 VStack(alignment: .leading, spacing: 8) {
                                     HStack(alignment: .top) {
-                                        LocalTranslatedText(original: item.displayTitle, field: .title).font(.body.weight(.medium)).multilineTextAlignment(.leading)
+                                        CompanyNewsTitle(item: item, isActive: isActive)
+                                            .font(.body.weight(.medium))
+                                            .multilineTextAlignment(.leading)
                                         Spacer(minLength: 8)
                                         Text(item.sentimentTitle).font(.caption).foregroundStyle(.secondary)
                                     }
@@ -477,7 +491,7 @@ struct GoogleSignalView: View {
             guard !Task.isCancelled, isActive, current == generation, requestedFilter == filter else { return }
             displayList = prepared
             if #available(iOS 26.0, *) {
-                let titles = page.items.prefix(12).map(\.displayTitle)
+                let titles = page.items.prefix(12).filter { !$0.usesXBodyForTitle }.map(\.displayTitle)
                 Task { await FeedTranslationCache.shared.pretranslate(titles) }
             }
             loadedFilter = requestedFilter
@@ -502,6 +516,64 @@ struct GoogleSignalView: View {
     }
 }
 
+private struct CompanyNewsTitle: View {
+    let item: CompanyNewsItem
+    var isActive = true
+    var detail = false
+
+    var body: some View {
+        if item.usesXBodyForTitle {
+            let key = FeedTranslationCache.xKey(tweetID: item.articleID, original: item.originalContent)
+            XTitle(item: item, isActive: isActive, detail: detail, key: key)
+                .id(key)
+        } else {
+            LocalTranslatedText(original: item.displayTitle, detail: detail)
+        }
+    }
+
+    private struct XTitle: View {
+        let item: CompanyNewsItem
+        let isActive: Bool
+        let detail: Bool
+        @State private var translation: FeedTranslationCache.DisplayState
+
+        init(item: CompanyNewsItem, isActive: Bool, detail: Bool, key: String) {
+            self.item = item
+            self.isActive = isActive
+            self.detail = detail
+            _translation = State(initialValue: FeedTranslationCache.shared.displayState(for: key))
+        }
+
+        var body: some View {
+            let original = item.displayTitle
+            let needsTranslation = LocalTranslatedText.sourceLanguage(original) != nil
+            let chinese = needsTranslation ? LocalTranslatedText.chineseText(item.contentZH) ?? translation.text : nil
+            let title = chinese.map { compactTitle($0) } ?? original
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title)
+                if detail, title != original {
+                    DisclosureGroup("查看原标题") { Text(original).textSelection(.enabled) }
+                        .font(.callout)
+                }
+            }
+            .task(id: isActive) {
+                guard isActive, needsTranslation, chinese == nil,
+                      !item.articleID.isEmpty,
+                      item.articleID.utf8.allSatisfy({ (48...57).contains($0) }) else { return }
+                let client = APIClient(baseURL: ServerConfiguration.currentURL)
+                _ = try? await FeedTranslationCache.shared.translateXPost(
+                    tweetID: item.articleID, original: item.originalContent, using: client.fetchXTranslation
+                )
+            }
+        }
+
+        private func compactTitle(_ text: String) -> String {
+            let title = CompanyNewsItem.singleLine(text)
+            return title.count <= 80 ? title : String(title.prefix(79)) + "…"
+        }
+    }
+}
+
 private struct CompanyNewsDetail: View {
     let item: CompanyNewsItem
     let companies: [CompanyNewsCompany]
@@ -515,7 +587,7 @@ private struct CompanyNewsDetail: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    LocalTranslatedText(original: item.displayTitle, detail: true, field: .title).font(.title2.bold())
+                    CompanyNewsTitle(item: item, detail: true).font(.title2.bold())
                     Text(item.displayAuthor).foregroundStyle(.secondary)
                     HStack { ForEach(companies.filter { item.companies[$0.id] != "unrelated" }) { company in
                         Text("\(company.name) · \(GoogleSignalSentimentFilter(rawValue: item.companies[company.id] ?? "uncertain")?.title ?? "待判断")").font(.caption)

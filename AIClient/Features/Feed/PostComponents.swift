@@ -2163,12 +2163,7 @@ struct XFeedQuotedPostCard: View {
                 }
             }
 
-            if !isDetail, let original = quote.originalText {
-                LocalTranslatedText(original: original, serverChinese: quote.textZH, field: .quote)
-                    .font(.system(size: 15))
-                    .lineSpacing(2)
-                    .lineLimit(6)
-            } else if let text = quote.displayText {
+            if let text = quote.displayText {
                 quotedText(text)
             }
 
