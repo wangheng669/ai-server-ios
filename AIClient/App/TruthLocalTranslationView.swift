@@ -8,9 +8,18 @@ import CryptoKit
 final class FeedTranslationCache {
     static let shared = FeedTranslationCache()
     private struct Entry: Codable { let text: String; let date: Date }
+    struct DeviceRequest {
+        let sourceLanguage: String?
+        let expiresAt: Date
+    }
+
     @Observable final class DisplayState {
         var text: String?
-        init(text: String?) { self.text = text }
+        var deviceRequest: DeviceRequest?
+        init(text: String?, deviceRequest: DeviceRequest?) {
+            self.text = text
+            self.deviceRequest = deviceRequest
+        }
     }
 
     private var entries: [String: Entry] = [:]
@@ -30,6 +39,10 @@ final class FeedTranslationCache {
     private var failedUntil: [String: Date] = [:]
     private var translating = false
     private var activeXTranslations = Set<String>()
+    private var xDeviceRequests: [String: DeviceRequest] = [:]
+    private let xTranslationClock = ContinuousClock()
+    private var xTranslationRetryAt: ContinuousClock.Instant?
+    private var xPostRetryAt: [String: ContinuousClock.Instant] = [:]
     private let file: URL
 
     private init() {
@@ -62,34 +75,76 @@ final class FeedTranslationCache {
         using fetch: (String) async throws -> XTranslation
     ) async throws -> String {
         let key = Self.xKey(tweetID: tweetID, original: original)
+        let retryDeadline = xTranslationClock.now.advanced(by: .seconds(45))
         while true {
             try Task.checkCancellation()
             if let saved = text(key), let value = LocalTranslatedText.validTranslation(saved, original: original) {
                 return value
             }
             guard canAttempt(key) else { throw APIError.invalidResponse }
-            if activeXTranslations.count < 2, !activeXTranslations.contains(key) { break }
-            try await Task.sleep(for: .milliseconds(150))
-        }
 
-        activeXTranslations.insert(key)
-        defer { activeXTranslations.remove(key) }
-        do {
-            let response = try await fetch(tweetID)
-            guard response.tweetId == tweetID,
-                  let value = LocalTranslatedText.validTranslation(response.text, original: original) else {
-                throw APIError.invalidResponse
+            let now = xTranslationClock.now
+            let nextRequest = max(xPostRetryAt[tweetID] ?? now, xTranslationRetryAt ?? now)
+            if nextRequest > now {
+                guard nextRequest <= retryDeadline else {
+                    requestXDeviceTranslation(key: key)
+                    throw APIError.invalidResponse
+                }
+                try await xTranslationClock.sleep(until: nextRequest)
+                continue
             }
-            save(value, key: key)
-            return value
-        } catch {
-            if !Task.isCancelled { failed(key) }
-            throw error
+            if activeXTranslations.count >= 2 || activeXTranslations.contains(tweetID) {
+                try await Task.sleep(for: .milliseconds(150))
+                continue
+            }
+
+            do {
+                xPostRetryAt[tweetID] = nil
+                activeXTranslations.insert(tweetID)
+                defer { activeXTranslations.remove(tweetID) }
+                let response = try await fetch(tweetID)
+                try Task.checkCancellation()
+                guard response.tweetId == tweetID else { throw APIError.invalidResponse }
+                guard response.status != "not_required",
+                      let value = LocalTranslatedText.validTranslation(response.text, original: original) else {
+                    requestXDeviceTranslation(key: key, sourceLanguage: response.sourceLanguage)
+                    throw APIError.invalidResponse
+                }
+                save(value, key: key)
+                return value
+            } catch let deferral as XTranslationDeferral {
+                let retryAt = xTranslationClock.now.advanced(by: .seconds(deferral.seconds))
+                if deferral.isPostSpecific {
+                    if xPostRetryAt.count > 400 { xPostRetryAt = xPostRetryAt.filter { $0.value > now } }
+                    xPostRetryAt[tweetID] = max(xPostRetryAt[tweetID] ?? retryAt, retryAt)
+                } else {
+                    xTranslationRetryAt = max(xTranslationRetryAt ?? retryAt, retryAt)
+                }
+            } catch {
+                guard !Task.isCancelled else { throw CancellationError() }
+                if let apiError = error as? APIError, case .httpStatus(let status) = apiError,
+                   [404, 502, 503, 504].contains(status) {
+                    requestXDeviceTranslation(key: key)
+                }
+                failed(key)
+                throw error
+            }
         }
     }
+
+    private func requestXDeviceTranslation(key: String, sourceLanguage: String? = nil) {
+        let now = Date()
+        if let request = xDeviceRequests[key], request.expiresAt > now { return }
+        if xDeviceRequests.count > 400 { xDeviceRequests = xDeviceRequests.filter { $0.value.expiresAt > now } }
+        let request = DeviceRequest(sourceLanguage: sourceLanguage, expiresAt: now.addingTimeInterval(600))
+        xDeviceRequests[key] = request
+        displayStates.object(forKey: key as NSString)?.deviceRequest = request
+    }
+
     func displayState(for key: String) -> DisplayState {
         if let state = displayStates.object(forKey: key as NSString) { return state }
-        let state = DisplayState(text: text(key))
+        let request = xDeviceRequests[key].flatMap { $0.expiresAt > Date() ? $0 : nil }
+        let state = DisplayState(text: text(key), deviceRequest: request)
         displayStates.setObject(state, forKey: key as NSString)
         return state
     }
@@ -173,6 +228,7 @@ final class FeedTranslationCache {
 
     func save(_ text: String, key: String) {
         entries[key] = Entry(text: text, date: Date())
+        xDeviceRequests[key] = nil
         displayStates.object(forKey: key as NSString)?.text = text
         hasUnsavedEntries = true
         guard persistTask == nil else { return }
@@ -313,6 +369,76 @@ struct LocalTranslatedText: View {
     }
 }
 
+struct XDeviceTranslation: View {
+    let original: String
+    let key: String
+    let sourceLanguage: String?
+    let showsControls: Bool
+    let onTranslation: ((String) -> Void)?
+    init(
+        tweetID: String, original: String, sourceLanguage: String? = nil,
+        showsControls: Bool = false, onTranslation: ((String) -> Void)? = nil
+    ) {
+        self.original = original
+        self.sourceLanguage = sourceLanguage
+        self.showsControls = showsControls
+        self.onTranslation = onTranslation
+        key = FeedTranslationCache.xKey(tweetID: tweetID, original: original)
+    }
+
+    var body: some View {
+        Driver(key: key, original: original, sourceLanguage: sourceLanguage,
+               showsControls: showsControls, onTranslation: onTranslation)
+            .id(key)
+    }
+
+    private struct Driver: View {
+        let key: String
+        let original: String
+        let sourceLanguage: String?
+        let showsControls: Bool
+        let onTranslation: ((String) -> Void)?
+        @State private var display: FeedTranslationCache.DisplayState
+
+        init(key: String, original: String, sourceLanguage: String?, showsControls: Bool,
+             onTranslation: ((String) -> Void)?) {
+            self.key = key
+            self.original = original
+            self.sourceLanguage = sourceLanguage
+            self.showsControls = showsControls
+            self.onTranslation = onTranslation
+            _display = State(initialValue: FeedTranslationCache.shared.displayState(for: key))
+        }
+
+        var body: some View {
+            Group {
+                if #available(iOS 18.0, *), display.text == nil, let request = display.deviceRequest,
+                   let language = deviceLanguage(request.sourceLanguage) {
+                    FeedDeviceTranslatedText(
+                        original: original, detail: showsControls, sourceIdentifier: language,
+                        translationOnly: true, field: nil, rendersText: false
+                    ) { translation in
+                        guard display.text == nil else { return }
+                        FeedTranslationCache.shared.save(translation, key: key)
+                    }
+                    .id(language)
+                }
+            }
+            .onChange(of: display.text, initial: true) { _, text in
+                if let text { onTranslation?(text) }
+            }
+        }
+
+        private func deviceLanguage(_ providerLanguage: String?) -> String? {
+            for hint in [providerLanguage, sourceLanguage].compactMap({ $0?.lowercased() })
+                where !hint.isEmpty && hint != "und" && hint != "zxx" && !hint.hasPrefix("zh") {
+                return hint
+            }
+            return LocalTranslatedText.sourceLanguage(original)
+        }
+    }
+}
+
 @available(iOS 18.0, *)
 private struct FeedDeviceTranslatedText: View {
     private enum Phase { case preparing, translating, needsDownload, unavailable, failed }
@@ -322,6 +448,8 @@ private struct FeedDeviceTranslatedText: View {
     let sourceIdentifier: String
     let translationOnly: Bool
     let field: FeedTranslationField?
+    let rendersText: Bool
+    let onTranslation: ((String) -> Void)?
     private let key: String
     @State private var display: FeedTranslationCache.DisplayState
     @Environment(\.scenePhase) private var scenePhase
@@ -333,26 +461,33 @@ private struct FeedDeviceTranslatedText: View {
     private var source: Locale.Language { Locale.Language(identifier: sourceIdentifier) }
     private let target = Locale.Language(identifier: "zh-Hans")
 
-    init(original: String, detail: Bool, sourceIdentifier: String, translationOnly: Bool, field: FeedTranslationField?) {
+    init(
+        original: String, detail: Bool, sourceIdentifier: String, translationOnly: Bool,
+        field: FeedTranslationField?, rendersText: Bool = true, onTranslation: ((String) -> Void)? = nil
+    ) {
         self.original = original
         self.detail = detail
         self.sourceIdentifier = sourceIdentifier
         self.translationOnly = translationOnly
         self.field = field
+        self.rendersText = rendersText
+        self.onTranslation = onTranslation
         key = FeedTranslationCache.key(original, language: sourceIdentifier)
         _display = State(initialValue: FeedTranslationCache.shared.displayState(for: key))
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: detail ? 8 : 0) {
-            if let translated = display.text {
-                Text(translated)
-            } else if let field {
-                Text(status(for: field))
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("feed-translation-status")
-            } else if !translationOnly {
-                Text(original)
+            if rendersText {
+                if let translated = display.text {
+                    Text(translated)
+                } else if let field {
+                    Text(status(for: field))
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("feed-translation-status")
+                } else if !translationOnly {
+                    Text(original)
+                }
             }
 
             if detail {
@@ -378,6 +513,9 @@ private struct FeedDeviceTranslatedText: View {
             }
         }
         .task(id: cache.languageState.revision) { await prepare() }
+        .onChange(of: display.text, initial: true) { _, text in
+            if let text { onTranslation?(text) }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active, configuration == nil { Task { await prepare() } }
             else if phase == .background { configuration = nil }

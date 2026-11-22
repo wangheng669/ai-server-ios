@@ -29,7 +29,6 @@ struct CompanyNewsItem: Codable, Sendable, Identifiable, Equatable {
     let id: Int64
     let quoteContent: String
     let replyContent: String
-    let translationPostID: Int64
     let articleID: String
     let source: String
     let sourceURL: String
@@ -44,19 +43,28 @@ struct CompanyNewsItem: Codable, Sendable, Identifiable, Equatable {
     enum CodingKeys: String, CodingKey {
         case id, source, title, companies, sentiment
         case quoteContent = "quote_content", replyContent = "reply_content"
-        case translationPostID = "translation_post_id", articleID = "article_id", sourceURL = "source_url"
+        case articleID = "article_id", sourceURL = "source_url"
         case originalContent = "original_content", contentZH = "content_zh", authorName = "author_name"
         case authorHandle = "author_handle", publishedAt = "published_at"
     }
     var displayTitle: String { title.isEmpty ? String(originalContent.prefix(100)) : title }
     var displayAuthor: String { authorName.isEmpty ? source : authorName }
 
+    fileprivate var xTweetID: String? {
+        guard source == "x", !articleID.isEmpty, articleID.utf8.allSatisfy({ (48...57).contains($0) }) else { return nil }
+        return articleID
+    }
+
     fileprivate var usesXBodyForTitle: Bool {
         guard source == "x", !originalContent.isEmpty else { return false }
         if title.isEmpty { return true }
-        let excerpt = Self.singleLine(title)
+        func bodyText(_ text: String) -> String {
+            Self.singleLine(text)
+                .replacingOccurrences(of: #"^(?:@[A-Za-z0-9_]+ +)+"#, with: "", options: .regularExpression)
+        }
+        let excerpt = bodyText(title)
         let prefix = String(excerpt.dropLast(excerpt.hasSuffix("…") ? 1 : 0))
-        return !prefix.isEmpty && Self.singleLine(originalContent).hasPrefix(prefix)
+        return !prefix.isEmpty && bodyText(originalContent).hasPrefix(prefix)
     }
 
     fileprivate static func singleLine(_ text: String) -> String {
@@ -106,21 +114,6 @@ struct CompanyNewsDisplayList: Sendable {
 
 private struct CompanyNewsEnvelope<Value: Decodable>: Decodable { let success: Bool; let data: Value }
 struct GoogleSignalService {
-    enum TranslationSource { case x, rss }
-
-    private struct TranslationDocuments<Item: Decodable>: Decodable { let items: [Item] }
-    private struct XTranslation: Decodable {
-        struct Part: Decodable { let text: String? }
-        let postId: Int64
-        let status: String
-        let parts: [String: Part]
-    }
-    private struct RSSTranslation: Decodable {
-        let postId: Int64
-        let status: String
-        let text: String?
-    }
-
     let baseURL: URL
     private let session: URLSession
     init(baseURL: URL = ServerConfiguration.currentURL, session: URLSession = .shared) {
@@ -163,40 +156,6 @@ struct GoogleSignalService {
         }
         return try await get(url, as: Catalog.self).companies
     }
-    func translationRequest(postID: Int64, source: TranslationSource, observe: Bool = false) throws -> URLRequest {
-        let endpoint = source == .x ? "translations" : "rss-translations"
-        var request = URLRequest(url: baseURL.appending(path: "api/ios/v1/company-news/\(endpoint)"))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        var body: [String: Any] = ["postIds": [postID], "intent": observe ? "observe" : "read", "retry": !observe]
-        if source == .rss { body["part"] = "article" }
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        return request
-    }
-
-    func translate(postID: Int64, source: TranslationSource) async throws -> String {
-        for attempt in 0..<20 {
-            try Task.checkCancellation()
-            let request = try translationRequest(postID: postID, source: source, observe: attempt > 0)
-            let first: (postId: Int64, status: String, text: String?)?
-            switch source {
-            case .x:
-                let result: TranslationDocuments<XTranslation> = try await send(request)
-                first = result.items.first.map { ($0.postId, $0.status, $0.parts["body"]?.text) }
-            case .rss:
-                let result: TranslationDocuments<RSSTranslation> = try await send(request)
-                first = result.items.first.map { ($0.postId, $0.status, $0.text) }
-            }
-            guard let document = first, document.postId == postID else { throw APIError.invalidResponse }
-            if let text = document.text, !text.isEmpty { return text }
-            if document.status == "failed" || (source == .x && document.status == "expired") {
-                throw APIError.invalidResponse
-            }
-            try await Task.sleep(for: .seconds(2))
-        }
-        throw APIError.invalidResponse
-    }
-
     private func get<Value: Decodable>(_ url: URL, as _: Value.Type) async throws -> Value {
         let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
         return try await send(request)
@@ -522,47 +481,68 @@ private struct CompanyNewsTitle: View {
     var detail = false
 
     var body: some View {
-        if item.usesXBodyForTitle {
-            let key = FeedTranslationCache.xKey(tweetID: item.articleID, original: item.originalContent)
-            XTitle(item: item, isActive: isActive, detail: detail, key: key)
-                .id(key)
+        if item.usesXBodyForTitle, item.xTweetID != nil {
+            CompanyNewsXText(item: item, isActive: isActive, asTitle: true, detail: detail)
         } else {
             LocalTranslatedText(original: item.displayTitle, detail: detail)
         }
     }
+}
 
-    private struct XTitle: View {
+private struct CompanyNewsXText: View {
+    let item: CompanyNewsItem
+    var isActive = true
+    var asTitle = false
+    let detail: Bool
+
+    var body: some View {
+        if let tweetID = item.xTweetID {
+            let key = FeedTranslationCache.xKey(tweetID: tweetID, original: item.originalContent)
+            Content(item: item, tweetID: tweetID, isActive: isActive, asTitle: asTitle, detail: detail, key: key)
+                .id(key)
+        } else {
+            LocalTranslatedText(original: item.originalContent, serverChinese: item.contentZH, detail: detail)
+        }
+    }
+
+    private struct Content: View {
         let item: CompanyNewsItem
+        let tweetID: String
         let isActive: Bool
+        let asTitle: Bool
         let detail: Bool
         @State private var translation: FeedTranslationCache.DisplayState
 
-        init(item: CompanyNewsItem, isActive: Bool, detail: Bool, key: String) {
+        init(item: CompanyNewsItem, tweetID: String, isActive: Bool, asTitle: Bool, detail: Bool, key: String) {
             self.item = item
+            self.tweetID = tweetID
             self.isActive = isActive
+            self.asTitle = asTitle
             self.detail = detail
             _translation = State(initialValue: FeedTranslationCache.shared.displayState(for: key))
         }
 
         var body: some View {
-            let original = item.displayTitle
-            let needsTranslation = LocalTranslatedText.sourceLanguage(original) != nil
+            let original = asTitle ? item.displayTitle : item.originalContent
+            let needsTranslation = LocalTranslatedText.sourceLanguage(item.originalContent) != nil
             let chinese = needsTranslation ? LocalTranslatedText.chineseText(item.contentZH) ?? translation.text : nil
-            let title = chinese.map { compactTitle($0) } ?? original
+            let translated = chinese.map { asTitle ? compactTitle($0) : $0 }
             VStack(alignment: .leading, spacing: 8) {
-                Text(title)
-                if detail, title != original {
-                    DisclosureGroup("查看原标题") { Text(original).textSelection(.enabled) }
+                Text(translated ?? original)
+                if detail, let translated, translated != original {
+                    DisclosureGroup(asTitle ? "查看原标题" : "查看原文") { Text(original).textSelection(.enabled) }
                         .font(.callout)
+                }
+                if isActive, needsTranslation, chinese == nil {
+                    XDeviceTranslation(tweetID: tweetID, original: item.originalContent,
+                                       showsControls: detail && !asTitle)
                 }
             }
             .task(id: isActive) {
-                guard isActive, needsTranslation, chinese == nil,
-                      !item.articleID.isEmpty,
-                      item.articleID.utf8.allSatisfy({ (48...57).contains($0) }) else { return }
+                guard isActive, needsTranslation, chinese == nil else { return }
                 let client = APIClient(baseURL: ServerConfiguration.currentURL)
                 _ = try? await FeedTranslationCache.shared.translateXPost(
-                    tweetID: item.articleID, original: item.originalContent, using: client.fetchXTranslation
+                    tweetID: tweetID, original: item.originalContent, using: client.fetchXTranslation
                 )
             }
         }
@@ -578,9 +558,6 @@ private struct CompanyNewsDetail: View {
     let item: CompanyNewsItem
     let companies: [CompanyNewsCompany]
     @State private var originalArticle: String?
-    @State private var translated = ""
-    @State private var translating = false
-    @State private var translationError: String?
     @State private var browser: InAppBrowserDestination?
     @Environment(\.dismiss) private var dismiss
     var body: some View {
@@ -598,16 +575,16 @@ private struct CompanyNewsDetail: View {
                         if !item.quoteContent.isEmpty { LocalTranslatedText(original: item.quoteContent, detail: true) }
                         if !item.replyContent.isEmpty { LocalTranslatedText(original: item.replyContent, detail: true) }
                     } else {
-                    Text(item.originalContent).textSelection(.enabled)
-                    if !item.quoteContent.isEmpty { Text("引用原文").font(.headline); Text(item.quoteContent).textSelection(.enabled) }
-                    if !item.replyContent.isEmpty { Text("回复上下文").font(.headline); Text(item.replyContent).textSelection(.enabled) }
-                    if !item.contentZH.isEmpty || !translated.isEmpty {
-                        Divider(); Text("译文").font(.headline); Text(translated.isEmpty ? item.contentZH : translated).textSelection(.enabled)
-                    } else {
-                        Button(translating ? "正在翻译…" : "翻译正文") { Task { await translate() } }.disabled(translating)
+                        CompanyNewsXText(item: item, detail: true).textSelection(.enabled)
+                        if !item.quoteContent.isEmpty {
+                            Text("引用").font(.headline)
+                            LocalTranslatedText(original: item.quoteContent, detail: true).textSelection(.enabled)
+                        }
+                        if !item.replyContent.isEmpty {
+                            Text("回复上下文").font(.headline)
+                            LocalTranslatedText(original: item.replyContent, detail: true).textSelection(.enabled)
+                        }
                     }
-                    }
-                    if let translationError { Text(translationError).font(.caption).foregroundStyle(.red) }
                     if let url = URL(string: item.sourceURL) { Button("阅读来源网页") { browser = InAppBrowserDestination(url: url) } }
                 }.padding(20)
                     .padding(.bottom, 76)
@@ -627,13 +604,7 @@ private struct CompanyNewsDetail: View {
             if original.count > item.originalContent.count { originalArticle = original }
         }
     }
-    @MainActor private func translate() async {
-        guard item.source == "x" else { return }
-        translating = true; translationError = nil; defer { translating = false }
-        do {
-            translated = try await GoogleSignalService().translate(postID: item.translationPostID, source: .x)
-        } catch { if !Task.isCancelled { translationError = "翻译暂不可用，请重试" } }
-    }
+
 }
 struct GoogleSignalFilterButton: View {
     let sentiment: GoogleSignalSentimentFilter

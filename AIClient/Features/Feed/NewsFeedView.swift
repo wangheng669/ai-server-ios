@@ -1186,6 +1186,11 @@ struct NewsFeedView: View {
                             openPost(model.postForDisplay(post, includePending: true))
                         }, xTimelineWidth: cardWidth)
                             .equatable()
+                            .background {
+                                if isActive {
+                                    xDeviceTranslations(for: post, displayed: displayed)
+                                }
+                            }
                             .accessibilityIdentifier("feed-post-\(post.id)")
                             .alignmentGuide(.listRowSeparatorLeading) { _ in NewsCardView.xHorizontalInset }
                             .alignmentGuide(.listRowSeparatorTrailing) { dimensions in
@@ -1260,6 +1265,27 @@ struct NewsFeedView: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                     }
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func xDeviceTranslations(for post: Post, displayed: Post) -> some View {
+        if displayed.needsXTranslation, let input = model.xDeviceBodySource(for: post) {
+            XDeviceTranslation(tweetID: input.id, original: input.text, sourceLanguage: input.language) { text in
+                model.applyXDeviceBody(text, to: post.id)
+            }
+        }
+        if displayed.needsXQuotedTranslation, let quote = displayed.meta?.quotedTweet,
+           let id = quote.id, let original = quote.originalText {
+            XDeviceTranslation(tweetID: id, original: original) { text in
+                model.applyXDeviceQuote(text, to: post.id)
+            }
+        }
+        if displayed.needsXReplyContextTranslation, let reply = displayed.xReplyContext,
+           let id = reply.id ?? displayed.meta?.inReplyToStatusID, let original = reply.text {
+            XDeviceTranslation(tweetID: id, original: original) { text in
+                model.applyXDeviceReply(text, to: post.id, reply: reply)
             }
         }
     }

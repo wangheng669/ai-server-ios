@@ -566,7 +566,9 @@ struct APIClient {
             .init(name: "to", value: "zh")
         ]
         guard let url = parts?.url else { throw APIError.invalidURL }
-        let response: XTranslationResponse = try await get(url, retriesTransientFailures: false)
+        let response: XTranslationResponse = try await get(
+            url, retriesTransientFailures: false, mapHTTPError: { XTranslationDeferral($0) }
+        )
         guard response.success else { throw APIError.invalidResponse }
         return response.data
     }
@@ -705,7 +707,8 @@ struct APIClient {
         cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy,
         timeoutInterval: TimeInterval = 30,
         authorization: String? = nil,
-        retryableNetworkErrors: Set<URLError.Code>? = nil
+        retryableNetworkErrors: Set<URLError.Code>? = nil,
+        mapHTTPError: ((HTTPURLResponse) -> Error?)? = nil
     ) async throws -> Response {
         let attempts = retriesTransientFailures ? 2 : 1
         for attempt in 0..<attempts {
@@ -718,7 +721,9 @@ struct APIClient {
                     try await Task.sleep(for: .milliseconds(400 * (attempt + 1)))
                     continue
                 }
-                guard (200..<300).contains(http.statusCode) else { throw APIError.httpStatus(http.statusCode) }
+                guard (200..<300).contains(http.statusCode) else {
+                    throw mapHTTPError?(http) ?? APIError.httpStatus(http.statusCode)
+                }
                 do { return try JSONDecoder().decode(Response.self, from: data) }
                 catch {
                     #if DEBUG
@@ -1388,6 +1393,19 @@ struct XBookmarkResult: Decodable, Equatable {
         case savedAt = "saved_at"
     }
 }
+struct XTranslationDeferral: Error {
+    let seconds: Int
+    let isPostSpecific: Bool
+
+    init?(_ response: HTTPURLResponse) {
+        guard response.statusCode == 429,
+              let raw = response.value(forHTTPHeaderField: "Retry-After"),
+              let seconds = Int(raw), seconds > 0 else { return nil }
+        self.seconds = seconds
+        isPostSpecific = response.value(forHTTPHeaderField: "X-Translation-Reason") == "in_flight"
+    }
+}
+
 enum APIError: LocalizedError {
     case invalidURL, invalidResponse, httpStatus(Int), decoding(Error), missingCategory(String), invalidXPostID, sourceUnavailable(String)
     var errorDescription: String? {
