@@ -2106,6 +2106,7 @@ struct XFeedQuotedPostCard: View {
     let availableWidth: CGFloat
     var enablesTextSelection = false
     var isDetail = false
+    var showsOriginalText = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -2130,7 +2131,7 @@ struct XFeedQuotedPostCard: View {
                 }
             }
 
-            if let text = quote.displayText {
+            if let text = showsOriginalText ? quote.originalText : quote.displayText {
                 quotedText(text)
             }
 

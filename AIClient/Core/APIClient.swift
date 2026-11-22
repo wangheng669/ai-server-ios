@@ -1096,8 +1096,30 @@ struct TodayWorldYesterdayReportPayload: Decodable, Equatable {
     let costCNY: Double
     let completedAt: String?
 
+    struct Diagnostic: Decodable, Equatable {
+        let scope: String
+        let systemName: String?
+        let reason: String
+
+        enum CodingKeys: String, CodingKey {
+            case scope, reason
+            case systemName = "system_name"
+        }
+    }
+
+    struct Generation: Decodable, Equatable {
+        let unfinishedIssueCount: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case unfinishedIssueCount = "unfinished_issue_count"
+        }
+    }
+
+    let diagnostics: [Diagnostic]?
+    let generation: Generation?
+
     enum CodingKeys: String, CodingKey {
-        case date, timezone, status, stage, progress, report, model, admission
+        case date, timezone, status, stage, progress, report, model, admission, diagnostics, generation
         case sourceCount = "source_count"
         case postCount = "post_count"
         case totalTokens = "total_tokens"

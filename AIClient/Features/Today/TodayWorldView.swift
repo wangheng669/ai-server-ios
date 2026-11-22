@@ -341,6 +341,7 @@ struct TodayWorldView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store: TodayWorldStore
     @State private var waitingForRechargeReturn = false
+    @State private var headerHeight: CGFloat = 63
 
     init(store: TodayWorldStore) {
         _store = StateObject(wrappedValue: store)
@@ -380,14 +381,15 @@ struct TodayWorldView: View {
 
     private func pageContent(viewport: CGSize) -> some View {
         let readingHeight = max(0, viewport.height - bottomChromeHeight - 8)
-        let topInset = store.brief == nil ? 0 : min(32, max(0, (readingHeight - 480) / 6))
+        let topInset = min(18, max(0, (readingHeight - 420) / 8))
         return ScrollView {
-            VStack(spacing: TodayBriefStyle.toolsSpacing) {
-                toolsButton
+            VStack(spacing: 8) {
+                pageHeader
+                    .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { headerHeight = $0 }
                 if let brief = store.brief {
                     TodayBriefOverviewView(
                         brief: brief,
-                        viewport: CGSize(width: viewport.width, height: readingHeight - topInset),
+                        viewport: CGSize(width: viewport.width, height: readingHeight - topInset - headerHeight - 8),
                         isLoadingSources: store.isLoading || store.isLoadingSources,
                         retryReport: { await store.loadReport(force: true) }
                     )
@@ -404,20 +406,35 @@ struct TodayWorldView: View {
         .padding(.bottom, bottomChromeHeight + 8)
     }
 
-    private var toolsButton: some View {
-        TodayToolsButton(
-            waitingForRechargeReturn: $waitingForRechargeReturn,
-            balance: store.balance,
-            dailyCosts: store.dailyCosts,
-            isLoading: store.isLoadingBalance,
-            needsRetry: store.balanceNeedsRetry,
-            retry: { await store.loadBalance(force: true) },
-            editionNotice: editionNotice,
-            isRefreshingReport: store.isLoading,
-            retryReport: { await store.loadReport(force: true) }
-        )
-        .frame(maxWidth: TodayBriefStyle.maximumCardWidth, alignment: .trailing)
-        .frame(height: TodayBriefStyle.toolsRowHeight)
+    private var pageHeader: some View {
+        HStack(alignment: .bottom, spacing: 4) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("今日")
+                    .font(.largeTitle.weight(.semibold))
+                    .accessibilityAddTraits(.isHeader)
+                if let date = store.brief?.date ?? store.report?.date,
+                   let label = TodayBriefDate.edition(date) {
+                    Text(label).font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 4)
+            if let editionNotice {
+                TodayEditionStatusButton(
+                    notice: editionNotice,
+                    isRefreshing: store.isLoading,
+                    retry: { await store.loadReport(force: true) }
+                )
+            }
+            TodayToolsButton(
+                waitingForRechargeReturn: $waitingForRechargeReturn,
+                balance: store.balance,
+                dailyCosts: store.dailyCosts,
+                isLoading: store.isLoadingBalance,
+                needsRetry: store.balanceNeedsRetry,
+                retry: { await store.loadBalance(force: true) }
+            )
+        }
+        .frame(maxWidth: TodayBriefStyle.maximumCardWidth)
         .padding(.horizontal, TodayBriefStyle.horizontalInset)
     }
 
@@ -514,7 +531,20 @@ struct TodayWorldView: View {
         let error = store.errorMessage.map { "\($0)。正在查看上次加载的日报。" }
         let message = error ?? (store.isShowingCachedEdition ? cachedEditionStatus : nil)
         guard message != nil || brief.isPartial else { return nil }
-        return TodayEditionNotice(message: message, isPartial: brief.isPartial, canRetry: error != nil)
+        let report = store.report.flatMap { $0.date == brief.date ? $0 : nil }
+        let reasons = (report?.diagnostics ?? []).filter { $0.scope == "content" }.map { issue in
+            if let name = issue.systemName, !name.isEmpty { return "\(todayBriefSystemName(name)) · \(issue.reason)" }
+            return issue.reason
+        }
+        let missingCount = report?.generation?.unfinishedIssueCount
+        return TodayEditionNotice(
+            message: message,
+            isPartial: brief.isPartial,
+            missingCount: missingCount.flatMap { $0 > 0 ? $0 : nil },
+            reasons: TodayReadingEvent.unique(reasons),
+            publishedAt: report?.completedAt.flatMap(TodayBriefDate.timestamp),
+            canRetry: error != nil
+        )
     }
 }
 
@@ -588,7 +618,6 @@ struct TodayReadingEvent: Identifiable, Sendable {
 struct TodaySourcePresentation: Identifiable, Sendable {
     let post: Post
     let originalText: String
-    let chineseText: String?
     let reply: String?
     let quote: XQuotedPost?
     let author: String
@@ -602,17 +631,14 @@ struct TodaySourcePresentation: Identifiable, Sendable {
 
     init(post: Post) {
         self.post = post
-        originalText = XPostTextFormatter.simplifiedChinese(post.xStoredOriginalContent)
-        chineseText = post.hasTranslation
-            ? LocalTranslatedText.chineseText(post.displayContent).map(XPostTextFormatter.simplifiedChinese)
-            : nil
-        reply = post.xReplyContext?.displayText
+        originalText = post.xStoredOriginalContent
+        reply = post.xReplyContext?.text
         let sourceQuote = post.xQuotedPost
         quote = sourceQuote
         author = post.authorName
         avatarURL = post.avatarURL
         quoteAvatarURL = sourceQuote?.author?.profileImageURL.flatMap(URL.init(string:))
-        time = post.formattedTime
+        time = post.articlePostAt.flatMap(TodayBriefDate.timestamp) ?? post.formattedTime
         hasMedia = post.previewURL != nil || !post.videoURLs.isEmpty
         let mainPreviews = if !post.videoURLs.isEmpty {
             [post.xFeedVideoPoster].compactMap { $0 }
@@ -631,10 +657,12 @@ struct TodaySourceAuthorView: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            AvatarView(url: source.avatarURL, name: source.author, size: 30)
+            AvatarView(url: source.avatarURL, name: source.author, size: 40)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-                Text(source.author).font(.subheadline.weight(.semibold))
+                Text(source.author)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(TodayBriefStyle.accent)
                 if let time = source.time {
                     Text(time).font(.caption).foregroundStyle(.secondary)
                 }
@@ -647,25 +675,14 @@ struct TodaySourceAuthorView: View {
 struct TodayInlineSourceView: View {
     let source: TodaySourcePresentation
     let width: CGFloat
-    let allowsLocalTranslation: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if !source.originalText.isEmpty || source.chineseText != nil {
-                Group {
-                    if let chineseText = source.chineseText {
-                        Text(chineseText)
-                    } else {
-                        LocalTranslatedText(
-                            original: source.originalText,
-                            detail: true,
-                            enabled: allowsLocalTranslation && source.post.sourceName == "X"
-                        )
-                    }
-                }
-                .font(.body)
-                .lineSpacing(4)
-                .textSelection(.enabled)
+            if !source.originalText.isEmpty {
+                Text(source.originalText)
+                    .font(.body)
+                    .lineSpacing(4)
+                    .textSelection(.enabled)
             }
             if let reply = source.reply, !reply.isEmpty {
                 Text("回复：\(reply)")
@@ -678,7 +695,8 @@ struct TodayInlineSourceView: View {
                 XFeedQuotedPostCard(
                     quote: quote,
                     availableWidth: width,
-                    isDetail: true
+                    isDetail: true,
+                    showsOriginalText: true
                 )
             }
         }
