@@ -557,17 +557,22 @@ struct TodayWorldView: View {
         let message = error ?? (store.isShowingCachedEdition ? cachedEditionStatus : nil)
         let report = store.report.flatMap { $0.date == brief.date ? $0 : nil }
         let contentIssues = (report?.diagnostics ?? []).filter { $0.scope == "content" }
-        let subscriptionIssues = contentIssues.filter { $0.reasonCode == "subscriber_only" }
-        guard message != nil || brief.isPartial || !subscriptionIssues.isEmpty else { return nil }
-        let reasons = (brief.isPartial ? contentIssues : subscriptionIssues).map { issue in
+        let visibleIssues = contentIssues.filter { $0.reasonCode != "subscriber_only" }
+        let subscriberItemIDs = Set(contentIssues.filter { $0.reasonCode == "subscriber_only" }.map(\.itemID))
+            .subtracting(visibleIssues.map(\.itemID))
+        let hiddenCount = (report?.report.final?.failedItems ?? [])
+            .filter { !$0.itemID.isEmpty && subscriberItemIDs.contains($0.itemID) }.count
+        let missingCount = report?.generation?.unfinishedIssueCount.map { max(0, $0 - hiddenCount) }
+        let isPartial = report != nil && brief.isPartial
+            && (hiddenCount == 0 || missingCount != 0 || !visibleIssues.isEmpty)
+        guard message != nil || isPartial else { return nil }
+        let reasons = visibleIssues.map { issue in
             if let name = issue.systemName, !name.isEmpty { return "\(todayBriefSystemName(name)) · \(issue.reason)" }
             return issue.reason
         }
-        let missingCount = report?.generation?.unfinishedIssueCount
         return TodayEditionNotice(
             message: message,
-            isPartial: brief.isPartial,
-            hasSubscriptionNotice: !subscriptionIssues.isEmpty,
+            isPartial: isPartial,
             missingCount: missingCount.flatMap { $0 > 0 ? $0 : nil },
             reasons: TodayReadingEvent.unique(reasons),
             publishedAt: report?.completedAt.flatMap(TodayBriefDate.timestamp),

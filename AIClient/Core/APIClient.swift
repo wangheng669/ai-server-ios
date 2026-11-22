@@ -1098,12 +1098,14 @@ struct TodayWorldYesterdayReportPayload: Decodable, Equatable {
 
     struct Diagnostic: Decodable, Equatable {
         let scope: String
+        let itemID: String
         let systemName: String?
         let reasonCode: String
         let reason: String
 
         enum CodingKeys: String, CodingKey {
             case scope, reason
+            case itemID = "item_id"
             case systemName = "system_name"
             case reasonCode = "reason_code"
         }
@@ -1160,10 +1162,19 @@ struct TodayWorldYesterdayReportContent: Decodable, Equatable {
 }
 
 struct TodayWorldFinalReport: Codable, Sendable, Equatable {
+    struct FailedItem: Codable, Sendable, Equatable {
+        let itemID: String
+
+        enum CodingKeys: String, CodingKey {
+            case itemID = "item_id"
+        }
+    }
+
     let status: String
     let stage: String?
     let error: String?
     let completenessStatus: String?
+    let failedItems: [FailedItem]?
     let sections: [TodayWorldFinalReportSection]
     let sectionCount: Int
     let groupCount: Int
@@ -1180,6 +1191,7 @@ struct TodayWorldFinalReport: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case status, stage, error, sections, model, overview
         case completenessStatus = "completeness_status"
+        case failedItems = "failed_items"
         case sectionCount = "section_count"
         case groupCount = "group_count"
         case systemCount = "system_count"
@@ -1197,6 +1209,7 @@ struct TodayWorldFinalReport: Codable, Sendable, Equatable {
         stage = try container.decodeIfPresent(String.self, forKey: .stage)
         error = try container.decodeIfPresent(String.self, forKey: .error)
         completenessStatus = try container.decodeIfPresent(String.self, forKey: .completenessStatus)
+        failedItems = try container.decodeIfPresent([FailedItem].self, forKey: .failedItems)
         let decodedSections = try container.decodeIfPresent([TodayWorldFinalReportSection].self, forKey: .sections) ?? []
         sections = decodedSections
         sectionCount = try container.decodeIfPresent(Int.self, forKey: .sectionCount) ?? decodedSections.count
