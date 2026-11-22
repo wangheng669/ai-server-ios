@@ -665,7 +665,8 @@ def main():
     config_info = CONFIG.stat()
     require(CONFIG.is_file() and not CONFIG.is_symlink() and config_info.st_uid == os.getuid()
             and not (config_info.st_mode & 0o077), "Direct-install configuration must be private")
-    config = json.loads(CONFIG.read_text())
+    configuration_file = CONFIG.read_bytes()
+    config = json.loads(configuration_file)
     origin = urlsplit(config["public_origin"])
     require(origin.scheme == "https" and origin.hostname and not origin.username
             and not origin.path and not origin.query and not origin.fragment, "Expected a public HTTPS origin")
@@ -680,6 +681,7 @@ def main():
     handoff = WORK_ROOT / f"focus-adhoc-export.{hashlib.sha256(key).hexdigest()}"
 
     with release_lock(channel) as lock_fd:
+        require(CONFIG.read_bytes() == configuration_file, "Release configuration changed")
         require(not channel.is_symlink(), "Direct-install channel must be a real directory")
         channel.mkdir(exist_ok=True)
         current, current_version = read_current(channel)
@@ -703,6 +705,7 @@ def main():
         request = request_signing(identity, receipt["archive_sha256"])
     wait_for_signing(receipt["archive_sha256"], request)
     with release_lock(channel):
+        require(CONFIG.read_bytes() == configuration_file, "Release configuration changed while signing")
         finish_release(config, entry_url, identity, handoff, channel)
 
 
