@@ -43,14 +43,20 @@ GitHub `main` 是稳定代码源。开始前运行 `./ci/safe-sync.sh main`。�
 
 焦点改动完成并验证通过后，直接把新版本发到 App 内的「今日 → 更新」。点「更新」后由 iOS 确认并安装，不打开浏览器。日常交付使用 Ad Hoc 直装，无需提交 TestFlight。
 
-在黑苹果的干净工作树准备比直装页已发布版本更新的版本和构建号，例如 `python3 ci/publish-direct-install.py --prepare --version 1.0.25 --build 17`。把输出的 `archive_path` 和 `archive_sha256` 交给 `codex/focus-adhoc-signing` 分支上的 Ad Hoc 签名任务。该分支沿用 `testflight.yml` 作为任务入口，执行的是本机 Ad Hoc 签名导出，产物为 `Focus-AdHoc.ipa`。
+在黑苹果上，先在开发工作区提交要交付的改动，再用本机统一入口指定这次发布的源码提交、版本和构建号。
 
-准备任务按直装频道和版本、构建号唯一标识。对相同提交和配置重复执行 `--prepare` 时会核对归档 SHA-256 并返回同一个签名输入。如果看到 `signed_ipa`，可直接进入发布。不同源码使用新的版本或构建号。
+```sh
+~/.local/bin/focus-direct-install --release --source-commit "$(git rev-parse HEAD)" --version 1.0.115 --build 107
+```
 
-在同一来源提交用相同版本和构建号运行 `python3 ci/publish-direct-install.py --signed-ipa <签名任务导出的文件> --version 1.0.25 --build 17`。发布前核验主 App 和两个通知扩展的 Ad Hoc 签名、设备范围、推送权限，以及与准备归档一致的二进制 UUID，并从公网回读安装包。校验通过后，固定的「今日 → 更新」入口才会指向新版本。发布后从公网安装页确认显示的新版本和构建号，并区分「已可更新」和「手机已安装」。
+工具每次从 GitHub `main` 读取发布程序，并且只从指定提交导出 Xcode 工程、App、配置和两个通知扩展。发布主机上的入口文件使用 `main` 的 `ci/focus-direct-install.sh`，以 `0700` 权限安装到 `~/.local/bin/focus-direct-install`。Xcode 配置覆盖文件及设备 SDK 在归档前核对。
 
-发布成功后，直装频道保留正式 IPA。本机在私有的 `~/.local/share/focus-direct-install/receipts/` 中保存含提交、哈希、UUID 和公网确认时间的 `release.json`，以及用于分析崩溃的 `dSYMs.zip`。公网回读和本机记录落盘后，发布器清理这一版的交接归档和签名包副本。若公网已切换且交接目录还在，用原发布命令可复验和继续收尾。临时源码、编译缓存和验证文件随步骤结束清理。发生构建错误时，构建日志单独保存在私有 `diagnostics/`。
+`--release` 按顺序准备归档、等待 `main` 的 `Sign Focus Ad Hoc` 工作流签名，再验签和发布。准备、签名和发布共用一份含源码提交、版本、构建号和归档 SHA-256 的记录。同一构建中断后重跑原命令，工具会复用已核验的归档、签名任务或 IPA。只准备归档用 `--prepare`，用现有签名包重试发布可用 `--publish`。不同源码使用新的版本或构建号。
+
+发布前核验主 App 和两个通知扩展的 Ad Hoc 签名、登记设备、推送权限和二进制 UUID，并从公网回读安装包。固定的「今日 → 更新」入口切换后继续回读版本号和构建号。手机安装是独立的验收步骤。
+
+发布成功后，直装频道保留正式 IPA。本机在私有的 `~/.local/share/focus-direct-install/receipts/` 中保存 `release.json` 和压缩崩溃符号 `dSYMs.zip`。公网回读和本机记录落盘后，发布器回收本次交接归档和 IPA 副本。每个阶段结束清理临时文件并输出临时目录占用和磁盘可用空间变化。失败时在私有 `diagnostics/` 中保存归档或签名日志的末尾，并保留可续跑的交接记录。异常退出后遗留超过 24 小时的临时目录会在下次发布流程启动时检查，确认闲置后回收。
 
 同一台 iPhone 已验证 Ad Hoc 构建 17 可直接覆盖到构建 18，原有本地设置文件保留。
 
-本机配置在 `~/.local/share/focus-direct-install/config.json`，由发布主机保管，文件权限为 `0600`。配置包括 HTTPS 公网入口 `public_origin`、静态资源目录 `public_img_root`、固定的随机目录名 `channel`、唯一的设备登记编号 `device_udid` 和签名团队 `team_id`。同一设备的后续构建继续使用同一个 `channel`。直装发布会把该页面地址写入已签名 App 的 `FocusDirectInstallURL`。
+本机配置在 `~/.local/share/focus-direct-install/release-config.json`，由发布主机保管，文件权限为 `0600`。配置包括 HTTPS 公网入口 `public_origin`、静态资源目录 `public_img_root`、固定的随机目录名 `channel`、唯一的设备登记编号 `device_udid` 和签名团队 `team_id`。同一设备的后续构建继续使用同一个 `channel`。直装发布会把该页面地址写入已签名 App 的 `FocusDirectInstallURL`。

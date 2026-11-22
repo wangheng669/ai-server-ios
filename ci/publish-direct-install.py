@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Prepare or publish an Ad Hoc build of 焦点 for the registered iPhone."""
+"""Build, sign and publish an Ad Hoc build of 焦点 for the registered iPhone."""
 
 import argparse
+import base64
 import fcntl
 import hashlib
 import json
@@ -10,23 +11,35 @@ import plistlib
 import re
 import secrets
 import shutil
+import signal
 import subprocess
+import sys
 import tempfile
+import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 from zipfile import ZIP_DEFLATED, ZipFile
 
 
-PROJECT = Path(__file__).resolve().parent.parent
+PROJECT = Path.home() / "Desktop/ai-server-ios"
+GITHUB_REPO = "wangheng669/ai-server-ios"
+SIGNING_WORKFLOW = "focus-adhoc.yml"
 BUNDLE_ID = "com.wangheng.aiserverclient"
-CONFIG = Path.home() / ".local/share/focus-direct-install/config.json"
+CONFIG = Path.home() / ".local/share/focus-direct-install/release-config.json"
+LOCK = CONFIG.parent / "config.lock"
 WORK_ROOT = Path.home() / ".cache/ai-server-ios"
+SCRATCH_ROOT = WORK_ROOT / "focus-direct-install-tmp"
 RECEIPT_ROOT = CONFIG.parent / "receipts"
+DIAGNOSTICS_ROOT = CONFIG.parent / "diagnostics"
 ARCHIVE_NAME = "VerifiedAIServerClient.xcarchive.zip"
 IPA_NAME = "Focus-AdHoc.ipa"
 RECEIPT_NAME = "release.json"
 SYMBOLS_NAME = "dSYMs.zip"
+BUILD_PATHS = ("AIClient", "AIServerClient.xcodeproj", "Config", "NotificationContentExtension",
+               "NotificationServiceExtension")
+ICON_PATH = "AIClient/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png"
 
 
 def require(condition, message):
@@ -57,17 +70,85 @@ def fetch(url, path, status=200, byte_range=None):
     args = ["curl", "-fsS", "--max-time", "90", "-o", str(path), "-w", "%{http_code}"]
     if byte_range:
         args += ["--range", byte_range]
-    result = command(args + [url], capture_output=True, text=True)
-    require(result.stdout == str(status), f"Expected HTTP {status}, got {result.stdout}")
+    result = subprocess.run(args + [url], capture_output=True, text=True)
+    require(result.returncode == 0 and result.stdout == str(status),
+            f"Public readback failed (expected HTTP {status}, received {result.stdout or 'no response'})")
 
 
-def build_app(work, config, entry_url, version, build, source_commit):
+def git_output(*args):
+    return command(["git", "-C", PROJECT, *args], capture_output=True).stdout
+
+
+def private_directory(path):
+    path.mkdir(mode=0o700, exist_ok=True)
+    require(path.is_dir() and path.resolve() == path and path.stat().st_uid == os.getuid()
+            and not (path.stat().st_mode & 0o077), f"Expected an owned private directory: {path}")
+
+
+def free_bytes(path):
+    info = os.statvfs(path)
+    return info.f_bavail * info.f_frsize
+
+
+@contextmanager
+def scratch(stage):
+    free_before = free_bytes(SCRATCH_ROOT)
+    occupied = 0
+    try:
+        with tempfile.TemporaryDirectory(prefix=f"{stage}.", dir=SCRATCH_ROOT) as temp:
+            path = Path(temp)
+            try:
+                yield path
+            finally:
+                result = subprocess.run(["du", "-sk", path], capture_output=True, text=True)
+                if result.returncode == 0:
+                    occupied = int(result.stdout.split()[0]) * 1024
+    finally:
+        print(f"storage stage={stage} scratch_bytes={occupied} available_before_bytes={free_before} "
+              f"available_after_bytes={free_bytes(SCRATCH_ROOT)}", flush=True)
+
+
+def prune_scratch(channel):
+    cutoff = time.time() - 24 * 60 * 60
+    roots = [(SCRATCH_ROOT, r"(prepare|sign|publish|finished)\."),
+             (RECEIPT_ROOT, r"\.focus-receipt\."),
+             (channel, r"\.focus-public\.")]
+    candidates = [p for root, prefix in roots if root.is_dir() and root.resolve() == root
+                  for p in root.iterdir() if re.fullmatch(prefix + r"[a-z0-9_]{8}", p.name)
+                  and p.is_dir() and not p.is_symlink() and p.stat().st_uid == os.getuid()
+                  and not (p.stat().st_mode & 0o077) and not p.is_mount() and p.stat().st_mtime < cutoff]
+    if not candidates:
+        return
+    owner = command(["id", "-un"], capture_output=True, text=True).stdout.strip()
+    open_files = subprocess.run(["lsof", "-nP", "-a", "-u", owner, "-Fn"], capture_output=True, text=True)
+    require(open_files.returncode == 0, "Unable to verify whether release scratch is in use")
+    active_paths = [line[1:] for line in open_files.stdout.splitlines() if line.startswith("n/")]
+    for path in candidates:
+        if not any(p == str(path) or p.startswith(f"{path}/") for p in active_paths):
+            shutil.rmtree(path)
+            print(f"Removed stale release scratch {path.name}", flush=True)
+
+
+def xcode_environment():
+    env = os.environ.copy()
+    override = env.pop("XCODE_XCCONFIG_FILE", "").strip()
+    if override:
+        path = Path(override).expanduser().resolve()
+        require(path.is_file() and path.suffix == ".xcconfig" and os.access(path, os.R_OK),
+                "XCODE_XCCONFIG_FILE must name a readable .xcconfig file")
+        env["XCODE_XCCONFIG_FILE"] = str(path)
+    command(["xcrun", "--sdk", "iphoneos", "--show-sdk-path"], env=env, stdout=subprocess.DEVNULL)
+    return env
+
+
+def build_app(work, config, entry_url, version, build, source_commit, env, lock_fd):
     source = work / "source"
     source.mkdir()
-    snapshot = work / "source.tar"
-    command(["git", "archive", "--output", str(snapshot), source_commit], cwd=PROJECT)
-    command(["tar", "-xf", str(snapshot), "-C", str(source)])
-    snapshot.unlink()
+    with subprocess.Popen(["git", "-C", PROJECT, "archive", source_commit, "--", *BUILD_PATHS],
+                          stdout=subprocess.PIPE) as snapshot:
+        with snapshot.stdout:
+            command(["tar", "-xf", "-", "-C", source], stdin=snapshot.stdout)
+        require(snapshot.wait() == 0, "Unable to export the source commit")
 
     info_path = source / "Config/Info.plist"
     info = plistlib.loads(info_path.read_bytes())
@@ -85,7 +166,7 @@ def build_app(work, config, entry_url, version, build, source_commit):
             "-derivedDataPath", str(work / "DerivedData"), f"DEVELOPMENT_TEAM={config['team_id']}",
             "CODE_SIGN_STYLE=Automatic", "COMPILER_INDEX_STORE_ENABLE=NO",
             f"MARKETING_VERSION={version}", f"CURRENT_PROJECT_VERSION={build}",
-        ], cwd=source, stdout=log, stderr=subprocess.STDOUT)
+        ], cwd=source, env=env, stdout=log, stderr=subprocess.STDOUT, pass_fds=(lock_fd,))
     return archive
 
 
@@ -117,29 +198,29 @@ def read_handoff(handoff, identity):
     require(path.is_file() and not path.is_symlink(), "Release handoff receipt is missing")
     receipt = json.loads(path.read_bytes())
     require(receipt["identity"] == identity, "Build already prepared with a different source or release configuration")
-    require(receipt["status"] == "prepared", "Release handoff receipt has invalid status")
+    require(receipt.get("protocol") == 1 and receipt["status"] == "prepared",
+            "Release handoff must come from the canonical release tool")
     archive = handoff / ARCHIVE_NAME
     require(archive.is_file() and not archive.is_symlink() and sha256(archive) == receipt["archive_sha256"],
             "Prepared archive checksum differs")
     return receipt
 
 
-def prepare_archive(config, entry_url, identity, handoff):
-    if handoff.exists():
-        receipt = read_handoff(handoff, identity)
-    else:
+def prepare_archive(config, entry_url, identity, handoff, lock_fd):
+    if not handoff.exists() and not handoff.is_symlink():
+        env = xcode_environment()
         version, build = identity["version"], identity["build"]
         print(f"Building {version} ({build}) from {identity['source_commit']}", flush=True)
-        with tempfile.TemporaryDirectory(prefix=".focus-adhoc-prepare.", dir=WORK_ROOT) as temp:
-            work = Path(temp)
+        with scratch("prepare") as work:
             stage = work / "handoff"
             stage.mkdir()
             try:
-                archive = build_app(work, config, entry_url, version, build, identity["source_commit"])
+                archive = build_app(work, config, entry_url, version, build, identity["source_commit"], env, lock_fd)
                 app = archive / "Products/Applications/AIServerClient.app"
                 archive_zip = stage / ARCHIVE_NAME
                 command(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", archive, archive_zip])
                 receipt = {
+                    "protocol": 1,
                     "identity": identity,
                     "archive_sha256": sha256(archive_zip),
                     "binary_uuids": app_binary_uuids(app, archive / "dSYMs"),
@@ -149,19 +230,11 @@ def prepare_archive(config, entry_url, identity, handoff):
                 write_atomic(stage / RECEIPT_NAME, json.dumps(receipt, indent=2).encode())
                 stage.rename(handoff)
             except BaseException:
-                log = work / "archive.log"
-                if log.is_file():
-                    diagnostics = CONFIG.parent / "diagnostics"
-                    diagnostics.mkdir(exist_ok=True)
-                    saved = diagnostics / f"{handoff.name}-{identity['source_commit'][:12]}.log"
-                    write_atomic(saved, log.read_bytes())
-                    print(f"Build log: {saved}", flush=True)
+                save_diagnostics(work, handoff, "archive")
                 raise
-    print(f"archive_path={handoff / ARCHIVE_NAME}")
-    print(f"archive_sha256={receipt['archive_sha256']}")
-    signed = handoff / IPA_NAME
-    if signed.is_file() and not signed.is_symlink():
-        print(f"signed_ipa={signed}")
+    receipt = read_handoff(handoff, identity)
+    print(f"archive_sha256={receipt['archive_sha256']}", flush=True)
+    return receipt
 
 
 def component_plist(args):
@@ -304,7 +377,7 @@ def save_release_receipt(handoff, destination, receipt, ipa_sha256):
 
     archive_prefix = "AIServerClient.xcarchive/"
     published["public_readback_at"] = datetime.now(timezone.utc).isoformat()
-    with tempfile.TemporaryDirectory(prefix=".staging-", dir=destination.parent) as staging:
+    with tempfile.TemporaryDirectory(prefix=".focus-receipt.", dir=destination.parent) as staging:
         stage = Path(staging) / "receipt"
         stage.mkdir()
         symbols = stage / SYMBOLS_NAME
@@ -343,7 +416,7 @@ def publish(work, channel, entry_url, package, base, assets, ipa, manifest_path,
                     and sha256(package / "Focus.ipa") == sha256(ipa),
                     "Existing package differs from the release handoff")
         else:
-            with tempfile.TemporaryDirectory(prefix=".staging-", dir=channel) as staging:
+            with tempfile.TemporaryDirectory(prefix=".focus-public.", dir=channel) as staging:
                 stage = Path(staging) / "package"
                 stage.mkdir()
                 shutil.copyfile(ipa, stage / "Focus.ipa")
@@ -384,18 +457,216 @@ def publish(work, channel, entry_url, package, base, assets, ipa, manifest_path,
         raise
 
 
+def save_diagnostics(work, handoff, stage):
+    log = work / f"{stage}.log"
+    if log.is_file():
+        private_directory(DIAGNOSTICS_ROOT)
+        saved = DIAGNOSTICS_ROOT / f"{handoff.name}-{stage}.log"
+        with log.open("rb") as file:
+            file.seek(max(0, log.stat().st_size - 2 * 1024 * 1024))
+            write_atomic(saved, file.read())
+        print(f"{stage} log: {saved}", flush=True)
+
+
+def export_signed(config, entry_url, identity, handoff, checksum, auth, lock_fd):
+    receipt = read_handoff(handoff, identity)
+    require(checksum == receipt["archive_sha256"], "Signing request does not match the prepared archive")
+    ipa = handoff / IPA_NAME
+    if ipa.is_file() and not ipa.is_symlink():
+        print("Ad Hoc IPA already exported", flush=True)
+        return
+    require(not ipa.exists() and not ipa.is_symlink(), "Unexpected signed output path")
+    env = xcode_environment()
+    version, build = identity["version"], identity["build"]
+    with scratch("sign") as work:
+        archive = work / "AIServerClient.xcarchive"
+        command(["ditto", "-x", "-k", handoff / ARCHIVE_NAME, work], pass_fds=(lock_fd,))
+        app = archive / "Products/Applications/AIServerClient.app"
+        command(["codesign", "--verify", "--deep", "--strict", app])
+        signature = command(["codesign", "-dv", app], capture_output=True, text=True).stderr
+        require(f"TeamIdentifier={config['team_id']}" in signature.splitlines(), "Archive signing team differs")
+        info = plistlib.loads((app / "Info.plist").read_bytes())
+        require(info["CFBundleIdentifier"] == BUNDLE_ID
+                and (info["CFBundleShortVersionString"], info["CFBundleVersion"]) == (version, str(build))
+                and app_binary_uuids(app) == receipt["binary_uuids"], "Archive does not match its signing receipt")
+
+        key_id, issuer_id, private_key = auth
+        key = work / "AuthKey.p8"
+        options = work / "export-options.plist"
+        export = work / "export"
+        options.write_bytes(plistlib.dumps({"destination": "export", "method": "release-testing",
+                                           "signingStyle": "automatic", "teamID": config["team_id"],
+                                           "manageAppVersionAndBuildNumber": False}))
+        key.write_bytes(private_key)
+        try:
+            with (work / "export.log").open("wb") as log:
+                result = subprocess.run(["xcodebuild", "-exportArchive", "-archivePath", archive,
+                                         "-exportOptionsPlist", options, "-exportPath", export,
+                                         "-allowProvisioningUpdates", "-authenticationKeyPath", key,
+                                         "-authenticationKeyID", key_id, "-authenticationKeyIssuerID", issuer_id],
+                                        env=env, stdout=log, stderr=subprocess.STDOUT, pass_fds=(lock_fd,))
+                require(result.returncode == 0, f"Xcode Ad Hoc export exited with status {result.returncode}")
+        except BaseException:
+            save_diagnostics(work, handoff, "export")
+            raise
+        finally:
+            key.unlink()
+        exported, = export.glob("*.ipa")
+        require(exported.is_file() and not exported.is_symlink(), "Missing signature export")
+        require(verify_app(work, exported, config, entry_url, version, build) == receipt["binary_uuids"],
+                "Signed IPA binaries differ from the prepared archive")
+        exported.chmod(0o600)
+        exported.rename(ipa)
+
+
+def signing_runs(checksum):
+    result = command(["gh", "run", "list", "--repo", GITHUB_REPO, "--workflow", SIGNING_WORKFLOW,
+                      "--branch", "main", "--event", "workflow_dispatch", "--limit", "100",
+                      "--json", "displayTitle,databaseId,status,conclusion"], capture_output=True)
+    return [run for run in json.loads(result.stdout) if run["displayTitle"] == f"Focus Ad Hoc {checksum}"]
+
+
+def request_signing(identity, checksum):
+    matching = signing_runs(checksum)
+    if matching and (matching[0]["status"] != "completed" or matching[0]["conclusion"] == "success"):
+        return matching[0]["databaseId"], set()
+    inputs = {"source_commit": identity["source_commit"], "version": identity["version"],
+              "build": str(identity["build"]), "archive_sha256": checksum}
+    command(["gh", "workflow", "run", SIGNING_WORKFLOW, "--repo", GITHUB_REPO, "--ref", "main", "--json"],
+            input=json.dumps(inputs), text=True)
+    return None, {run["databaseId"] for run in matching}
+
+
+def wait_for_signing(checksum, request):
+    run_id, previous = request
+    deadline = time.monotonic() + 60
+    while run_id is None and time.monotonic() < deadline:
+        runs = signing_runs(checksum)
+        run_id = next((run["databaseId"] for run in runs if run["databaseId"] not in previous), None)
+        if run_id is None:
+            time.sleep(3)
+    require(run_id is not None, "Signing job is not visible yet. Resume using the same release command.")
+    command(["gh", "run", "watch", str(run_id), "--repo", GITHUB_REPO, "--interval", "5", "--exit-status"])
+
+
+def read_current(channel):
+    latest = channel / "latest.json"
+    current = json.loads(latest.read_bytes()) if latest.exists() else None
+    current_version = version_key(current["version"], current["build"]) if current else (0, 0, 0, 0)
+    return current, current_version
+
+
+def require_package_name(package, identity):
+    require(re.fullmatch(rf"build-{re.escape(identity['version'])}-{identity['build']}-[0-9a-f]{{16}}", package),
+            "Invalid package identity in release receipt")
+
+
+def finish_release(config, entry_url, identity, handoff, channel):
+    current, current_version = read_current(channel)
+    version, build = identity["version"], identity["build"]
+    target = version_key(version, build)
+    require(target >= current_version, "The direct-install page already serves a newer build")
+    origin = config["public_origin"]
+    if target == current_version and not handoff.exists():
+        package = current["package"]
+        require_package_name(package, identity)
+        record = RECEIPT_ROOT / package / RECEIPT_NAME
+        require(record.is_file() and not record.is_symlink(), "No receipt for the current build")
+        saved = json.loads(record.read_bytes())
+        require(saved.get("protocol") == 1 and saved["identity"] == identity
+                and saved["package"] == package and saved["status"] == "published"
+                and sha256(record.parent / SYMBOLS_NAME) == saved["dsym_sha256"], "Published receipt differs")
+        with scratch("publish") as work:
+            fetch(f"{origin}/img/{config['channel']}/{package}/Focus.ipa", work / "public.ipa")
+            require(sha256(work / "public.ipa") == saved["ipa_sha256"], "Public IPA differs from the saved receipt")
+            fetch(entry_url.rsplit("/", 1)[0] + "/latest.json?check=" + secrets.token_hex(8), work / "public-latest.json")
+            require(json.loads((work / "public-latest.json").read_bytes()) == current, "Public latest version differs")
+        print(f"Published {version} ({build}) verified. release_record={record}", flush=True)
+        return
+
+    ipa = handoff / IPA_NAME
+    receipt = read_handoff(handoff, identity)
+    require(ipa.is_file() and not ipa.is_symlink(), "The prepared release requires its signed IPA")
+    require({path.name for path in handoff.iterdir()} == {ARCHIVE_NAME, IPA_NAME, RECEIPT_NAME},
+            "Release handoff contains unexpected files")
+    name = receipt["package"]
+    require_package_name(name, identity)
+    require(target > current_version or current["package"] == name,
+            "The direct-install page already serves another build")
+    private_directory(RECEIPT_ROOT)
+    destination = RECEIPT_ROOT / name
+    base = f"{origin}/img/{config['channel']}/{name}/"
+    assets = {kind: base + file for kind, file in {
+        "software-package": "Focus.ipa", "display-image": "icon-57.png", "full-size-image": "icon-512.png",
+    }.items()}
+
+    ipa_checksum = sha256(ipa)
+    with scratch("publish") as work:
+        require(verify_app(work, ipa, config, entry_url, version, build) == receipt["binary_uuids"],
+                "Signed IPA binaries differ from the prepared archive")
+        require(ipa_checksum == sha256(ipa), "Signed IPA changed during verification")
+        manifest = work / "manifest.plist"
+        manifest.write_bytes(install_manifest(assets, version))
+        icon = work / "AppIcon.png"
+        icon.write_bytes(git_output("show", f"{identity['source_commit']}:{ICON_PATH}"))
+        publish(work, channel, entry_url, channel / name, base, assets, ipa, manifest, icon, version, build)
+        require(ipa_checksum == sha256(ipa), "Signed IPA changed during public verification")
+        save_release_receipt(handoff, destination, receipt, ipa_checksum)
+
+    with scratch("finished") as work:
+        handoff.rename(work / "handoff")
+    print(f"Published {version} ({build}). release_record={destination / RECEIPT_NAME}", flush=True)
+
+
+@contextmanager
+def release_lock(channel):
+    with LOCK.open("a+") as file:
+        fcntl.flock(file, fcntl.LOCK_EX)
+        WORK_ROOT.mkdir(exist_ok=True, parents=True)
+        require(WORK_ROOT.resolve() == WORK_ROOT and WORK_ROOT.stat().st_uid == os.getuid(),
+                "Direct-install work root must be an owned directory")
+        private_directory(SCRATCH_ROOT)
+        prune_scratch(channel)
+        yield file.fileno()
+
+
 def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", required=True)
     parser.add_argument("--build", required=True, type=int)
+    parser.add_argument("--source-commit", required=True, help="Full SHA of the committed app source")
+    parser.add_argument("--archive-sha256", help=argparse.SUPPRESS)
     action = parser.add_mutually_exclusive_group(required=True)
-    action.add_argument("--prepare", action="store_true", help="Build the archive for the Ad Hoc signer")
-    action.add_argument("--signed-ipa", type=Path, help="Verify and publish this signed Ad Hoc package")
+    action.add_argument("--prepare", action="store_true", help="Prepare or reuse the archive")
+    action.add_argument("--release", action="store_true", help="Prepare, sign and publish this release")
+    action.add_argument("--publish", action="store_true", help="Resume public verification using a signed handoff")
+    action.add_argument("--export-signed", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
-    target_version = version_key(args.version, args.build)
-    require(not CONFIG.stat().st_mode & 0o077, "Direct-install configuration must be private")
-    config = json.loads(CONFIG.read_text())
+    target = version_key(args.version, args.build)
+    require(re.fullmatch(r"[a-f0-9]{40}", args.source_commit), "Expected a full Git commit SHA")
+    if args.export_signed:
+        require(os.environ.get("GITHUB_REF") == "refs/heads/main"
+                and os.environ.get("GITHUB_WORKFLOW_REF", "").split("@", 1)[0]
+                == f"{GITHUB_REPO}/.github/workflows/{SIGNING_WORKFLOW}",
+                "Signing must run in the dedicated workflow on main")
+        require(args.archive_sha256 and re.fullmatch(r"[a-f0-9]{64}", args.archive_sha256),
+                "Expected the prepared archive SHA-256")
+        key = os.environ.pop("APP_STORE_CONNECT_PRIVATE_KEY_BASE64", "")
+        key_id = os.environ.pop("APP_STORE_CONNECT_KEY_ID", "")
+        issuer_id = os.environ.pop("APP_STORE_CONNECT_ISSUER_ID", "")
+        require(key and key_id and issuer_id, "Signing workflow credentials are unavailable")
+        auth = key_id, issuer_id, base64.b64decode("".join(key.split()), validate=True)
+    else:
+        require(re.fullmatch(r"[a-f0-9]{40}", os.environ.get("FOCUS_RELEASE_MAIN", "")),
+                "Start from ~/.local/bin/focus-direct-install")
+        require(not args.archive_sha256, "Archive checksums are input to the signing workflow only")
+    require(git_output("cat-file", "-t", args.source_commit).strip() == b"commit", "Source commit is unavailable")
+    config_info = CONFIG.stat()
+    require(CONFIG.is_file() and not CONFIG.is_symlink() and config_info.st_uid == os.getuid()
+            and not (config_info.st_mode & 0o077), "Direct-install configuration must be private")
+    configuration_file = CONFIG.read_bytes()
+    config = json.loads(configuration_file)
     origin = urlsplit(config["public_origin"])
     require(origin.scheme == "https" and origin.hostname and not origin.username
             and not origin.path and not origin.query and not origin.fragment, "Expected a public HTTPS origin")
@@ -403,74 +674,41 @@ def main():
     require(re.fullmatch(r"focus-update-[a-f0-9]{48}", channel_name), "Invalid private channel path")
     channel = Path(config["public_img_root"]).resolve(strict=True) / channel_name
     entry_url = f"{config['public_origin']}/img/{channel_name}/install.html"
-    with CONFIG.with_suffix(".lock").open("a+") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        require(not command(["git", "status", "--porcelain"], cwd=PROJECT, capture_output=True).stdout,
-                "Commit the intended source in a clean worktree first")
+    configuration = json.dumps([entry_url, config["team_id"], config["device_udid"]]).encode()
+    identity = {"source_commit": args.source_commit, "version": args.version, "build": args.build,
+                "configuration_sha256": hashlib.sha256(configuration).hexdigest()}
+    key = json.dumps([entry_url, target]).encode()
+    handoff = WORK_ROOT / f"focus-adhoc-export.{hashlib.sha256(key).hexdigest()}"
+
+    with release_lock(channel) as lock_fd:
+        require(CONFIG.read_bytes() == configuration_file, "Release configuration changed")
         require(not channel.is_symlink(), "Direct-install channel must be a real directory")
         channel.mkdir(exist_ok=True)
-        WORK_ROOT.mkdir(exist_ok=True, parents=True)
-        require(WORK_ROOT.resolve() == WORK_ROOT and WORK_ROOT.stat().st_uid == os.getuid(),
-                "Direct-install work root must be an owned directory")
-        configuration = json.dumps([entry_url, config["team_id"], config["device_udid"]]).encode()
-        commit = command(["git", "rev-parse", "HEAD"], cwd=PROJECT, capture_output=True, text=True).stdout.strip()
-        identity = {
-            "source_commit": commit,
-            "version": args.version,
-            "build": args.build,
-            "configuration_sha256": hashlib.sha256(configuration).hexdigest(),
-        }
-        key = json.dumps([entry_url, target_version]).encode()
-        handoff = WORK_ROOT / f"focus-adhoc-export.{hashlib.sha256(key).hexdigest()}"
-        latest = channel / "latest.json"
-        current = json.loads(latest.read_bytes()) if latest.exists() else None
-        current_version = version_key(current["version"], current["build"]) if current else (0, 0, 0, 0)
-        if args.prepare:
-            require(target_version > current_version, "The direct-install page already serves this build or a newer one")
-            prepare_archive(config, entry_url, identity, handoff)
+        current, current_version = read_current(channel)
+        if args.publish or (args.release and target == current_version and not handoff.exists()):
+            finish_release(config, entry_url, identity, handoff, channel)
             return
-
+        require(target >= current_version, "The direct-install page already serves a newer build")
+        if target == current_version:
+            require(read_handoff(handoff, identity)["package"] == current["package"],
+                    "The direct-install page already serves another build")
+        if args.export_signed:
+            export_signed(config, entry_url, identity, handoff, args.archive_sha256, auth, lock_fd)
+            return
+        receipt = prepare_archive(config, entry_url, identity, handoff, lock_fd)
+        if args.prepare:
+            return
         ipa = handoff / IPA_NAME
-        require(args.signed_ipa.absolute() == ipa and ipa.is_file() and not ipa.is_symlink(),
-                "Use the signed IPA from this build's prepare handoff")
-        receipt = read_handoff(handoff, identity)
-        require({path.name for path in handoff.iterdir()} == {ARCHIVE_NAME, IPA_NAME, RECEIPT_NAME},
-                "Release handoff contains unexpected files")
-        package_name = receipt["package"]
-        require(re.fullmatch(rf"build-{re.escape(args.version)}-{args.build}-[0-9a-f]{{16}}", package_name),
-                "Invalid package identity in release receipt")
-        require(target_version > current_version or (target_version == current_version and current
-                and current["package"] == package_name), "The direct-install page already serves another build or a newer one")
-
-        RECEIPT_ROOT.mkdir(mode=0o700, exist_ok=True)
-        require(RECEIPT_ROOT.resolve() == RECEIPT_ROOT and RECEIPT_ROOT.stat().st_uid == os.getuid()
-                and not (RECEIPT_ROOT.stat().st_mode & 0o077), "Release receipt storage must be private and owned")
-        destination = RECEIPT_ROOT / package_name
-        package = channel / package_name
-        base = f"{config['public_origin']}/img/{channel_name}/{package_name}/"
-        assets = {kind: base + file for kind, file in {
-            "software-package": "Focus.ipa", "display-image": "icon-57.png", "full-size-image": "icon-512.png",
-        }.items()}
-        icon = PROJECT / "AIClient/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png"
-
-        ipa_sha256 = sha256(ipa)
-        with tempfile.TemporaryDirectory(prefix=".focus-adhoc-verify.", dir=WORK_ROOT) as temp:
-            work = Path(temp)
-            uuids = verify_app(work, ipa, config, entry_url, args.version, args.build)
-            require(uuids == receipt["binary_uuids"], "Signed IPA binaries differ from the prepared archive")
-            require(ipa_sha256 == sha256(ipa), "Signed IPA changed during verification")
-            manifest = work / "manifest.plist"
-            manifest.write_bytes(install_manifest(assets, args.version))
-            publish(work, channel, entry_url, package, base, assets, ipa, manifest, icon, args.version, args.build)
-
-        require(ipa_sha256 == sha256(ipa), "Signed IPA changed during public verification")
-        save_release_receipt(handoff, destination, receipt, ipa_sha256)
-        with tempfile.TemporaryDirectory(prefix=".focus-adhoc-finished.", dir=WORK_ROOT) as cleanup:
-            handoff.rename(Path(cleanup) / "handoff")
-        print(f"release_record={destination / RECEIPT_NAME}")
-        print(f"Published {args.version} ({args.build}): {entry_url}", flush=True)
-
+        if ipa.is_file() and not ipa.is_symlink():
+            finish_release(config, entry_url, identity, handoff, channel)
+            return
+        request = request_signing(identity, receipt["archive_sha256"])
+    wait_for_signing(receipt["archive_sha256"], request)
+    with release_lock(channel):
+        require(CONFIG.read_bytes() == configuration_file, "Release configuration changed while signing")
+        finish_release(config, entry_url, identity, handoff, channel)
 
 
 if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, lambda _signum, _frame: sys.exit(143))
     main()

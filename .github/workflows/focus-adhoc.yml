@@ -1,0 +1,55 @@
+name: Sign Focus Ad Hoc
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Full commit SHA recorded by the release tool
+        required: true
+        type: string
+      version:
+        description: Marketing version recorded by the release tool
+        required: true
+        type: string
+      build:
+        description: Build number recorded by the release tool
+        required: true
+        type: string
+      archive_sha256:
+        description: Prepared archive SHA-256
+        required: true
+        type: string
+
+run-name: Focus Ad Hoc ${{ inputs.archive_sha256 }}
+
+concurrency:
+  group: focus-adhoc-signing
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sign:
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, macOS, X64, ios-hackintosh]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Export the prepared archive
+        env:
+          DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+          FOCUS_SOURCE_COMMIT: ${{ inputs.source_commit }}
+          FOCUS_VERSION: ${{ inputs.version }}
+          FOCUS_BUILD: ${{ inputs.build }}
+          FOCUS_ARCHIVE_SHA256: ${{ inputs.archive_sha256 }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY_BASE64 }}
+        run: |
+          python3 ci/publish-direct-install.py --export-signed \
+            --source-commit "$FOCUS_SOURCE_COMMIT" --version "$FOCUS_VERSION" --build "$FOCUS_BUILD" \
+            --archive-sha256 "$FOCUS_ARCHIVE_SHA256"
