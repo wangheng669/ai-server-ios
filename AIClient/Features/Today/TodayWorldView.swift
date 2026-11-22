@@ -44,7 +44,7 @@ final class TodayWorldStore: ObservableObject {
     private let fetchBalance: (Bool) async throws -> AliyunAccountBalance
 
     var needsPublicationCheck: Bool {
-        errorMessage != nil || displayedEdition?.date != Self.billingDate(daysAgo: 1)
+        errorMessage != nil || brief?.isPartial == true || brief?.date != Self.billingDate(daysAgo: 1)
     }
 
     init(fetchBalance: ((Bool) async throws -> AliyunAccountBalance)? = nil,
