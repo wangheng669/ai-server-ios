@@ -538,9 +538,15 @@ private struct TodayBriefDeck: View {
     }
 
     private func summaryDeck(selection: Int, width: CGFloat, height: CGFloat, maximumHeight: CGFloat) -> some View {
-        ZStack(alignment: .top) {
-            if brief.cards.count > 1, selection == brief.cards.count - 1, shuffle == nil {
-                backingCard(width: width, height: height)
+        let lastIndex = brief.cards.count - 1
+        let next = shuffle.flatMap { adjacentIndex(from: selection, direction: $0.direction) }
+        let promotion = shuffle?.progress ?? 0
+        return ZStack(alignment: .top) {
+            if brief.cards.count > 1, selection == lastIndex || next == lastIndex {
+                let opacity = selection == lastIndex ? 1 - promotion : promotion
+                let lastHeight = summaryHeights[brief.cards[lastIndex].id] ?? height
+                backingCard(width: width, height: lastHeight)
+                    .opacity(opacity)
             }
             summaryCards(selection: selection, width: width, height: height, maximumHeight: maximumHeight)
         }
@@ -552,9 +558,11 @@ private struct TodayBriefDeck: View {
             cardCount: brief.cards.count,
             cardWidth: width,
             viewportWidth: viewport.width,
+            frontHeight: height,
+            cardHeight: { summaryHeights[brief.cards[$0].id] },
             direction: showsOriginals ? 1 : shuffle?.direction ?? 1,
             progress: showsOriginals ? 0 : shuffle?.progress ?? 0
-        ) { index, contentOpacity, shadowOpacity in
+        ) { index, visibleHeight, contentOpacity, depth in
             let card = brief.cards[index]
             TodayBriefCardFace(
                 card: card,
@@ -568,12 +576,10 @@ private struct TodayBriefDeck: View {
                 if summaryHeights[card.id] != measured { summaryHeights[card.id] = measured }
             }
             .opacity(contentOpacity)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.18)) { view in
-                view.frame(height: height, alignment: .top)
-            }
+            .frame(height: visibleHeight, alignment: .top)
             .clipShape(shape)
             .modifier(CardSurface(
-                shape: shape, width: width, shadowOpacity: shadowOpacity, isBacking: contentOpacity == 0
+                shape: shape, width: width, shadowOpacity: 0.07 - 0.045 * depth, backingDepth: depth
             ))
             .allowsHitTesting(index == selection)
             .accessibilityHidden(index != selection)
@@ -753,8 +759,11 @@ private struct TodayBriefDeck: View {
 
         let pending = Settlement(shuffle: swipe)
         settlement = pending
-        let duration = (showsOriginals ? 0.28 : 0.36) * max(0.45, remaining)
-        withAnimation(.easeOut(duration: duration), completionCriteria: .logicallyComplete) {
+        let duration = (showsOriginals ? 0.28 : 0.40) * max(0.45, remaining)
+        let animation: Animation = showsOriginals
+            ? .easeOut(duration: duration)
+            : .timingCurve(0.24, 0.16, 0.31, 1, duration: duration)
+        withAnimation(animation, completionCriteria: .logicallyComplete) {
             settlement?.shuffle.progress = target
         } completion: {
             if settlement?.id == pending.id { completeShuffle(next) }
@@ -826,7 +835,7 @@ private struct TodayBriefDeck: View {
 
     private func backingCard(width: CGFloat, height: CGFloat) -> some View {
         Color.clear.frame(height: height)
-            .modifier(CardSurface(shape: shape, width: width, shadowOpacity: 0.025, isBacking: true))
+            .modifier(CardSurface(shape: shape, width: width, shadowOpacity: 0.025, backingDepth: 1))
             .scaleEffect(0.988, anchor: .bottom)
             .rotationEffect(.degrees(0.7))
             .offset(x: 7, y: Self.layerSpacing)
@@ -838,7 +847,7 @@ private struct TodayBriefDeck: View {
         let shape: RoundedRectangle
         let width: CGFloat
         let shadowOpacity: CGFloat
-        var isBacking = false
+        var backingDepth: CGFloat = 0
 
         func body(content: Content) -> some View {
             content
@@ -846,7 +855,7 @@ private struct TodayBriefDeck: View {
                 .background {
                     shape.fill(TodayBriefStyle.surface)
                         .overlay {
-                            if isBacking { shape.fill(TodayBriefStyle.accent.opacity(0.025)) }
+                            shape.fill(TodayBriefStyle.accent.opacity(0.025 * backingDepth))
                         }
                         .shadow(color: TodayBriefStyle.accent.opacity(shadowOpacity), radius: 8, x: 0, y: 3)
                 }
@@ -893,9 +902,11 @@ private struct TodayBriefDeckLayers<Layer: View>: View, Animatable {
     let cardCount: Int
     let cardWidth: CGFloat
     let viewportWidth: CGFloat
+    let frontHeight: CGFloat
+    let cardHeight: (Int) -> CGFloat?
     let direction: Int
     var progress: CGFloat
-    @ViewBuilder let layer: (_ index: Int, _ contentOpacity: CGFloat, _ shadowOpacity: CGFloat) -> Layer
+    @ViewBuilder let layer: (_ index: Int, _ height: CGFloat, _ contentOpacity: CGFloat, _ depth: CGFloat) -> Layer
 
     var animatableData: CGFloat {
         get { progress }
@@ -909,6 +920,10 @@ private struct TodayBriefDeckLayers<Layer: View>: View, Animatable {
         let destination = candidate.isEmpty ? front : candidate
         let visible = front + destination.filter { !front.contains($0) }
         let fraction = min(1, max(0, progress))
+        let promotion = smoothProgress(fraction)
+        let reveal = smoothProgress(fraction / 0.38)
+        let destinationHeight = destination.first.flatMap(cardHeight) ?? frontHeight
+        let promotedHeight = frontHeight + (destinationHeight - frontHeight) * promotion
         let stackInset = CGFloat(stackSize - 1) * 2
         let entryTravel = (viewportWidth + cardWidth) / 2 + 24
 
@@ -918,20 +933,23 @@ private struct TodayBriefDeckLayers<Layer: View>: View, Animatable {
                 let target = destination.firstIndex(of: index)
                 let sourceDepth = CGFloat(source ?? stackSize - 1)
                 let targetDepth = CGFloat(target ?? stackSize - 1)
-                let isReturning = direction < 0 && target == 0 && fraction > 0
-                let depth = isReturning ? 0 : sourceDepth + (targetDepth - sourceDepth) * fraction
+                let isEntering = target == 0 && source != 0
+                let isReturning = direction < 0 && isEntering
+                let depth = isReturning ? 0 : sourceDepth + (targetDepth - sourceDepth) * promotion
                 let isLeaving = direction > 0 && index == selection
                 let flight = isLeaving ? fraction : 0
                 let approach = isReturning ? 1 - fraction : 0
-                let rank = (fraction < 0.56 ? source : target) ?? stackSize
-                let rearOpacity = min(1, max(0, (fraction - 0.56) / 0.44))
+                let rank = source ?? stackSize
+                let rearOpacity = smoothProgress((fraction - 0.38) / 0.55)
                 let outgoingOpacity = min(1, (1 - fraction) * 4)
                 let shuffleOpacity = source == nil ? rearOpacity : target == nil ? outgoingOpacity : 1
-                let cardOpacity = isReturning ? min(1, fraction * 8) : shuffleOpacity
-                let textOpacity = min(1, max(0, 1 - depth * 1.54 + flight * 0.75))
-                let shadowOpacity = 0.025 + 0.045 * max(0, 1 - depth)
+                let cardOpacity = isReturning ? 1 : shuffleOpacity
+                let textOpacity = contentOpacity(
+                    source: source, target: target, isReturning: isReturning,
+                    isLeaving: isLeaving, reveal: reveal, promotion: promotion
+                )
 
-                layer(index, textOpacity, shadowOpacity)
+                layer(index, isLeaving ? frontHeight : promotedHeight, textOpacity, depth)
                     .scaleEffect(1 - 0.012 * depth, anchor: .bottom)
                     .rotationEffect(.degrees(0.7 * depth - 13 * flight - 6 * approach))
                     .offset(
@@ -943,6 +961,20 @@ private struct TodayBriefDeckLayers<Layer: View>: View, Animatable {
                     .transition(.identity)
             }
         }
+    }
+
+    private func smoothProgress(_ progress: CGFloat) -> CGFloat {
+        let t = min(1, max(0, progress))
+        return t * t * (3 - 2 * t)
+    }
+
+    private func contentOpacity(
+        source: Int?, target: Int?, isReturning: Bool, isLeaving: Bool,
+        reveal: CGFloat, promotion: CGFloat
+    ) -> CGFloat {
+        if isReturning || isLeaving { return 1 }
+        if target == 0 { return reveal }
+        return source == 0 ? 1 - promotion : 0
     }
 
     private func stack(from first: Int, size: Int) -> [Int] {
