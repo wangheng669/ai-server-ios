@@ -485,6 +485,7 @@ struct XTranslationResponse: Decodable {
 struct XTranslation: Decodable, Equatable {
     let tweetId: String
     let text: String
+    let status: String?
     let sourceLanguage: String?
     let destinationLanguage: String?
 }
@@ -739,8 +740,8 @@ struct Post: Codable, Identifiable, Hashable {
         let language = meta?.lang?.lowercased()
         guard language?.hasPrefix("zh") != true else { return false }
         guard language != nil || !Self.containsHanCharacters(xStoredOriginalContent) else { return false }
-        guard hasTranslation else { return true }
         let translation = displayContent
+        guard hasTranslation, Self.containsHanCharacters(translation) else { return true }
         if XPostTextFormatter.isTruncated(translation) { return true }
         if XPostTextFormatter.containsUntranslatedEnglishPassage(translation) { return true }
         return xStoredOriginalContent.count >= 600
@@ -765,7 +766,7 @@ struct Post: Codable, Identifiable, Hashable {
         guard sourceName == "X",
               clean(meta?.inReplyToStatusID) != nil,
               let reply = xReplyContext,
-              xNonempty(reply.textZH) == nil,
+              reply.textZH.map(Self.containsHanCharacters) != true,
               let original = xNonempty(reply.text) else { return false }
         return !Self.containsHanCharacters(original)
     }

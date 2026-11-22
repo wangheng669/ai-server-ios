@@ -1940,6 +1940,15 @@ struct PostDetailView: View {
                         }
                         .padding(.top, 20)
 
+                        if !isLoadingXFullText, !showsOriginal, post.needsXTranslation, let tweetID = post.xTweetID {
+                            XDeviceTranslation(
+                                tweetID: tweetID, original: xLiveDetail?.fullText ?? post.xStoredOriginalContent,
+                                sourceLanguage: xLiveDetail?.lang ?? post.meta?.lang, showsControls: true
+                            ) { text in
+                                xLiveTranslationText = text
+                            }
+                        }
+
                         if let reply = xResolvedReplyContext,
                            let replyText = reply.displayText {
                             XReplyContextCard(reply: reply, text: replyText, isDetail: true)

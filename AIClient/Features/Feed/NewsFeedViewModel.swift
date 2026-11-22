@@ -696,6 +696,33 @@ final class NewsFeedViewModel: ObservableObject {
         return displayed
     }
 
+    func xDeviceBodySource(for post: Post) -> (id: String, text: String, language: String?)? {
+        if post.isXRetweetWrapper, let detail = xPresentations[post.id]?.detail {
+            return (detail.id, detail.fullText, detail.lang)
+        }
+        guard let tweetID = post.xTweetID else { return nil }
+        return (tweetID, post.xStoredOriginalContent, post.meta?.lang)
+    }
+
+    func applyXDeviceBody(_ text: String, to postID: Int) {
+        guard xPresentation(for: postID)?.translation != text else { return }
+        stageXPresentation(for: postID) { $0.translation = text }
+    }
+
+    func applyXDeviceQuote(_ text: String, to postID: Int) {
+        guard xPresentation(for: postID)?.quotedTranslation != text else { return }
+        stageXPresentation(for: postID) { $0.quotedTranslation = text }
+    }
+
+    func applyXDeviceReply(_ text: String, to postID: Int, reply: XReplyContext) {
+        guard xPresentation(for: postID)?.reply?.textZH != text else { return }
+        let translated = XReplyContext(
+            id: reply.id, authorName: reply.authorName, screenName: reply.screenName,
+            avatarURL: reply.avatarURL, text: reply.text, textZH: text
+        )
+        stageXPresentation(for: postID) { $0.reply = translated }
+    }
+
     private func xPresentation(for postID: Int) -> XPresentation? {
         pendingXPresentations[postID] ?? xPresentations[postID]
     }
@@ -802,7 +829,7 @@ final class NewsFeedViewModel: ObservableObject {
                 || language?.hasPrefix("zh") == true {
                 nil
             } else {
-                try await resolvedXTranslation(tweetID: detail?.id ?? replyID, sourceText: sourceText)
+                try? await resolvedXTranslation(tweetID: detail?.id ?? replyID, sourceText: sourceText)
             }
             guard !Task.isCancelled else { return }
             let reply = XReplyContext(
