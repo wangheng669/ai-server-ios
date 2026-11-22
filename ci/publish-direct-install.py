@@ -15,16 +15,18 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
+from zipfile import ZIP_DEFLATED, ZipFile
 
 
 PROJECT = Path(__file__).resolve().parent.parent
 BUNDLE_ID = "com.wangheng.aiserverclient"
 CONFIG = Path.home() / ".local/share/focus-direct-install/config.json"
 WORK_ROOT = Path.home() / ".cache/ai-server-ios"
-RELEASE_ROOT = CONFIG.parent / "releases"
+RECEIPT_ROOT = CONFIG.parent / "receipts"
 ARCHIVE_NAME = "VerifiedAIServerClient.xcarchive.zip"
 IPA_NAME = "Focus-AdHoc.ipa"
 RECEIPT_NAME = "release.json"
+SYMBOLS_NAME = "dSYMs.zip"
 
 
 def require(condition, message):
@@ -115,7 +117,7 @@ def read_handoff(handoff, identity):
     require(path.is_file() and not path.is_symlink(), "Release handoff receipt is missing")
     receipt = json.loads(path.read_bytes())
     require(receipt["identity"] == identity, "Build already prepared with a different source or release configuration")
-    require(receipt["status"] in ("prepared", "published"), "Release receipt has invalid status")
+    require(receipt["status"] == "prepared", "Release handoff receipt has invalid status")
     archive = handoff / ARCHIVE_NAME
     require(archive.is_file() and not archive.is_symlink() and sha256(archive) == receipt["archive_sha256"],
             "Prepared archive checksum differs")
@@ -283,6 +285,44 @@ def write_atomic(path, content):
         Path(staged.name).unlink(missing_ok=True)
 
 
+def save_release_receipt(handoff, destination, receipt, ipa_sha256):
+    published = dict(receipt, status="published", ipa_sha256=ipa_sha256)
+    if destination.exists() or destination.is_symlink():
+        record = destination / RECEIPT_NAME
+        symbols = destination / SYMBOLS_NAME
+        require(destination.is_dir() and not destination.is_symlink()
+                and destination.stat().st_uid == os.getuid() and not (destination.stat().st_mode & 0o077)
+                and record.is_file() and not record.is_symlink()
+                and symbols.is_file() and not symbols.is_symlink(),
+                "Release receipt must contain a private record and symbols")
+        saved = json.loads(record.read_bytes())
+        readback_at = saved.pop("public_readback_at", None)
+        require(isinstance(readback_at, str) and readback_at
+                and saved == dict(published, dsym_sha256=sha256(symbols)),
+                "Saved release receipt differs from the published handoff")
+        return
+
+    archive_prefix = "AIServerClient.xcarchive/"
+    published["public_readback_at"] = datetime.now(timezone.utc).isoformat()
+    with tempfile.TemporaryDirectory(prefix=".staging-", dir=destination.parent) as staging:
+        stage = Path(staging) / "receipt"
+        stage.mkdir()
+        symbols = stage / SYMBOLS_NAME
+        with ZipFile(handoff / ARCHIVE_NAME) as archive, ZipFile(symbols, "w", ZIP_DEFLATED) as output:
+            members = [info for info in archive.infolist()
+                       if info.filename.startswith(archive_prefix + "dSYMs/") and not info.is_dir()]
+            require(any("/Contents/Resources/DWARF/" in info.filename for info in members),
+                    "No dSYM binaries in the prepared archive")
+            for info in members:
+                name = info.filename.removeprefix(archive_prefix)
+                require(".." not in Path(name).parts, "Invalid dSYM path in the prepared archive")
+                with archive.open(info) as source, output.open(name, "w") as target:
+                    shutil.copyfileobj(source, target, 1024 * 1024)
+        published["dsym_sha256"] = sha256(symbols)
+        write_atomic(stage / RECEIPT_NAME, json.dumps(published, indent=2).encode())
+        stage.rename(destination)
+
+
 def publish(work, channel, entry_url, package, base, assets, ipa, manifest_path, icon, version, build):
     item, = plistlib.loads(manifest_path.read_bytes())["items"]
     require(item["metadata"]["bundle-identifier"] == BUNDLE_ID, "Manifest app identifier differs")
@@ -394,19 +434,18 @@ def main():
         require(args.signed_ipa.absolute() == ipa and ipa.is_file() and not ipa.is_symlink(),
                 "Use the signed IPA from this build's prepare handoff")
         receipt = read_handoff(handoff, identity)
+        require({path.name for path in handoff.iterdir()} == {ARCHIVE_NAME, IPA_NAME, RECEIPT_NAME},
+                "Release handoff contains unexpected files")
         package_name = receipt["package"]
         require(re.fullmatch(rf"build-{re.escape(args.version)}-{args.build}-[0-9a-f]{{16}}", package_name),
                 "Invalid package identity in release receipt")
         require(target_version > current_version or (target_version == current_version and current
                 and current["package"] == package_name), "The direct-install page already serves another build or a newer one")
 
-        RELEASE_ROOT.mkdir(mode=0o700, exist_ok=True)
-        require(RELEASE_ROOT.resolve() == RELEASE_ROOT and RELEASE_ROOT.stat().st_uid == os.getuid()
-                and not (RELEASE_ROOT.stat().st_mode & 0o077)
-                and RELEASE_ROOT.stat().st_dev == handoff.stat().st_dev,
-                "Release storage must be private, owned and on the handoff filesystem")
-        destination = RELEASE_ROOT / package_name
-        require(not destination.exists() and not destination.is_symlink(), "Release record already exists")
+        RECEIPT_ROOT.mkdir(mode=0o700, exist_ok=True)
+        require(RECEIPT_ROOT.resolve() == RECEIPT_ROOT and RECEIPT_ROOT.stat().st_uid == os.getuid()
+                and not (RECEIPT_ROOT.stat().st_mode & 0o077), "Release receipt storage must be private and owned")
+        destination = RECEIPT_ROOT / package_name
         package = channel / package_name
         base = f"{config['public_origin']}/img/{channel_name}/{package_name}/"
         assets = {kind: base + file for kind, file in {
@@ -415,8 +454,6 @@ def main():
         icon = PROJECT / "AIClient/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png"
 
         ipa_sha256 = sha256(ipa)
-        if receipt["status"] == "published":
-            require(receipt["ipa_sha256"] == ipa_sha256, "Signed IPA differs from the published release receipt")
         with tempfile.TemporaryDirectory(prefix=".focus-adhoc-verify.", dir=WORK_ROOT) as temp:
             work = Path(temp)
             uuids = verify_app(work, ipa, config, entry_url, args.version, args.build)
@@ -427,10 +464,9 @@ def main():
             publish(work, channel, entry_url, package, base, assets, ipa, manifest, icon, args.version, args.build)
 
         require(ipa_sha256 == sha256(ipa), "Signed IPA changed during public verification")
-        receipt.update(status="published", ipa_sha256=ipa_sha256,
-                       public_readback_at=datetime.now(timezone.utc).isoformat())
-        write_atomic(handoff / RECEIPT_NAME, json.dumps(receipt, indent=2).encode())
-        handoff.rename(destination)
+        save_release_receipt(handoff, destination, receipt, ipa_sha256)
+        with tempfile.TemporaryDirectory(prefix=".focus-adhoc-finished.", dir=WORK_ROOT) as cleanup:
+            handoff.rename(Path(cleanup) / "handoff")
         print(f"release_record={destination / RECEIPT_NAME}")
         print(f"Published {args.version} ({args.build}): {entry_url}", flush=True)
 
