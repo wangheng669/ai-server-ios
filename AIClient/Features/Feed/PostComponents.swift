@@ -2148,12 +2148,7 @@ struct XFeedQuotedPostCard: View {
                 }
             }
 
-            if !showsOriginalText, !isDetail, let original = quote.originalText {
-                LocalTranslatedText(original: original, serverChinese: quote.textZH, field: .quote)
-                    .font(.system(size: 15))
-                    .lineSpacing(2)
-                    .lineLimit(6)
-            } else if let text = showsOriginalText ? quote.originalText : quote.displayText {
+            if let text = showsOriginalText ? quote.originalText : quote.displayText {
                 quotedText(text)
             }
 

@@ -29,6 +29,7 @@ final class FeedTranslationCache {
     }
     private var failedUntil: [String: Date] = [:]
     private var translating = false
+    private var activeXTranslations = Set<String>()
     private let file: URL
 
     private init() {
@@ -45,6 +46,47 @@ final class FeedTranslationCache {
             .map { String(format: "%02x", $0) }.joined()
     }
     func text(_ key: String) -> String? { entries[key]?.text }
+
+    static func xKey(tweetID: String, original: String) -> String {
+        key(original, language: "x/" + tweetID)
+    }
+
+    func cachedXTranslation(tweetID: String, original: String) -> String? {
+        text(Self.xKey(tweetID: tweetID, original: original))
+            .flatMap { LocalTranslatedText.validTranslation($0, original: original) }
+    }
+
+    func translateXPost(
+        tweetID: String,
+        original: String,
+        using fetch: (String) async throws -> XTranslation
+    ) async throws -> String {
+        let key = Self.xKey(tweetID: tweetID, original: original)
+        while true {
+            try Task.checkCancellation()
+            if let saved = text(key), let value = LocalTranslatedText.validTranslation(saved, original: original) {
+                return value
+            }
+            guard canAttempt(key) else { throw APIError.invalidResponse }
+            if activeXTranslations.count < 2, !activeXTranslations.contains(key) { break }
+            try await Task.sleep(for: .milliseconds(150))
+        }
+
+        activeXTranslations.insert(key)
+        defer { activeXTranslations.remove(key) }
+        do {
+            let response = try await fetch(tweetID)
+            guard response.tweetId == tweetID,
+                  let value = LocalTranslatedText.validTranslation(response.text, original: original) else {
+                throw APIError.invalidResponse
+            }
+            save(value, key: key)
+            return value
+        } catch {
+            if !Task.isCancelled { failed(key) }
+            throw error
+        }
+    }
     func displayState(for key: String) -> DisplayState {
         if let state = displayStates.object(forKey: key as NSString) { return state }
         let state = DisplayState(text: text(key))
@@ -170,21 +212,10 @@ struct TruthLocalTranslationView: View {
     }
 }
 
-@MainActor
-@Observable
-final class XTimelineActivity {
-    var isScrolling = false
-}
-
-extension EnvironmentValues {
-    @Entry var xTimelineActivity: XTimelineActivity? = nil
-}
-
 enum FeedTranslationField: String {
     case title = "标题"
     case summary = "摘要"
     case body = "正文"
-    case quote = "引用"
     case reply = "回复"
 }
 
@@ -293,9 +324,7 @@ private struct FeedDeviceTranslatedText: View {
     let field: FeedTranslationField?
     private let key: String
     @State private var display: FeedTranslationCache.DisplayState
-    @State private var timelineTranslation: String?
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.xTimelineActivity) private var xTimelineActivity
     @State private var configuration: TranslationSession.Configuration?
     @State private var phase = Phase.preparing
     @State private var permitsDownload = false
@@ -311,18 +340,15 @@ private struct FeedDeviceTranslatedText: View {
         self.translationOnly = translationOnly
         self.field = field
         key = FeedTranslationCache.key(original, language: sourceIdentifier)
-        let state = FeedTranslationCache.shared.displayState(for: key)
-        _display = State(initialValue: state)
-        _timelineTranslation = State(initialValue: state.text)
+        _display = State(initialValue: FeedTranslationCache.shared.displayState(for: key))
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: detail ? 8 : 0) {
-            if let translated = xTimelineActivity == nil ? display.text : timelineTranslation {
+            if let translated = display.text {
                 Text(translated)
             } else if let field {
                 Text(status(for: field))
-                    .lineLimit(xTimelineActivity == nil ? nil : 1)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("feed-translation-status")
             } else if !translationOnly {
@@ -352,14 +378,6 @@ private struct FeedDeviceTranslatedText: View {
             }
         }
         .task(id: cache.languageState.revision) { await prepare() }
-        .onChange(of: display.text) { _, text in
-            guard xTimelineActivity?.isScrolling == false else { return }
-            timelineTranslation = text
-        }
-        .onChange(of: xTimelineActivity?.isScrolling) { _, isScrolling in
-            guard isScrolling == false else { return }
-            timelineTranslation = display.text
-        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active, configuration == nil { Task { await prepare() } }
             else if phase == .background { configuration = nil }

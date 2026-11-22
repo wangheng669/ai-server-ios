@@ -1925,12 +1925,6 @@ struct PostDetailView: View {
                         Group {
                             if isLoadingXFullText {
                                 xFullTextLoadingPlaceholder
-                            } else if !showsOriginal,
-                                      LocalTranslatedText.sourceLanguage(xDisplayedDetailText) != nil {
-                                LocalTranslatedText(original: xDisplayedDetailText, detail: true, field: .body)
-                                    .font(.system(size: 17))
-                                    .lineSpacing(3)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
                             } else {
                                 VStack(alignment: .leading, spacing: 16) {
                                     ForEach(Array(xDisplayedDetailParagraphs.enumerated()), id: \.offset) { _, paragraph in
@@ -2453,11 +2447,12 @@ struct PostDetailView: View {
                 }
             }
             isLoadingXFullText = false
-            if post.needsXTranslation, let translation = try? await client.fetchXTranslation(tweetID: tweetID).text,
-               !Task.isCancelled {
-                xLiveTranslationText = LocalTranslatedText.validTranslation(
-                    translation, original: xLiveDetail?.fullText ?? post.xStoredOriginalContent
-                )
+            if post.needsXTranslation,
+               let translation = try? await FeedTranslationCache.shared.translateXPost(
+                   tweetID: tweetID, original: xLiveDetail?.fullText ?? post.xStoredOriginalContent,
+                   using: client.fetchXTranslation
+               ), !Task.isCancelled {
+                xLiveTranslationText = translation
             }
         } else if post.sourceName == "X" {
             isLoadingXFullText = false

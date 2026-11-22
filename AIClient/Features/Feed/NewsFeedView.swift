@@ -272,11 +272,11 @@ struct NewsFeedView: View {
             }
         }
         .onChange(of: model.pendingRealtimePosts.count) { _, count in
-            guard count > 0, isFeedAtTop, !model.xTimelineActivity.isScrolling else { return }
+            guard count > 0, isFeedAtTop, !model.isXTimelineScrolling else { return }
             withAnimation(.easeOut(duration: 0.2)) { model.acceptPendingRealtimePosts() }
         }
         .onChange(of: isFeedAtTop) { _, isAtTop in
-            guard isAtTop, !model.pendingRealtimePosts.isEmpty, !model.xTimelineActivity.isScrolling else { return }
+            guard isAtTop, !model.pendingRealtimePosts.isEmpty, !model.isXTimelineScrolling else { return }
             withAnimation(.easeOut(duration: 0.2)) { model.acceptPendingRealtimePosts() }
         }
         .onChange(of: isFeedEntitySelectorExpanded) { _, expanded in
@@ -1199,6 +1199,10 @@ struct NewsFeedView: View {
                                 let upcoming = Array(posts.dropFirst(index + 1).prefix(7))
                                 model.prefetchXTimelineImages(for: upcoming)
                             }
+                            .task(id: isActive) {
+                                guard isActive, post.needsXTranslation || post.needsXQuotedTranslation else { return }
+                                await model.translateXPostIfNeeded(post)
+                            }
                             .task(id: isPaginationRow ? nextPage : nil) {
                                 guard isActive, isPaginationRow, !Task.isCancelled,
                                       let nextPage, nextPage == model.xTimelineNextPage,
@@ -1225,7 +1229,6 @@ struct NewsFeedView: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .accessibilityIdentifier("feed-list-x")
-                .environment(\.xTimelineActivity, model.xTimelineActivity)
                 .refreshable {
                     guard isActive else { return }
                     await model.refresh()
@@ -3222,8 +3225,7 @@ struct NewsCardView: View, Equatable {
     private var xCard: some View {
         let content = xTimelineContent
         let width = xTimelineWidth ?? UIScreen.main.bounds.width - Self.xHorizontalInset * 2
-        let needsTranslation = !content.isEmpty && LocalTranslatedText.sourceLanguage(content) != nil
-        let showsExpansion = !needsTranslation && !isXTextExpanded
+        let showsExpansion = !isXTextExpanded
             && XTimelineTextLayout.needsExpansion(content, width: width)
         return VStack(alignment: .leading, spacing: 11) {
             if let attribution = post.xRepostAttributionText {
@@ -3238,15 +3240,7 @@ struct NewsCardView: View, Equatable {
                 .onTapGesture { onOpen?() }
                 .accessibilityIdentifier("feed-x-author-\(post.id)")
 
-            if needsTranslation {
-                LocalTranslatedText(original: content, field: .body)
-                    .font(.system(size: XTimelineTextLayout.fontSize))
-                    .lineSpacing(XTimelineTextLayout.lineSpacing)
-                    .lineLimit(XTimelineTextLayout.lineLimit)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .onTapGesture { onOpen?() }
-            } else if !content.isEmpty {
+            if !content.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     xRichText(content)
                         .font(.system(size: XTimelineTextLayout.fontSize))
