@@ -708,6 +708,8 @@ struct TodaySourceAuthorView: View {
 struct TodayInlineSourceView: View {
     let source: TodaySourcePresentation
     let width: CGFloat
+    let allowsTranslation: Bool
+    @State private var showsTranslation = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -717,6 +719,24 @@ struct TodayInlineSourceView: View {
                     .foregroundStyle(TodayBriefStyle.ink)
                     .lineSpacing(5)
                     .textSelection(.enabled)
+            }
+            if allowsTranslation, source.post.sourceName == "X",
+               LocalTranslatedText.sourceLanguage(source.originalText) != nil {
+                DisclosureGroup("查看译文", isExpanded: $showsTranslation) {
+                    if showsTranslation {
+                        if let chinese = LocalTranslatedText.validTranslation(
+                            source.post.displayContent, original: source.originalText
+                        ) {
+                            Text(chinese)
+                        } else {
+                            LocalTranslatedText(
+                                original: source.originalText, detail: true, translationOnly: true, field: .body
+                            )
+                        }
+                    }
+                }
+                .font(.callout)
+                .textSelection(.enabled)
             }
             if let reply = source.reply, !reply.isEmpty {
                 Text("回复：\(reply)")

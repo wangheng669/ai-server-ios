@@ -363,7 +363,8 @@ private struct TodayOriginalsPanel: View {
                     if let source = selectedSource {
                         TodayInlineSourceView(
                             source: source,
-                            width: max(1, width - TodayBriefStyle.horizontalInset * 2)
+                            width: max(1, width - TodayBriefStyle.horizontalInset * 2),
+                            allowsTranslation: isCurrent
                         )
                     }
                     sourceStatus
