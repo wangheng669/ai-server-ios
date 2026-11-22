@@ -1361,8 +1361,9 @@ final class NewsFeedViewModel: ObservableObject {
             }
         }
         Task(priority: .utility) { [weak self] in
+            guard let self else { return }
             await runWithLimitedConcurrency(candidates, maximumConcurrentRequests: 2) { post in
-                await self?.translateXPostIfNeeded(post)
+                await self.translateXPostIfNeeded(post)
             }
         }
     }
