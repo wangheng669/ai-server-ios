@@ -1099,11 +1099,13 @@ struct TodayWorldYesterdayReportPayload: Decodable, Equatable {
     struct Diagnostic: Decodable, Equatable {
         let scope: String
         let systemName: String?
+        let reasonCode: String
         let reason: String
 
         enum CodingKeys: String, CodingKey {
             case scope, reason
             case systemName = "system_name"
+            case reasonCode = "reason_code"
         }
     }
 

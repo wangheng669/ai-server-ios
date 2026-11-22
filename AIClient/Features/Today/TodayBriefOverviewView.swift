@@ -1152,6 +1152,7 @@ enum AliyunRecharge {
 struct TodayEditionNotice {
     let message: String?
     let isPartial: Bool
+    let hasSubscriptionNotice: Bool
     let missingCount: Int?
     let reasons: [String]
     let publishedAt: String?
@@ -1162,7 +1163,7 @@ struct TodayEditionNotice {
             if let missingCount { return "\(missingCount) 项缺失" }
             return "内容不完整"
         }
-        return "日报状态"
+        return hasSubscriptionNotice ? "订阅专享" : "日报状态"
     }
 }
 
@@ -1197,7 +1198,7 @@ struct TodayEditionStatusDetails: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if notice.isPartial {
+            if notice.isPartial || notice.hasSubscriptionNotice {
                 Text(notice.label)
                     .font(.subheadline.weight(.semibold))
                     .accessibilityIdentifier("today-partial-edition")

@@ -555,9 +555,11 @@ struct TodayWorldView: View {
         guard let brief = store.brief else { return nil }
         let error = store.errorMessage.map { "\($0)。正在查看上次加载的日报。" }
         let message = error ?? (store.isShowingCachedEdition ? cachedEditionStatus : nil)
-        guard message != nil || brief.isPartial else { return nil }
         let report = store.report.flatMap { $0.date == brief.date ? $0 : nil }
-        let reasons = (report?.diagnostics ?? []).filter { $0.scope == "content" }.map { issue in
+        let contentIssues = (report?.diagnostics ?? []).filter { $0.scope == "content" }
+        let subscriptionIssues = contentIssues.filter { $0.reasonCode == "subscriber_only" }
+        guard message != nil || brief.isPartial || !subscriptionIssues.isEmpty else { return nil }
+        let reasons = (brief.isPartial ? contentIssues : subscriptionIssues).map { issue in
             if let name = issue.systemName, !name.isEmpty { return "\(todayBriefSystemName(name)) · \(issue.reason)" }
             return issue.reason
         }
@@ -565,6 +567,7 @@ struct TodayWorldView: View {
         return TodayEditionNotice(
             message: message,
             isPartial: brief.isPartial,
+            hasSubscriptionNotice: !subscriptionIssues.isEmpty,
             missingCount: missingCount.flatMap { $0 > 0 ? $0 : nil },
             reasons: TodayReadingEvent.unique(reasons),
             publishedAt: report?.completedAt.flatMap(TodayBriefDate.timestamp),
