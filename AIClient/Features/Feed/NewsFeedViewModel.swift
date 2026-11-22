@@ -752,7 +752,7 @@ final class NewsFeedViewModel: ObservableObject {
             await loadXEngagementIfNeeded(post)
         }
         guard !Task.isCancelled else { return }
-        await translateXPostIfNeeded(postForDisplay(post))
+        await translateXPostIfNeeded(post)
     }
 
     func translateXPostIfNeeded(_ post: Post) async {

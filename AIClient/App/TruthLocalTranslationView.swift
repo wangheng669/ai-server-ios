@@ -301,9 +301,12 @@ struct LocalTranslatedText: View {
         return language
     }
 
+    static func languageSample(_ text: String) -> String {
+        text.replacingOccurrences(of: #"https?://\S+|[@$][A-Za-z0-9_]+"#, with: " ", options: .regularExpression)
+    }
+
     private static func recognizeLanguage(_ text: String) -> String? {
-        let sample = text
-            .replacingOccurrences(of: #"https?://\S+|[@$][A-Za-z0-9_]+"#, with: " ", options: .regularExpression)
+        let sample = languageSample(text)
         guard sample.unicodeScalars.contains(where: CharacterSet.letters.contains) else { return nil }
         let hasEnglishPassage = XPostTextFormatter.containsUntranslatedEnglishPassage(sample)
         if hasHan(sample), sample.unicodeScalars.allSatisfy(isHanLatinOrNonletter) {
@@ -373,22 +376,31 @@ struct XDeviceTranslation: View {
     let original: String
     let key: String
     let sourceLanguage: String?
+    let replyContext: String?
     let showsControls: Bool
     let onTranslation: ((String) -> Void)?
     init(
-        tweetID: String, original: String, sourceLanguage: String? = nil,
+        tweetID: String, original: String, sourceLanguage: String? = nil, replyContext: String? = nil,
         showsControls: Bool = false, onTranslation: ((String) -> Void)? = nil
     ) {
         self.original = original
         self.sourceLanguage = sourceLanguage
+        self.replyContext = replyContext
         self.showsControls = showsControls
         self.onTranslation = onTranslation
         key = FeedTranslationCache.xKey(tweetID: tweetID, original: original)
     }
 
+    static func declaredLanguage(_ value: String?) -> String? {
+        guard let language = value?.lowercased(), !language.isEmpty,
+              !["und", "zxx", "qam", "qme", "qst"].contains(language),
+              !language.hasPrefix("zh") else { return nil }
+        return language
+    }
+
     var body: some View {
         Driver(key: key, original: original, sourceLanguage: sourceLanguage,
-               showsControls: showsControls, onTranslation: onTranslation)
+               replyContext: replyContext, showsControls: showsControls, onTranslation: onTranslation)
             .id(key)
     }
 
@@ -396,15 +408,17 @@ struct XDeviceTranslation: View {
         let key: String
         let original: String
         let sourceLanguage: String?
+        let replyContext: String?
         let showsControls: Bool
         let onTranslation: ((String) -> Void)?
         @State private var display: FeedTranslationCache.DisplayState
 
-        init(key: String, original: String, sourceLanguage: String?, showsControls: Bool,
-             onTranslation: ((String) -> Void)?) {
+        init(key: String, original: String, sourceLanguage: String?, replyContext: String?,
+             showsControls: Bool, onTranslation: ((String) -> Void)?) {
             self.key = key
             self.original = original
             self.sourceLanguage = sourceLanguage
+            self.replyContext = replyContext
             self.showsControls = showsControls
             self.onTranslation = onTranslation
             _display = State(initialValue: FeedTranslationCache.shared.displayState(for: key))
@@ -430,9 +444,19 @@ struct XDeviceTranslation: View {
         }
 
         private func deviceLanguage(_ providerLanguage: String?) -> String? {
-            for hint in [providerLanguage, sourceLanguage].compactMap({ $0?.lowercased() })
-                where !hint.isEmpty && hint != "und" && hint != "zxx" && !hint.hasPrefix("zh") {
-                return hint
+            if let language = XDeviceTranslation.declaredLanguage(providerLanguage)
+                ?? XDeviceTranslation.declaredLanguage(sourceLanguage) {
+                return language
+            }
+            // A single Latin-script word can be ambiguous. A substantial parent
+            // in the same script supplies a stronger language signal.
+            let letters = LocalTranslatedText.languageSample(original).unicodeScalars.filter(CharacterSet.letters.contains)
+            if (1...12).contains(letters.count), letters.allSatisfy({ $0.value <= 0x024F }) {
+                guard let replyContext else { return nil }
+                let parent = LocalTranslatedText.languageSample(String(replyContext.prefix(1_200)))
+                let parentLetters = parent.unicodeScalars.filter(CharacterSet.letters.contains)
+                guard parentLetters.count >= 20, parentLetters.allSatisfy({ $0.value <= 0x024F }) else { return nil }
+                return LocalTranslatedText.sourceLanguage(parent)
             }
             return LocalTranslatedText.sourceLanguage(original)
         }

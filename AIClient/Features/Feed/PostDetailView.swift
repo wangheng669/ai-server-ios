@@ -1943,7 +1943,8 @@ struct PostDetailView: View {
                         if !isLoadingXFullText, !showsOriginal, post.needsXTranslation, let tweetID = post.xTweetID {
                             XDeviceTranslation(
                                 tweetID: tweetID, original: xLiveDetail?.fullText ?? post.xStoredOriginalContent,
-                                sourceLanguage: xLiveDetail?.lang ?? post.meta?.lang, showsControls: true
+                                sourceLanguage: XDeviceTranslation.declaredLanguage(xLiveDetail?.lang) ?? post.meta?.lang,
+                                replyContext: xResolvedReplyContext?.text, showsControls: true
                             ) { text in
                                 xLiveTranslationText = text
                             }
@@ -3827,6 +3828,7 @@ struct XAuthorPostsView: View {
                         ForEach(model.posts) { post in
                             let displayed = model.postForDisplay(post)
                             NewsCardView(post: displayed, onOpen: { selectedPost = displayed })
+                                .background { XFeedDeviceTranslations(model: model, post: post, displayed: displayed) }
                                 .task(id: post.id) { await model.prepareXAuthorPost(post) }
                                 .onAppear {
                                     // A real row reliably appears in LazyVStack; a one-point

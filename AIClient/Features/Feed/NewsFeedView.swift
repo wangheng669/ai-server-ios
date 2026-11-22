@@ -1188,7 +1188,7 @@ struct NewsFeedView: View {
                             .equatable()
                             .background {
                                 if isActive {
-                                    xDeviceTranslations(for: post, displayed: displayed)
+                                    XFeedDeviceTranslations(model: model, post: post, displayed: displayed)
                                 }
                             }
                             .accessibilityIdentifier("feed-post-\(post.id)")
@@ -1265,27 +1265,6 @@ struct NewsFeedView: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                     }
                 }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func xDeviceTranslations(for post: Post, displayed: Post) -> some View {
-        if displayed.needsXTranslation, let input = model.xDeviceBodySource(for: post) {
-            XDeviceTranslation(tweetID: input.id, original: input.text, sourceLanguage: input.language) { text in
-                model.applyXDeviceBody(text, to: post.id)
-            }
-        }
-        if displayed.needsXQuotedTranslation, let quote = displayed.meta?.quotedTweet,
-           let id = quote.id, let original = quote.originalText {
-            XDeviceTranslation(tweetID: id, original: original) { text in
-                model.applyXDeviceQuote(text, to: post.id)
-            }
-        }
-        if displayed.needsXReplyContextTranslation, let reply = displayed.xReplyContext,
-           let id = reply.id ?? displayed.meta?.inReplyToStatusID, let original = reply.text {
-            XDeviceTranslation(tweetID: id, original: original) { text in
-                model.applyXDeviceReply(text, to: post.id, reply: reply)
             }
         }
     }
@@ -4201,3 +4180,32 @@ private enum ZhihuBookmarkStore {
 }
 
 #Preview { NewsFeedView() }
+
+struct XFeedDeviceTranslations: View {
+    let model: NewsFeedViewModel
+    let post: Post
+    let displayed: Post
+
+    var body: some View {
+        if displayed.needsXTranslation, let input = model.xDeviceBodySource(for: post) {
+            XDeviceTranslation(
+                tweetID: input.id, original: input.text, sourceLanguage: input.language,
+                replyContext: displayed.xReplyContext?.text
+            ) { text in
+                model.applyXDeviceBody(text, to: post.id)
+            }
+        }
+        if displayed.needsXQuotedTranslation, let quote = displayed.meta?.quotedTweet,
+           let id = quote.id, let original = quote.originalText {
+            XDeviceTranslation(tweetID: id, original: original) { text in
+                model.applyXDeviceQuote(text, to: post.id)
+            }
+        }
+        if displayed.needsXReplyContextTranslation, let reply = displayed.xReplyContext,
+           let id = reply.id ?? displayed.meta?.inReplyToStatusID, let original = reply.text {
+            XDeviceTranslation(tweetID: id, original: original) { text in
+                model.applyXDeviceReply(text, to: post.id, reply: reply)
+            }
+        }
+    }
+}
