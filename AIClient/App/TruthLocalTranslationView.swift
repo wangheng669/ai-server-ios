@@ -5,10 +5,28 @@ import CryptoKit
 
 /// App-owned text cache. Apple owns the separate, shared on-device language models.
 @MainActor
-final class FeedTranslationCache: ObservableObject {
+final class FeedTranslationCache {
     static let shared = FeedTranslationCache()
     private struct Entry: Codable { let text: String; let date: Date }
-    @Published private var entries: [String: Entry] = [:]
+    @Observable final class DisplayState {
+        var text: String?
+        init(text: String?) { self.text = text }
+    }
+
+    private var entries: [String: Entry] = [:]
+    private let displayStates = NSMapTable<NSString, DisplayState>.strongToWeakObjects()
+    private var persistTask: Task<Void, Never>?
+    private var hasUnsavedEntries = false
+    private var availabilityByLanguage: [String: LanguageStatus] = [:]
+    @Observable final class LanguageState { var revision = 0 }
+    let languageState = LanguageState()
+
+    private enum LanguageReadiness { case installed, downloadable, unsupported }
+
+    private struct LanguageStatus {
+        let value: LanguageReadiness
+        let checkedAt: Date
+    }
     private var failedUntil: [String: Date] = [:]
     private var translating = false
     private let file: URL
@@ -27,8 +45,18 @@ final class FeedTranslationCache: ObservableObject {
             .map { String(format: "%02x", $0) }.joined()
     }
     func text(_ key: String) -> String? { entries[key]?.text }
+    func displayState(for key: String) -> DisplayState {
+        if let state = displayStates.object(forKey: key as NSString) { return state }
+        let state = DisplayState(text: text(key))
+        displayStates.setObject(state, forKey: key as NSString)
+        return state
+    }
     func canAttempt(_ key: String) -> Bool { failedUntil[key, default: .distantPast] < Date() }
-    func failed(_ key: String) { failedUntil[key] = Date().addingTimeInterval(600) }
+    func failed(_ key: String) {
+        let now = Date()
+        if failedUntil.count > 400 { failedUntil = failedUntil.filter { $0.value > now } }
+        failedUntil[key] = now.addingTimeInterval(600)
+    }
     func retry(_ key: String) { failedUntil[key] = nil }
 
     // Serialize work across visible feed rows and the detail sheet. Waiting is cancellable.
@@ -38,59 +66,98 @@ final class FeedTranslationCache: ObservableObject {
         translating = true
     }
     func release() { translating = false }
-    @available(iOS 26.0, *)
-    func pretranslateTruth(_ posts: [Post]) async {
-        let language = "en"
-        var requests: [TranslationSession.Request] = []
-        var seen = Set<String>()
-        for post in posts.prefix(20) where post.source == "truth" && LocalTranslatedText.chineseText(post.truthChineseContent) == nil {
-            let text = post.originalDisplayContent
-            let key = Self.key(text, language: language)
-            if seen.insert(key).inserted, entries[key] == nil, canAttempt(key),
-               LocalTranslatedText.sourceLanguage(text) == language {
-                requests.append(.init(sourceText: text, clientIdentifier: key))
+    @available(iOS 18.0, *)
+    func availability(for language: String) async -> LanguageAvailability.Status {
+        if let saved = availabilityByLanguage[language], Date().timeIntervalSince(saved.checkedAt) < 30 {
+            switch saved.value {
+            case .installed: return .installed
+            case .downloadable: return .supported
+            case .unsupported: return .unsupported
             }
         }
-        guard !requests.isEmpty else { return }
-        let source = Locale.Language(identifier: language)
-        let target = Locale.Language(identifier: "zh-Hans")
-        guard await LanguageAvailability().status(from: source, to: target) == .installed else { return }
-        do {
-            try await acquire()
-            defer { release() }
-            requests.removeAll { request in request.clientIdentifier.flatMap { entries[$0] } != nil }
-            guard !requests.isEmpty else { return }
-            let session = TranslationSession(installedSource: source, target: target)
-            var changed = false
-            defer { if changed { persistEntries() } }
-            for try await response in session.translate(batch: requests) {
-                try Task.checkCancellation()
-                let value = response.targetText.trimmingCharacters(in: .whitespacesAndNewlines)
-                if let key = response.clientIdentifier, !value.isEmpty, value != response.sourceText {
-                    entries[key] = Entry(text: value, date: Date())
-                    changed = true
+        let status = await LanguageAvailability().status(
+            from: Locale.Language(identifier: language), to: Locale.Language(identifier: "zh-Hans")
+        )
+        if !Task.isCancelled {
+            let value: LanguageReadiness = status == .installed ? .installed : status == .supported ? .downloadable : .unsupported
+            availabilityByLanguage[language] = LanguageStatus(value: value, checkedAt: Date())
+        }
+        return status
+    }
+
+    func languageWasInstalled(_ language: String) {
+        availabilityByLanguage[language] = LanguageStatus(value: .installed, checkedAt: Date())
+        languageState.revision += 1
+    }
+
+    @available(iOS 26.0, *)
+    func pretranslate(_ originals: [String]) async {
+        var requestsByLanguage: [String: [TranslationSession.Request]] = [:]
+        var seen = Set<String>()
+        for original in originals {
+            guard let language = LocalTranslatedText.sourceLanguage(original) else { continue }
+            let key = Self.key(original, language: language)
+            guard seen.insert(key).inserted, text(key) == nil, canAttempt(key) else { continue }
+            requestsByLanguage[language, default: []].append(.init(sourceText: original, clientIdentifier: key))
+        }
+        for (language, requests) in requestsByLanguage {
+            guard !Task.isCancelled else { return }
+            guard await availability(for: language) == .installed else { continue }
+            do {
+                try await acquire()
+                defer { release() }
+                let pending = requests.filter { request in
+                    guard let key = request.clientIdentifier else { return false }
+                    return text(key) == nil && canAttempt(key)
                 }
+                guard !pending.isEmpty else { continue }
+                let session = TranslationSession(
+                    installedSource: Locale.Language(identifier: language), target: Locale.Language(identifier: "zh-Hans")
+                )
+                for try await response in session.translate(batch: pending) {
+                    try Task.checkCancellation()
+                    if let key = response.clientIdentifier,
+                       let value = LocalTranslatedText.validTranslation(response.targetText, original: response.sourceText) {
+                        save(value, key: key)
+                    }
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                // A row can still try its individual request after a batch error.
             }
-        } catch {
-            // Visible rows can still request their own translation.
         }
     }
 
     func save(_ text: String, key: String) {
         entries[key] = Entry(text: text, date: Date())
-        persistEntries()
+        displayStates.object(forKey: key as NSString)?.text = text
+        hasUnsavedEntries = true
+        guard persistTask == nil else { return }
+        persistTask = Task { [weak self] in
+            guard let self else { return }
+            while hasUnsavedEntries {
+                try? await Task.sleep(for: .milliseconds(350))
+                hasUnsavedEntries = false
+                await persistEntries()
+            }
+            persistTask = nil
+        }
     }
 
-    private func persistEntries() {
+    private func persistEntries() async {
         if entries.count > 400 {
             for key in entries.sorted(by: { $0.value.date > $1.value.date }).dropFirst(400).map(\.key) {
                 entries[key] = nil
             }
         }
-        if let data = try? JSONEncoder().encode(entries) {
-            try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-        }
+        let location = file
+        let snapshot = entries
+        await Task.detached(priority: .utility) {
+            guard let data = try? JSONEncoder().encode(snapshot) else { return }
+            try? FileManager.default.createDirectory(at: location.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? data.write(to: location, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        }.value
     }
 }
 
@@ -99,8 +166,16 @@ struct TruthLocalTranslationView: View {
     var detail = false
     var body: some View {
         LocalTranslatedText(original: post.originalDisplayContent,
-                            serverChinese: post.truthChineseContent, detail: detail, showsListStatus: !detail)
+                            serverChinese: post.truthChineseContent, detail: detail, field: .body)
     }
+}
+
+enum FeedTranslationField: String {
+    case title = "标题"
+    case summary = "摘要"
+    case body = "正文"
+    case quote = "引用"
+    case reply = "回复"
 }
 
 /// Translation is presentation-only: the original Post, links and article blocks stay intact.
@@ -110,133 +185,200 @@ struct LocalTranslatedText: View {
     var detail = false
     var enabled = true
     var translationOnly = false
-    var showsListStatus = false
+    var field: FeedTranslationField? = nil
+
+    private static let recognizedLanguages: NSCache<NSString, NSString> = {
+        let cache = NSCache<NSString, NSString>()
+        cache.countLimit = 600
+        return cache
+    }()
 
     static func sourceLanguage(_ text: String) -> String? {
-        let recognizer = NLLanguageRecognizer()
-        recognizer.processString(text)
-        guard let language = recognizer.dominantLanguage,
-              language != .simplifiedChinese, language != .traditionalChinese,
-              language != .undetermined else { return nil }
-        return language.rawValue
+        let prefix = String(text.prefix(1_200))
+        let key = prefix as NSString
+        if let cached = recognizedLanguages.object(forKey: key) {
+            return cached.length == 0 ? nil : cached as String
+        }
+        let language = recognizeLanguage(prefix)
+        recognizedLanguages.setObject((language ?? "") as NSString, forKey: key)
+        return language
     }
 
-    private var existingChinese: String? { Self.chineseText(serverChinese) }
-
-    static func chineseText(_ serverChinese: String?) -> String? {
-        guard let serverChinese else { return nil }
+    private static func recognizeLanguage(_ text: String) -> String? {
+        let sample = text
+            .replacingOccurrences(of: #"https?://\S+|[@$][A-Za-z0-9_]+"#, with: " ", options: .regularExpression)
+        guard sample.unicodeScalars.contains(where: CharacterSet.letters.contains) else { return nil }
+        let hasEnglishPassage = XPostTextFormatter.containsUntranslatedEnglishPassage(sample)
+        if hasHan(sample), sample.unicodeScalars.allSatisfy(isHanLatinOrNonletter) {
+            return hasEnglishPassage ? "en" : nil
+        }
         let recognizer = NLLanguageRecognizer()
-        recognizer.processString(serverChinese)
-        guard recognizer.dominantLanguage == .simplifiedChinese || recognizer.dominantLanguage == .traditionalChinese else { return nil }
-        return serverChinese
+        recognizer.processString(sample)
+        switch recognizer.dominantLanguage {
+        case .simplifiedChinese, .traditionalChinese, .undetermined, nil:
+            return hasEnglishPassage ? "en" : nil
+        case let language?:
+            return language.rawValue
+        }
+    }
+
+    static func chineseText(_ text: String?) -> String? {
+        guard let value = text?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty,
+              hasHan(value),
+              !XPostTextFormatter.containsUntranslatedEnglishPassage(value) else { return nil }
+        return value
+    }
+
+    private static func hasHan(_ text: String) -> Bool {
+        text.unicodeScalars.contains(where: isHan)
+    }
+
+    private static func isHan(_ scalar: Unicode.Scalar) -> Bool {
+        (0x3400...0x9FFF).contains(scalar.value) || (0xF900...0xFAFF).contains(scalar.value)
+    }
+
+    private static func isHanLatinOrNonletter(_ scalar: Unicode.Scalar) -> Bool {
+        isHan(scalar) || scalar.value <= 0x024F || !CharacterSet.letters.contains(scalar)
+    }
+
+    static func validTranslation(_ text: String, original: String) -> String? {
+        guard let value = chineseText(text), value != original.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            return nil
+        }
+        return value
     }
 
     var body: some View {
-        if #available(iOS 18.0, *), enabled, let language = Self.sourceLanguage(original) {
-            TruthDeviceTranslatedText(original: original, serverChinese: existingChinese,
-                                      detail: detail, sourceIdentifier: language, translationOnly: translationOnly, showsListStatus: showsListStatus)
-                .id(language + ":" + original)
-        } else {
-            if !translationOnly { Text(existingChinese ?? original) }
-            if !translationOnly, detail, existingChinese != nil, existingChinese != original {
+        if let chinese = Self.chineseText(serverChinese), chinese != original {
+            if !translationOnly { Text(chinese) }
+            if detail, !translationOnly, chinese != original {
                 DisclosureGroup("查看原文") { Text(original).textSelection(.enabled) }
                     .font(.callout)
             }
+        } else if enabled, let language = Self.sourceLanguage(original) {
+            if #available(iOS 18.0, *) {
+                FeedDeviceTranslatedText(original: original, detail: detail, sourceIdentifier: language,
+                                         translationOnly: translationOnly, field: field)
+                    .id(language + ":" + original)
+            } else if let field {
+                Text("\(field.rawValue)译文暂不可用").foregroundStyle(.secondary)
+                if detail { DisclosureGroup("查看原文") { Text(original).textSelection(.enabled) } }
+            } else if !translationOnly {
+                Text(original)
+            }
+        } else if !translationOnly {
+            Text(original)
         }
     }
 }
 
 @available(iOS 18.0, *)
-private struct TruthDeviceTranslatedText: View {
+private struct FeedDeviceTranslatedText: View {
+    private enum Phase { case preparing, translating, needsDownload, unavailable, failed }
+
     let original: String
-    let serverChinese: String?
     let detail: Bool
     let sourceIdentifier: String
     let translationOnly: Bool
-    let showsListStatus: Bool
-    @ObservedObject private var cache = FeedTranslationCache.shared
+    let field: FeedTranslationField?
+    private let key: String
+    @State private var display: FeedTranslationCache.DisplayState
     @Environment(\.scenePhase) private var scenePhase
     @State private var configuration: TranslationSession.Configuration?
-    @State private var needsDownload = false
-    @State private var failed = false
-    @State private var permitDownload = false
-    @State private var unsupported = false
+    @State private var phase = Phase.preparing
+    @State private var permitsDownload = false
+
+    private let cache = FeedTranslationCache.shared
     private var source: Locale.Language { Locale.Language(identifier: sourceIdentifier) }
     private let target = Locale.Language(identifier: "zh-Hans")
-    private var key: String { FeedTranslationCache.key(original, language: sourceIdentifier) }
-    private var translated: String? { serverChinese ?? cache.text(key) }
+
+    init(original: String, detail: Bool, sourceIdentifier: String, translationOnly: Bool, field: FeedTranslationField?) {
+        self.original = original
+        self.detail = detail
+        self.sourceIdentifier = sourceIdentifier
+        self.translationOnly = translationOnly
+        self.field = field
+        key = FeedTranslationCache.key(original, language: sourceIdentifier)
+        _display = State(initialValue: FeedTranslationCache.shared.displayState(for: key))
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: detail ? 12 : 0) {
-            if let translated { Text(translated) }
-            else if !translationOnly { Text(original) }
-            if translated == nil {
-                if showsListStatus, needsDownload {
-                    Text("点开帖子可下载翻译语言").font(.caption).foregroundStyle(.secondary)
-                } else if showsListStatus, failed {
-                    Text("本机翻译暂不可用，点开可重试").font(.caption).foregroundStyle(.secondary)
-                } else if (showsListStatus || detail), unsupported {
-                    Text("此设备不支持这组语言的本机翻译").font(.caption).foregroundStyle(.secondary)
-                }
+        VStack(alignment: .leading, spacing: detail ? 8 : 0) {
+            if let translated = display.text {
+                Text(translated)
+            } else if let field {
+                Text(status(for: field))
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("feed-translation-status")
+            } else if !translationOnly {
+                Text(original)
             }
+
             if detail {
-                if translated != nil, !translationOnly {
-                    DisclosureGroup("查看原文") { Text(original).textSelection(.enabled) }
-                        .font(.callout)
-                } else if needsDownload {
-                    Button("下载语言后在本机自动翻译") {
-                        permitDownload = true
+                if display.text == nil, phase == .needsDownload {
+                    Button("启用本机翻译") {
+                        permitsDownload = true
                         start()
                     }
                     .font(.callout)
-                } else if failed {
-                    Button("本机翻译暂不可用，重试") {
+                    .accessibilityIdentifier("feed-translation-enable")
+                } else if display.text == nil, phase == .failed {
+                    Button("重试翻译") {
                         cache.retry(key)
-                        failed = false
+                        phase = .preparing
                         Task { await prepare() }
                     }
                     .font(.callout)
                 }
+                if !translationOnly, field != nil || display.text != nil {
+                    DisclosureGroup("查看原文") { Text(original).textSelection(.enabled) }
+                        .font(.callout)
+                }
             }
         }
-        .task(id: key) { await prepare() }
+        .task(id: cache.languageState.revision) { await prepare() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active, configuration == nil { Task { await prepare() } }
             else if phase == .background { configuration = nil }
         }
         .translationTask(configuration) { session in
-            let requestKey = key
-            let requestText = original
-            defer { permitDownload = false }
+            defer { permitsDownload = false }
             do {
                 try await cache.acquire()
                 defer { cache.release() }
-                guard cache.text(requestKey) == nil, cache.canAttempt(requestKey), serverChinese == nil,
-                      scenePhase == .active else { return }
-                // A language download can only be requested by the explicit detail button.
-                if permitDownload { try await session.prepareTranslation() }
-                else {
-                    guard await LanguageAvailability().status(from: source, to: target) == .installed else {
-                        needsDownload = true
-                        return
-                    }
+                guard display.text == nil, cache.canAttempt(key), scenePhase == .active else { return }
+                if permitsDownload {
+                    try await session.prepareTranslation()
+                    cache.languageWasInstalled(sourceIdentifier)
                 }
-                let response = try await session.translate(requestText)
+                phase = .translating
+                let response = try await session.translate(original)
                 try Task.checkCancellation()
-                let result = response.targetText.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !result.isEmpty else { throw CancellationError() }
-                cache.save(result, key: requestKey)
-                needsDownload = false
-                failed = false
+                guard let result = LocalTranslatedText.validTranslation(response.targetText, original: original) else {
+                    cache.failed(key)
+                    phase = .failed
+                    return
+                }
+                cache.save(result, key: key)
             } catch is CancellationError {
                 return
             } catch {
-                if !Task.isCancelled {
-                    cache.failed(requestKey)
-                    failed = true
-                    needsDownload = false
+                guard !Task.isCancelled else { return }
+                if permitsDownload, await cache.availability(for: sourceIdentifier) == .supported {
+                    phase = .needsDownload
+                } else {
+                    cache.failed(key)
+                    phase = .failed
                 }
             }
+        }
+    }
+
+    private func status(for field: FeedTranslationField) -> String {
+        switch phase {
+        case .preparing, .translating: "\(field.rawValue)翻译中"
+        case .needsDownload: detail ? "\(field.rawValue)待翻译" : "\(field.rawValue)待翻译 · 点开启用"
+        case .unavailable, .failed: detail ? "\(field.rawValue)译文暂不可用" : "\(field.rawValue)译文暂不可用 · 点开查看"
         }
     }
 
@@ -246,16 +388,15 @@ private struct TruthDeviceTranslatedText: View {
     }
 
     private func prepare() async {
-        guard scenePhase == .active, translated == nil, !original.isEmpty else { return }
-        guard cache.canAttempt(key) else { failed = true; return }
-        let status = await LanguageAvailability().status(from: source, to: target)
-        guard !Task.isCancelled else { return }
-        unsupported = status == .unsupported
+        guard scenePhase == .active, display.text == nil, !original.isEmpty, !permitsDownload else { return }
+        guard cache.canAttempt(key) else { phase = .failed; return }
+        let status = await cache.availability(for: sourceIdentifier)
+        guard !Task.isCancelled, display.text == nil, !permitsDownload else { return }
         switch status {
-        case .installed: needsDownload = false; start()
-        case .supported: needsDownload = true
-        case .unsupported: break
-        @unknown default: break
+        case .installed: phase = .translating; start()
+        case .supported: phase = .needsDownload
+        case .unsupported: phase = .unavailable
+        @unknown default: phase = .unavailable
         }
     }
 }

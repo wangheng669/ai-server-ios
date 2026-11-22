@@ -352,7 +352,7 @@ struct PostDetailView: View {
             LazyVStack(alignment: .leading, spacing: 14) {
                 PostAuthorHeader(post: post)
                 if post.displayTitle != post.displayContent {
-                    LocalTranslatedText(original: post.rssOriginalTitle ?? post.displayTitle, serverChinese: post.rssOriginalTitle == nil ? nil : post.displayTitle, detail: true, enabled: post.isRSS).font(.title3.bold())
+                    LocalTranslatedText(original: post.feedOriginalTitle, serverChinese: post.feedChineseTitle, detail: true, enabled: post.isRSS, field: .title).font(.title3.bold())
                 }
                 Text(post.displayContent).font(.system(size: 17, weight: .regular)).lineSpacing(2).textSelection(.enabled)
 
@@ -385,7 +385,7 @@ struct PostDetailView: View {
 
                     rssSourceHeader
 
-                    LocalTranslatedText(original: post.rssOriginalTitle ?? post.displayTitle, serverChinese: post.rssOriginalTitle == nil ? nil : post.displayTitle, detail: true, enabled: post.isRSS)
+                    LocalTranslatedText(original: post.feedOriginalTitle, serverChinese: post.feedChineseTitle, detail: true, enabled: post.isRSS, field: .title)
                         .font(.system(size: 24, weight: .bold))
                         .tracking(-0.25)
                         .lineSpacing(3)
@@ -393,7 +393,7 @@ struct PostDetailView: View {
                         .padding(.top, 18)
 
                     if let summary = rssDetailSummary {
-                        LocalTranslatedText(original: summary, detail: true)
+                        LocalTranslatedText(original: summary, detail: true, field: .summary)
                             .font(.system(size: 16.5))
                             .foregroundStyle(.secondary)
                             .lineSpacing(5)
@@ -457,7 +457,7 @@ struct PostDetailView: View {
         VStack(spacing: 0) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    LocalTranslatedText(original: post.rssOriginalTitle ?? post.displayTitle, serverChinese: post.rssOriginalTitle == nil ? nil : post.displayTitle, detail: true, enabled: post.isRSS)
+                    LocalTranslatedText(original: post.feedOriginalTitle, serverChinese: post.feedChineseTitle, detail: true, enabled: post.isRSS, field: .title)
                         .font(.system(size: 25, weight: .semibold))
                         .tracking(-0.25)
                         .lineSpacing(4)
@@ -1925,6 +1925,12 @@ struct PostDetailView: View {
                         Group {
                             if isLoadingXFullText {
                                 xFullTextLoadingPlaceholder
+                            } else if !showsOriginal,
+                                      LocalTranslatedText.sourceLanguage(xDisplayedDetailText) != nil {
+                                LocalTranslatedText(original: xDisplayedDetailText, detail: true, field: .body)
+                                    .font(.system(size: 17))
+                                    .lineSpacing(3)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             } else {
                                 VStack(alignment: .leading, spacing: 16) {
                                     ForEach(Array(xDisplayedDetailParagraphs.enumerated()), id: \.offset) { _, paragraph in
@@ -2446,21 +2452,13 @@ struct PostDetailView: View {
                     showsOriginal = true
                 }
             }
-            if post.needsXTranslation {
-                do {
-                    let translation = try await client.fetchXTranslation(tweetID: tweetID).text
-                    if translation.unicodeScalars.contains(where: { (0x4E00...0x9FFF).contains(Int($0.value)) }) {
-                        xLiveTranslationText = translation
-                    } else {
-                        xLiveTranslationText = try await PersonArticleTranslationService.shared.translate(xLiveDetail?.fullText ?? post.xStoredOriginalContent)
-                    }
-                } catch is CancellationError {
-                    return
-                } catch {
-                    xLiveTranslationText = try? await PersonArticleTranslationService.shared.translate(xLiveDetail?.fullText ?? post.xStoredOriginalContent)
-                }
-            }
             isLoadingXFullText = false
+            if post.needsXTranslation, let translation = try? await client.fetchXTranslation(tweetID: tweetID).text,
+               !Task.isCancelled {
+                xLiveTranslationText = LocalTranslatedText.validTranslation(
+                    translation, original: xLiveDetail?.fullText ?? post.xStoredOriginalContent
+                )
+            }
         } else if post.sourceName == "X" {
             isLoadingXFullText = false
         }

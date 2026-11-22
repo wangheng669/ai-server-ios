@@ -158,7 +158,7 @@ struct YouTubeVideoDetailView: View {
 
     private var metadata: some View {
         VStack(alignment: .leading, spacing: 8) {
-            LocalTranslatedText(original: video.title, detail: true, enabled: translatesRSSLocally)
+            LocalTranslatedText(original: video.title, detail: true, enabled: translatesRSSLocally, field: .title)
                 .font(.system(size: 20, weight: .bold))
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)

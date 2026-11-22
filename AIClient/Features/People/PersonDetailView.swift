@@ -1678,7 +1678,7 @@ struct XReplyContextCard: View {
                 }
             }
             if isTimeline {
-                Text(text)
+                LocalTranslatedText(original: reply.text ?? text, serverChinese: reply.textZH, field: .reply)
                     .font(.system(size: 15))
                     .lineSpacing(2)
                     .lineLimit(6)
