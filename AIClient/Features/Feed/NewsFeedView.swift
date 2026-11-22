@@ -255,9 +255,14 @@ struct NewsFeedView: View {
             if rootTabIsActive, phase == .active {
                 model.startRealtime()
                 if hasLoadedFeedOnce, !model.isLoading {
-                    Task { await model.refresh() }
+                    if model.source == .x, !model.posts.isEmpty {
+                        Task { await model.checkForXTimelineUpdates() }
+                    } else {
+                        Task { await model.refresh() }
+                    }
                 }
             } else {
+                model.setXTimelineScrolling(false)
                 model.stopRealtime()
             }
         }
@@ -267,11 +272,11 @@ struct NewsFeedView: View {
             }
         }
         .onChange(of: model.pendingRealtimePosts.count) { _, count in
-            guard count > 0, isFeedAtTop else { return }
+            guard count > 0, isFeedAtTop, !model.xTimelineActivity.isScrolling else { return }
             withAnimation(.easeOut(duration: 0.2)) { model.acceptPendingRealtimePosts() }
         }
         .onChange(of: isFeedAtTop) { _, isAtTop in
-            guard isAtTop, !model.pendingRealtimePosts.isEmpty else { return }
+            guard isAtTop, !model.pendingRealtimePosts.isEmpty, !model.xTimelineActivity.isScrolling else { return }
             withAnimation(.easeOut(duration: 0.2)) { model.acceptPendingRealtimePosts() }
         }
         .onChange(of: isFeedEntitySelectorExpanded) { _, expanded in
@@ -1165,14 +1170,21 @@ struct NewsFeedView: View {
 
     private func xTimelineList(_ posts: [Post]) -> some View {
         let isActive = rootTabIsActive && model.source == .x
-        let paginationPost = posts.dropLast(2).last ?? posts.last
+        let lookahead = min(6, posts.count / 2)
+        let paginationPostID = posts.dropLast(lookahead).last?.id
+        let nextPage = isActive && model.canLoadMore && !model.isLoading && !model.isSwitchingSource
+            ? model.xTimelineNextPage
+            : nil
         return GeometryReader { geometry in
             let cardWidth = max(1, geometry.size.width - NewsCardView.xHorizontalInset * 2)
             ScrollViewReader { proxy in
                 List {
                     ForEach(Array(posts.enumerated()), id: \.element.id) { index, post in
+                        let isPaginationRow = post.id == paginationPostID || index == posts.count - 1
                         let displayed = model.postForDisplay(post)
-                        NewsCardView(post: displayed, onOpen: { openPost(displayed) }, xTimelineWidth: cardWidth)
+                        NewsCardView(post: displayed, onOpen: {
+                            openPost(model.postForDisplay(post, includePending: true))
+                        }, xTimelineWidth: cardWidth)
                             .equatable()
                             .accessibilityIdentifier("feed-post-\(post.id)")
                             .alignmentGuide(.listRowSeparatorLeading) { _ in NewsCardView.xHorizontalInset }
@@ -1183,19 +1195,14 @@ struct NewsFeedView: View {
                             .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
                             .task(id: isActive) {
-                                guard isActive else { return }
-                                if index % 4 == 2 {
-                                    let upcoming = Array(posts.dropFirst(index + 2).prefix(4))
-                                    async let images: Void = ImageLoader.prefetchXTimelineImages(for: upcoming)
-                                    await model.translateXPostIfNeeded(post)
-                                    await images
-                                } else {
-                                    await model.translateXPostIfNeeded(post)
-                                }
+                                guard isActive, index.isMultiple(of: 3), !Task.isCancelled else { return }
+                                let upcoming = Array(posts.dropFirst(index + 1).prefix(7))
+                                model.prefetchXTimelineImages(for: upcoming)
                             }
-                            .task(id: isActive && post.id == paginationPost?.id ? posts.last?.id : nil) {
-                                guard isActive, !Task.isCancelled,
-                                      post.id == paginationPost?.id, model.errorMessage == nil else { return }
+                            .task(id: isPaginationRow ? nextPage : nil) {
+                                guard isActive, isPaginationRow, !Task.isCancelled,
+                                      let nextPage, nextPage == model.xTimelineNextPage,
+                                      model.errorMessage == nil else { return }
                                 // Finish the page request even when a fast swipe recycles its anchor row.
                                 await Task {
                                     await model.loadMoreIfNeeded(current: post, thresholdPostID: post.id)
@@ -1218,11 +1225,26 @@ struct NewsFeedView: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .accessibilityIdentifier("feed-list-x")
+                .environment(\.xTimelineActivity, model.xTimelineActivity)
+                .refreshable {
+                    guard isActive else { return }
+                    await model.refresh()
+                }
                 .modifier(FeedChromeScrollModifier(
                     isActive: isActive,
                     isHidden: $isFeedChromeHidden,
-                    isAtTop: $isFeedAtTop
+                    isAtTop: $isFeedAtTop,
+                    onScrollActivityChange: { isScrolling in
+                        model.setXTimelineScrolling(isScrolling)
+                        if !isScrolling, isFeedAtTop, !model.pendingRealtimePosts.isEmpty {
+                            withAnimation(.easeOut(duration: 0.2)) { model.acceptPendingRealtimePosts() }
+                        }
+                    }
                 ))
+                .onChange(of: isActive) { _, active in
+                    if !active { model.setXTimelineScrolling(false) }
+                }
+                .onDisappear { model.setXTimelineScrolling(false) }
                 .overlay(alignment: .top) {
                     if isActive, !model.pendingRealtimePosts.isEmpty {
                         xNewPostsPill {
@@ -2833,6 +2855,7 @@ private struct FeedChromeScrollModifier: ViewModifier {
     let isActive: Bool
     @Binding var isHidden: Bool
     @Binding var isAtTop: Bool
+    var onScrollActivityChange: ((Bool) -> Void)? = nil
     @State private var tracking = FeedScrollTracking()
 
     @ViewBuilder
@@ -2842,6 +2865,7 @@ private struct FeedChromeScrollModifier: ViewModifier {
                 .onScrollPhaseChange { _, phase in
                     guard isActive else { return }
                     tracking.isScrollActive = phase.isScrolling
+                    onScrollActivityChange?(phase.isScrolling)
                     if !phase.isScrolling { resetDirectionTracking() }
                 }
                 .onScrollGeometryChange(for: CGFloat.self) { geometry in
@@ -3198,7 +3222,9 @@ struct NewsCardView: View, Equatable {
     private var xCard: some View {
         let content = xTimelineContent
         let width = xTimelineWidth ?? UIScreen.main.bounds.width - Self.xHorizontalInset * 2
-        let showsExpansion = !isXTextExpanded && XTimelineTextLayout.needsExpansion(content, width: width)
+        let needsTranslation = !content.isEmpty && LocalTranslatedText.sourceLanguage(content) != nil
+        let showsExpansion = !needsTranslation && !isXTextExpanded
+            && XTimelineTextLayout.needsExpansion(content, width: width)
         return VStack(alignment: .leading, spacing: 11) {
             if let attribution = post.xRepostAttributionText {
                 Label(attribution, systemImage: "arrow.2.squarepath")
@@ -3212,7 +3238,7 @@ struct NewsCardView: View, Equatable {
                 .onTapGesture { onOpen?() }
                 .accessibilityIdentifier("feed-x-author-\(post.id)")
 
-            if !content.isEmpty, LocalTranslatedText.sourceLanguage(content) != nil {
+            if needsTranslation {
                 LocalTranslatedText(original: content, field: .body)
                     .font(.system(size: XTimelineTextLayout.fontSize))
                     .lineSpacing(XTimelineTextLayout.lineSpacing)
