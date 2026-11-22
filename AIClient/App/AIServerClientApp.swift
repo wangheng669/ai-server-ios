@@ -755,39 +755,30 @@ private struct NotificationNavigationTaskID: Equatable {
 private struct RootNavigationBar: View {
     @Binding var selection: EditorialTab
     let dynamicTarget: EditorialTab
-    @Environment(\.colorScheme) private var colorScheme
+    @ScaledMetric(relativeTo: .footnote) private var barWidth: CGFloat = 344
+    @ScaledMetric(relativeTo: .footnote) private var iconSize: CGFloat = 19
 
-    private var accent: Color {
-        colorScheme == .dark
-            ? Color(red: 0.67, green: 0.84, blue: 0.72)
-            : Color(red: 0.22, green: 0.36, blue: 0.27)
-    }
+    private let accent = Color(red: 0.22, green: 0.36, blue: 0.27)
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 2) {
             item(.world, title: "今日", icon: "newspaper")
             intelligenceItem
             item(.investment, title: "研究", icon: "chart.bar")
             item(.learning, title: "知识", icon: "book")
         }
-        .padding(5)
-        .frame(maxWidth: 420)
-        .background {
-            Capsule()
-                .fill(.ultraThinMaterial)
-                .overlay {
-                    Capsule().fill(Color(uiColor: .systemBackground).opacity(0.24))
-                }
-                .shadow(color: .black.opacity(colorScheme == .dark ? 0.22 : 0.07), radius: 7, y: 3)
-        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
+        .frame(maxWidth: barWidth)
+        .background(.white, in: Capsule())
         .overlay {
             Capsule()
-                .strokeBorder(Color.primary.opacity(0.09), lineWidth: 0.5)
+                .strokeBorder(accent.opacity(0.16), lineWidth: 0.5)
                 .allowsHitTesting(false)
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, 16)
         .padding(.top, 6)
-        .padding(.bottom, 3)
+        .padding(.bottom, 8)
     }
 
     private var intelligenceItem: some View {
@@ -846,25 +837,25 @@ private struct RootNavigationBar: View {
     }
 
     private func itemLabel(title: String, icon: String, isSelected: Bool) -> some View {
-        VStack(spacing: 4) {
+        HStack(spacing: 5) {
             Image(systemName: icon)
-                .symbolVariant(isSelected ? .fill : .none)
-                .font(.system(size: 19, weight: isSelected ? .semibold : .medium))
+                .font(.system(size: iconSize, weight: isSelected ? .semibold : .regular))
+                .accessibilityHidden(true)
             Text(title)
-                .font(.caption.weight(isSelected ? .semibold : .medium))
+                .font(.footnote.weight(isSelected ? .semibold : .medium))
                 .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                .minimumScaleFactor(0.75)
         }
         .symbolRenderingMode(.monochrome)
-        .padding(.horizontal, 4)
-        .padding(.vertical, 5)
-        .foregroundStyle(isSelected ? accent : Color.primary.opacity(0.72))
-        .frame(maxWidth: .infinity, minHeight: 46)
+        .padding(.horizontal, 2)
+        .padding(.vertical, 4)
+        .foregroundStyle(isSelected ? accent : Color.primary.opacity(0.66))
+        .frame(maxWidth: .infinity, minHeight: 52)
         .background {
             if isSelected {
-                Capsule().fill(accent.opacity(0.10))
+                Capsule().fill(Color(red: 0.91, green: 0.94, blue: 0.92))
             }
         }
-        .contentShape(Capsule())
+        .contentShape(Rectangle())
     }
 }

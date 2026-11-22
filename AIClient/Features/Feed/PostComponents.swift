@@ -890,11 +890,6 @@ struct PostAuthorHeader: View {
 }
 
 struct AvatarView: View {
-    enum LoadingPolicy {
-        case remote
-        case prepared(UIImage?)
-    }
-
     let url: URL?
     let name: String
     let size: CGFloat
@@ -902,7 +897,6 @@ struct AvatarView: View {
     var cornerRadius: CGFloat? = nil
     var rejectsUpscaledImages = false
     var placeholderSymbol: String? = nil
-    var loadingPolicy: LoadingPolicy = .remote
     @State private var loadedAvatar: (request: ImageLoader.Request, image: UIImage)?
 
     private var resolvedCornerRadius: CGFloat { cornerRadius ?? size / 2 }
@@ -913,16 +907,8 @@ struct AvatarView: View {
     }
 
     var body: some View {
-        let request: ImageLoader.Request?
-        let image: UIImage?
-        switch loadingPolicy {
-        case .remote:
-            request = assetName == nil ? ImageLoader.avatarRequest(url, size: size) : nil
-            image = request.flatMap(avatarImage(for:))
-        case .prepared(let preparedImage):
-            request = nil
-            image = preparedImage
-        }
+        let request = assetName == nil ? ImageLoader.avatarRequest(url, size: size) : nil
+        let image = request.flatMap(avatarImage(for:))
 
         return Group {
             if let assetName { Image(assetName).resizable().scaledToFill() }
@@ -2137,7 +2123,7 @@ struct XFeedQuotedPostCard: View {
     let availableWidth: CGFloat
     var enablesTextSelection = false
     var isDetail = false
-    var avatarLoadingPolicy: AvatarView.LoadingPolicy = .remote
+    var showsOriginalText = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -2146,8 +2132,7 @@ struct XFeedQuotedPostCard: View {
                     AvatarView(
                         url: avatarURL,
                         name: quote.author?.name ?? "引用动态",
-                        size: 28,
-                        loadingPolicy: avatarLoadingPolicy
+                        size: 28
                     )
                 }
 
@@ -2163,12 +2148,12 @@ struct XFeedQuotedPostCard: View {
                 }
             }
 
-            if !isDetail, let original = quote.originalText {
+            if !showsOriginalText, !isDetail, let original = quote.originalText {
                 LocalTranslatedText(original: original, serverChinese: quote.textZH, field: .quote)
                     .font(.system(size: 15))
                     .lineSpacing(2)
                     .lineLimit(6)
-            } else if let text = quote.displayText {
+            } else if let text = showsOriginalText ? quote.originalText : quote.displayText {
                 quotedText(text)
             }
 
