@@ -208,14 +208,15 @@ struct LocalTranslatedText: View {
         let sample = text
             .replacingOccurrences(of: #"https?://\S+|[@$][A-Za-z0-9_]+"#, with: " ", options: .regularExpression)
         guard sample.unicodeScalars.contains(where: CharacterSet.letters.contains) else { return nil }
+        let hasEnglishPassage = XPostTextFormatter.containsUntranslatedEnglishPassage(sample)
+        if hasHan(sample), sample.unicodeScalars.allSatisfy(isHanLatinOrNonletter) {
+            return hasEnglishPassage ? "en" : nil
+        }
         let recognizer = NLLanguageRecognizer()
         recognizer.processString(sample)
-        let language = recognizer.dominantLanguage
-        switch language {
+        switch recognizer.dominantLanguage {
         case .simplifiedChinese, .traditionalChinese, .undetermined, nil:
-            return XPostTextFormatter.containsUntranslatedEnglishPassage(sample) ? "en" : nil
-        case .english where hasHan(sample) && !XPostTextFormatter.containsUntranslatedEnglishPassage(sample):
-            return nil
+            return hasEnglishPassage ? "en" : nil
         case let language?:
             return language.rawValue
         }
@@ -229,7 +230,15 @@ struct LocalTranslatedText: View {
     }
 
     private static func hasHan(_ text: String) -> Bool {
-        text.unicodeScalars.contains { (0x3400...0x9FFF).contains(Int($0.value)) }
+        text.unicodeScalars.contains(where: isHan)
+    }
+
+    private static func isHan(_ scalar: Unicode.Scalar) -> Bool {
+        (0x3400...0x9FFF).contains(scalar.value) || (0xF900...0xFAFF).contains(scalar.value)
+    }
+
+    private static func isHanLatinOrNonletter(_ scalar: Unicode.Scalar) -> Bool {
+        isHan(scalar) || scalar.value <= 0x024F || !CharacterSet.letters.contains(scalar)
     }
 
     static func validTranslation(_ text: String, original: String) -> String? {
