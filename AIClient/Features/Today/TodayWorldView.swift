@@ -341,7 +341,9 @@ struct TodayWorldView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store: TodayWorldStore
     @State private var waitingForRechargeReturn = false
-    @State private var headerHeight: CGFloat = 63
+    @State private var showsStatus = false
+    @State private var showsTools = false
+    @State private var statusHeight: CGFloat = 0
 
     init(store: TodayWorldStore) {
         _store = StateObject(wrappedValue: store)
@@ -383,59 +385,82 @@ struct TodayWorldView: View {
         let readingHeight = max(0, viewport.height - bottomChromeHeight - 8)
         let topInset = min(18, max(0, (readingHeight - 420) / 8))
         return ScrollView {
-            VStack(spacing: 8) {
-                pageHeader
-                    .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { headerHeight = $0 }
-                if let brief = store.brief {
-                    TodayBriefOverviewView(
-                        brief: brief,
-                        viewport: CGSize(width: viewport.width, height: readingHeight - topInset - headerHeight - 8),
-                        isLoadingSources: store.isLoading || store.isLoadingSources,
-                        retryReport: { await store.loadReport(force: true) }
-                    )
-                    .id(brief.date)
-                } else {
-                    emptyReportView
-                }
-            }
-            .padding(.top, topInset)
-            .frame(maxWidth: .infinity, minHeight: readingHeight, alignment: .top)
-        }
-        .scrollIndicators(.hidden)
-        .scrollBounceBehavior(.basedOnSize)
-        .padding(.bottom, bottomChromeHeight + 8)
-    }
-
-    private var pageHeader: some View {
-        HStack(alignment: .bottom, spacing: 4) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("今日")
-                    .font(.largeTitle.weight(.semibold))
-                    .accessibilityAddTraits(.isHeader)
-                if let date = store.brief?.date ?? store.report?.date,
-                   let label = TodayBriefDate.edition(date) {
-                    Text(label).font(.subheadline).foregroundStyle(.secondary)
-                }
-            }
-            Spacer(minLength: 4)
-            if let editionNotice {
-                TodayEditionStatusButton(
-                    notice: editionNotice,
-                    isRefreshing: store.isLoading,
-                    retry: { await store.loadReport(force: true) }
-                )
-            }
-            TodayToolsButton(
+            TodayToolsMenu(
                 waitingForRechargeReturn: $waitingForRechargeReturn,
+                showsTools: $showsTools,
                 balance: store.balance,
                 dailyCosts: store.dailyCosts,
                 isLoading: store.isLoadingBalance,
                 needsRetry: store.balanceNeedsRetry,
-                retry: { await store.loadBalance(force: true) }
-            )
+                retry: { await store.loadBalance(force: true) },
+                viewport: CGSize(width: viewport.width, height: readingHeight - topInset)
+            ) {
+                pageHeading
+            } report: { headingHeight in
+                VStack(spacing: 8) {
+                    if showsStatus, let editionNotice {
+                        TodayEditionStatusDetails(
+                            notice: editionNotice,
+                            isRefreshing: store.isLoading,
+                            retry: { await store.loadReport(force: true) }
+                        )
+                        .frame(maxWidth: TodayBriefStyle.maximumCardWidth)
+                        .padding(.horizontal, TodayBriefStyle.horizontalInset)
+                        .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { statusHeight = $0 }
+                    }
+                    if let brief = store.brief {
+                        TodayBriefOverviewView(
+                            brief: brief,
+                            viewport: CGSize(
+                                width: viewport.width,
+                                height: readingHeight - topInset - headingHeight - 8
+                                    - (showsStatus && editionNotice != nil ? statusHeight + 8 : 0)
+                            ),
+                            isLoadingSources: store.isLoading || store.isLoadingSources,
+                            isHeaderPanelOpen: showsTools,
+                            retryReport: { await store.loadReport(force: true) }
+                        )
+                        .id(brief.date)
+                    } else {
+                        emptyReportView
+                    }
+                }
+            }
+            .padding(.top, topInset)
         }
-        .frame(maxWidth: TodayBriefStyle.maximumCardWidth)
-        .padding(.horizontal, TodayBriefStyle.horizontalInset)
+        .scrollIndicators(.hidden)
+        .scrollBounceBehavior(.basedOnSize)
+        .padding(.bottom, bottomChromeHeight + 8)
+        .onChange(of: showsTools) { _, open in
+            if open { showsStatus = false }
+        }
+        .onChange(of: rootTabIsActive) { _, active in
+            if !active {
+                showsTools = false
+                showsStatus = false
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var pageHeading: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("今日")
+                .font(.largeTitle.weight(.semibold))
+                .foregroundStyle(TodayBriefStyle.ink)
+                .accessibilityAddTraits(.isHeader)
+            if let date = store.brief?.date ?? store.report?.date,
+               let label = TodayBriefDate.edition(date) {
+                Text(label).font(.subheadline.weight(.medium)).foregroundStyle(TodayBriefStyle.ink)
+            }
+        }
+        Spacer(minLength: 4)
+        if let editionNotice {
+            TodayEditionStatusButton(notice: editionNotice, isOpen: showsStatus) {
+                showsTools = false
+                showsStatus.toggle()
+            }
+        }
     }
 
     private var emptyReportView: some View {
@@ -681,7 +706,8 @@ struct TodayInlineSourceView: View {
             if !source.originalText.isEmpty {
                 Text(source.originalText)
                     .font(.body)
-                    .lineSpacing(4)
+                    .foregroundStyle(TodayBriefStyle.ink)
+                    .lineSpacing(5)
                     .textSelection(.enabled)
             }
             if let reply = source.reply, !reply.isEmpty {
