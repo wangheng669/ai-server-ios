@@ -21,7 +21,8 @@ enum TodayBriefStyle {
 enum TodayOverviewSelection {
     static func supplementarySystems(
         in section: TodayWorldFinalReportSection,
-        overview: TodayWorldFinalReportOverview
+        overview: TodayWorldFinalReportOverview,
+        highlightedFollowUps: [String: Set<String>]
     ) -> [TodayWorldFinalReportSystem] {
         let highlights = overview.highlights.map { (item: $0, postIDs: Set($0.postIDs)) }
         return section.systems.filter { system in
@@ -31,25 +32,40 @@ enum TodayOverviewSelection {
             guard !matches.isEmpty, !system.postIDs.isEmpty else { return true }
             let covered = Set(matches.flatMap(\.postIDs))
             let displayed = matches.map(\.text)
+            let watch = TodayReadingEvent.canonical(system.watchItem ?? "")
+            let hasAdditionalWatch = !watch.isEmpty && highlightedFollowUps[system.systemKey]?.contains(watch) != true
             // Sharing one source does not mean the entire company report is covered.
             return !Set(system.postIDs).isSubset(of: covered)
                 || !TodayReadingEvent.additionalDetails(system.facts.map(\.text), excluding: displayed).isEmpty
-                || !(system.watchItem ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || hasAdditionalWatch
         }
     }
 }
 
 struct TodayBriefProjection: Sendable {
+    private struct FollowUpKey: Equatable {
+        let systems: Set<String>
+        let posts: Set<Int>
+        let text: String
+
+        init?(systems: [String], posts: [Int], body: String?) {
+            self.systems = Set(systems)
+            self.posts = Set(posts.filter { $0 > 0 })
+            text = TodayReadingEvent.canonical(body ?? "")
+            guard !self.systems.isEmpty, !self.posts.isEmpty, !text.isEmpty else { return nil }
+        }
+    }
+
     fileprivate struct CompanyCard: Sendable {
         let name: String
         let avatar: TodaySystemAvatar.Source
         let text: String?
         let postIDs: [Int]
 
-        init(_ system: TodayWorldFinalReportSystem) {
+        init(_ system: TodayWorldFinalReportSystem, fact: TodayWorldFinalReportFact?) {
             name = todayBriefSystemName(system.systemName)
             avatar = TodaySystemAvatar.Source(system)
-            text = TodayReadingEvent.additionalDetails(system.facts.map(\.text), excluding: []).first
+            text = fact.flatMap { TodayReadingEvent.additionalDetails([$0.text], excluding: []).first }
                 ?? system.watchItem.flatMap { $0.isEmpty ? nil : "后续关注 · " + $0 }
             postIDs = Array(Set(system.postIDs.filter { $0 > 0 })).sorted()
         }
@@ -63,6 +79,7 @@ struct TodayBriefProjection: Sendable {
 
         let id: String
         let content: Content
+        let followUps: [String]
 
         var text: String? {
             switch content {
@@ -129,24 +146,50 @@ struct TodayBriefProjection: Sendable {
         date = edition.date
         isPartial = report.completenessStatus == "partial"
         let overview = report.overview
-        let highlights = overview.highlights.map { TodayReadingEvent.highlight($0, systems: systems) }
-        let watchItems = overview.watchItems.map { TodayReadingEvent.highlight($0, systems: systems) }
+        var remainingWatches = overview.watchItems.map { item in
+            (item: item, key: FollowUpKey(systems: item.systemKeys, posts: item.postIDs, body: item.context))
+        }
+        func takeFollowUps(for key: FollowUpKey?) -> [String] {
+            guard let key else { return [] }
+            let matched = remainingWatches.filter { $0.key == key }
+            remainingWatches.removeAll { $0.key == key }
+            return TodayReadingEvent.unique(matched.map(\.item.text))
+        }
+
+        var highlightedFollowUps: [String: Set<String>] = [:]
+        let highlights = overview.highlights.map { item in
+            let event = TodayReadingEvent.highlight(item, systems: systems)
+            let key = FollowUpKey(systems: item.systemKeys, posts: item.postIDs, body: item.text)
+            let followUps = takeFollowUps(for: key)
+            for system in item.systemKeys {
+                highlightedFollowUps[system, default: []].formUnion(followUps.map(TodayReadingEvent.canonical))
+            }
+            return Card(id: "highlight-" + event.id, content: .event(event), followUps: followUps)
+        }
         var companyCards: [Card] = []
         for section in report.sections {
-            let eligibleIDs = Set(TodayOverviewSelection.supplementarySystems(in: section, overview: overview).map(\.id))
+            let eligibleIDs = Set(TodayOverviewSelection.supplementarySystems(
+                in: section, overview: overview, highlightedFollowUps: highlightedFollowUps
+            ).map(\.id))
             for group in section.groups {
                 for system in group.systems where eligibleIDs.contains(system.id) {
-                    let company = CompanyCard(system)
+                    let fact = system.facts.first { !TodayReadingEvent.canonical($0.text).isEmpty }
+                    let key = fact.flatMap {
+                        FollowUpKey(systems: [system.systemKey], posts: $0.postIDs, body: $0.text)
+                    }
                     companyCards.append(Card(
                         id: "company-\(section.id)-\(group.id)-\(system.id)",
-                        content: .company(company)
+                        content: .company(CompanyCard(system, fact: fact)),
+                        followUps: takeFollowUps(for: key)
                     ))
                 }
             }
         }
-        cards = highlights.map { Card(id: "highlight-" + $0.id, content: .event($0)) }
-            + companyCards
-            + watchItems.map { Card(id: "watch-" + $0.id, content: .event($0)) }
+        let standaloneWatches = remainingWatches.map { watch in
+            let event = TodayReadingEvent.highlight(watch.item, systems: systems)
+            return Card(id: "watch-" + event.id, content: .event(event), followUps: [])
+        }
+        cards = highlights + companyCards + standaloneWatches
         sourceIDs = Set(cards.flatMap(\.postIDs)).sorted()
     }
 }
@@ -669,11 +712,11 @@ private struct TodayBriefCardFace: View {
         VStack(alignment: .leading, spacing: compact ? 14 : 22) {
             identity
 
-            if let text = card.text {
+            if card.text != nil || !card.followUps.isEmpty {
                 ViewThatFits(in: .vertical) {
-                    bodyText(text)
+                    readingContent
                     ScrollView {
-                        bodyText(text)
+                        readingContent
                     }
                     .scrollIndicators(.hidden)
                 }
@@ -687,13 +730,30 @@ private struct TodayBriefCardFace: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func bodyText(_ text: String) -> some View {
-        Text(text)
-            .font(compact ? .body : .title2)
-            .foregroundStyle(.primary)
-            .lineSpacing(compact ? 4 : 7)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
+    private var readingContent: some View {
+        VStack(alignment: .leading, spacing: compact ? 12 : 18) {
+            if let text = card.text {
+                Text(text)
+                    .font(compact ? .body : .title2)
+                    .foregroundStyle(.primary)
+                    .lineSpacing(compact ? 4 : 7)
+            }
+            if !card.followUps.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("后续关注")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(TodayBriefStyle.accent)
+                    ForEach(card.followUps, id: \.self) { text in
+                        Text(text)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineSpacing(3)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var identity: some View {
