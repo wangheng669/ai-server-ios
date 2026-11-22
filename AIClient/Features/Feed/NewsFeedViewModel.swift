@@ -221,7 +221,6 @@ final class NewsFeedViewModel: ObservableObject {
     private let fetchXFeedUsers: () async throws -> [XFeedUser]
     private let fetchXueqiuFeeds: () async throws -> [RSSFeedSource]
     private let fetchXTranslation: (String) async throws -> XTranslation
-    private let translateXFallback: (String) async throws -> String
     private let fetchXTweetDetail: (String) async throws -> XTweetDetailItem
     private let fetchRSSFeeds: () async throws -> [RSSFeedSource]
     private let fetchRSSFeedPosts: (Int, Int, Int) async throws -> [Post]
@@ -256,7 +255,6 @@ final class NewsFeedViewModel: ObservableObject {
         fetchXFeedUsers: (() async throws -> [XFeedUser])? = nil,
         fetchXueqiuFeeds: (() async throws -> [RSSFeedSource])? = nil,
         fetchXTranslation: ((String) async throws -> XTranslation)? = nil,
-        translateXFallback: ((String) async throws -> String)? = nil,
         fetchXTweetDetail: ((String) async throws -> XTweetDetailItem)? = nil,
         fetchRSSFeeds: (() async throws -> [RSSFeedSource])? = nil,
         fetchRSSFeedPosts: ((Int, Int, Int) async throws -> [Post])? = nil,
@@ -302,9 +300,6 @@ final class NewsFeedViewModel: ObservableObject {
         let client = APIClient(baseURL: serverURL)
         self.fetchXTranslation = fetchXTranslation ?? { tweetID in
             try await client.fetchXTranslation(tweetID: tweetID)
-        }
-        self.translateXFallback = translateXFallback ?? { text in
-            try await PersonArticleTranslationService.shared.translate(text)
         }
         self.fetchXTweetDetail = fetchXTweetDetail ?? { tweetID in
             try await client.fetchXTweetDetail(tweetID: tweetID)
@@ -756,10 +751,7 @@ final class NewsFeedViewModel: ObservableObject {
         loadingXQuotedTranslationIDs.insert(post.id)
         defer { loadingXQuotedTranslationIDs.remove(post.id) }
         do {
-            var value = try await resolvedXTranslation(tweetID: tweetID, sourceText: sourceText)
-            if !Self.containsHanCharacters(value) {
-                value = try await translateXFallback(sourceText)
-            }
+            let value = try await resolvedXTranslation(tweetID: tweetID, sourceText: sourceText)
             guard !Task.isCancelled else { return }
             let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !normalized.isEmpty, normalized != sourceText, Self.containsHanCharacters(normalized) else { return }
@@ -862,24 +854,22 @@ final class NewsFeedViewModel: ObservableObject {
     private func resolvedXTranslation(tweetID: String, sourceText: String) async throws -> String {
         let cache = FeedTranslationCache.shared
         let key = FeedTranslationCache.key(sourceText, language: "x/" + tweetID)
-        if let saved = cache.text(key) { return saved }
-        let primary: String?
+        if let saved = cache.text(key),
+           let value = LocalTranslatedText.validTranslation(saved, original: sourceText) {
+            return value
+        }
+        guard cache.canAttempt(key) else { throw APIError.invalidResponse }
         do {
-            primary = try await fetchXTranslation(tweetID).text
-        } catch is CancellationError {
-            throw CancellationError()
+            let received = try await fetchXTranslation(tweetID).text
+            guard let value = LocalTranslatedText.validTranslation(received, original: sourceText) else {
+                throw APIError.invalidResponse
+            }
+            cache.save(value, key: key)
+            return value
         } catch {
-            primary = nil
+            if !Task.isCancelled { cache.failed(key) }
+            throw error
         }
-        if let primary, Self.containsHanCharacters(primary) {
-            cache.save(primary, key: key)
-            return primary
-        }
-        let translated = try await translateXFallback(sourceText)
-        if translated != sourceText, Self.containsHanCharacters(translated) {
-            cache.save(translated, key: key)
-        }
-        return translated
     }
 
     private static func containsHanCharacters(_ value: String) -> Bool {
@@ -1299,19 +1289,22 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     private func pretranslateTimeline(_ posts: [Post]) {
-        if source == .truth, posts.first?.source == "truth", #available(iOS 26.0, *) {
-            Task { await FeedTranslationCache.shared.pretranslateTruth(posts) }
-        } else if source == .x {
-            let visible = Array(posts.prefix(10))
-            for post in visible where post.needsXTranslation && xTranslations[post.id] == nil {
-                guard let tweetID = post.xTweetID else { continue }
-                let key = FeedTranslationCache.key(post.xStoredOriginalContent, language: "x/" + tweetID)
-                if let saved = FeedTranslationCache.shared.text(key) { xTranslations[post.id] = saved }
+        guard source == .x else { return }
+        let visible = Array(posts.prefix(10))
+        var savedTranslations: [Int: String] = [:]
+        for post in visible where post.needsXTranslation && xTranslations[post.id] == nil {
+            guard let tweetID = post.xTweetID else { continue }
+            let original = post.xStoredOriginalContent
+            let key = FeedTranslationCache.key(original, language: "x/" + tweetID)
+            if let saved = FeedTranslationCache.shared.text(key),
+               let value = LocalTranslatedText.validTranslation(saved, original: original) {
+                savedTranslations[post.id] = value
             }
-            Task {
-                await runWithLimitedConcurrency(visible, maximumConcurrentRequests: 2) { post in
-                    await self.translateXPostIfNeeded(post)
-                }
+        }
+        if !savedTranslations.isEmpty { xTranslations.merge(savedTranslations) { existing, _ in existing } }
+        Task {
+            await runWithLimitedConcurrency(visible, maximumConcurrentRequests: 2) { post in
+                await self.translateXPostIfNeeded(post)
             }
         }
     }
@@ -1319,6 +1312,23 @@ final class NewsFeedViewModel: ObservableObject {
     private func schedulePresentationPrewarm(for posts: [Post], source: FeedSource? = nil) {
         let page = source ?? self.source
         Task(priority: .utility) { await FeedPresentationPrewarmer.shared.warm(posts, source: page) }
+        guard #available(iOS 26.0, *), [.x, .truth, .rss, .youtube].contains(page) else { return }
+        Task {
+            let originals = posts.prefix(10).flatMap { post -> [String] in
+                switch page {
+                case .truth:
+                    return LocalTranslatedText.chineseText(post.truthChineseContent) == nil ? [post.originalDisplayContent] : []
+                case .x:
+                    return [XPostTextFormatter.timelineText(post.displayContent)]
+                case .rss, .youtube:
+                    let title = LocalTranslatedText.chineseText(post.feedChineseTitle) == nil ? [post.feedOriginalTitle] : []
+                    return page == .rss ? title + [post.rssListContent] : title
+                default:
+                    return []
+                }
+            }
+            await FeedTranslationCache.shared.pretranslate(originals)
+        }
     }
 
     private func scheduleNewYorkTimesPrefetch(for posts: [Post], cancelsPrevious: Bool) {

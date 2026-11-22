@@ -654,9 +654,6 @@ struct Post: Codable, Identifiable, Hashable {
     let feedRank: Int?
     let meta: PostMeta?
     var rssOriginalTitle: String? = nil
-    // Runtime-only card translations. The backend payload and offline cache remain unchanged.
-    var rssTitleZH: String? = nil
-    var rssExcerptZH: String? = nil
     // Runtime-only translation for an embedded quoted X post.
     var xQuotedTextZH: String? = nil
     // Runtime-only reply context loaded or translated after the feed payload arrives.
@@ -665,8 +662,7 @@ struct Post: Codable, Identifiable, Hashable {
     var xReposterName: String? = nil
 
     var displayTitle: String {
-        clean(rssTitleZH)
-            ?? rssServerLocalizedTitle
+        rssServerLocalizedTitle
             ?? clean(contentZH)
             ?? clean(title)
             ?? clean(summary)
@@ -914,19 +910,6 @@ struct Post: Codable, Identifiable, Hashable {
         replaced.xReposterName = xReposterName ?? (isXRetweetWrapper ? authorName : nil)
         return replaced
     }
-    func replacingRSSCardTranslation(title: String, excerpt: String?) -> Post {
-        var translated = self
-        translated.rssTitleZH = clean(title)
-        translated.rssExcerptZH = clean(excerpt)
-        return translated
-    }
-
-    var needsRSSCardTranslation: Bool {
-        guard isRSS, clean(rssTitleZH) == nil, rssServerLocalizedTitle == nil, clean(contentZH) == nil,
-              let title = rssTranslationTitle else { return false }
-        return !Self.containsHanCharacters(title)
-    }
-
     /// The RSS localization pipeline stores its Chinese card headline in `summary`.
     /// Prefer it immediately when the source title is still English.
     var rssServerLocalizedTitle: String? {
@@ -1319,16 +1302,22 @@ struct Post: Codable, Identifiable, Hashable {
         return blocks.isEmpty ? [.paragraph(text: displayContent, emojis: [])] : blocks
     }
 
+    var feedOriginalTitle: String {
+        clean(rssOriginalTitle) ?? clean(title) ?? displayTitle
+    }
+
+    var feedChineseTitle: String? {
+        clean(rssOriginalTitle) == nil ? nil : clean(title)
+    }
+
     var rssListContent: String {
-        if clean(rssExcerptZH) == nil, rssServerLocalizedTitle != nil {
-            return displayTitle
-        }
-        let value = clean(rssExcerptZH)
-            ?? htmlTextPreservingRSSInlineEmoji(contentZH)
+        let value = htmlTextPreservingRSSInlineEmoji(contentZH)
             ?? htmlTextPreservingRSSInlineEmoji(content)
+            ?? rssTranslationExcerpt
             ?? displayContent
         let normalized = value.replacingOccurrences(of: #"\n{2,}"#, with: "\n", options: .regularExpression)
-        return Self.isRSSPlaceholder(normalized) ? displayTitle : normalized
+        guard !Self.isRSSPlaceholder(normalized), normalized != feedOriginalTitle else { return "" }
+        return String(normalized.prefix(420)) + (normalized.count > 420 ? "…" : "")
     }
 
     private func isInlineEmojiTag(_ tag: String, rawURL: String) -> Bool {

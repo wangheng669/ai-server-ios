@@ -341,7 +341,7 @@ struct GoogleSignalView: View {
                             Button { selected = item } label: {
                                 VStack(alignment: .leading, spacing: 8) {
                                     HStack(alignment: .top) {
-                                        LocalTranslatedText(original: item.displayTitle, enabled: item.source != "x").font(.body.weight(.medium)).multilineTextAlignment(.leading)
+                                        LocalTranslatedText(original: item.displayTitle, field: .title).font(.body.weight(.medium)).multilineTextAlignment(.leading)
                                         Spacer(minLength: 8)
                                         Text(item.sentimentTitle).font(.caption).foregroundStyle(.secondary)
                                     }
@@ -476,6 +476,10 @@ struct GoogleSignalView: View {
             let prepared = await (reset ? CompanyNewsDisplayList() : displayList).appending(page.items)
             guard !Task.isCancelled, isActive, current == generation, requestedFilter == filter else { return }
             displayList = prepared
+            if #available(iOS 26.0, *) {
+                let titles = page.items.prefix(12).map(\.displayTitle)
+                Task { await FeedTranslationCache.shared.pretranslate(titles) }
+            }
             loadedFilter = requestedFilter
             if reset { loadedAt = Date() }
             paginationFailed = false
@@ -511,7 +515,7 @@ private struct CompanyNewsDetail: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    LocalTranslatedText(original: item.displayTitle, enabled: item.source != "x").font(.title2.bold())
+                    LocalTranslatedText(original: item.displayTitle, detail: true, field: .title).font(.title2.bold())
                     Text(item.displayAuthor).foregroundStyle(.secondary)
                     HStack { ForEach(companies.filter { item.companies[$0.id] != "unrelated" }) { company in
                         Text("\(company.name) · \(GoogleSignalSentimentFilter(rawValue: item.companies[company.id] ?? "uncertain")?.title ?? "待判断")").font(.caption)
