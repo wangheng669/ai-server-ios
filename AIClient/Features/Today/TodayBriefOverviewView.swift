@@ -84,49 +84,37 @@ struct TodayBriefProjection: Sendable {
     fileprivate let cards: [Card]
     let sourceIDs: [Int]
     private(set) var sources: [Int: TodaySourcePresentation] = [:]
-    private(set) var avatars: [URL: UIImage] = [:]
     private(set) var previews: [URL: UIImage] = [:]
-    var preparedImageCount: Int { avatars.count + previews.count }
+    private(set) var hasPreparedPreviews = false
 
-    private enum ReadingImage: Hashable, Sendable {
-        case avatar(URL)
-        case preview(URL)
+    var avatarURLs: [URL] {
+        cards.flatMap { card in
+            let companyAvatar: URL?
+            if case .company(let company) = card.content, case .remote(let url) = company.avatar {
+                companyAvatar = url
+            } else {
+                companyAvatar = nil
+            }
+            return [companyAvatar].compactMap { $0 } + card.postIDs.flatMap { id in
+                [sources[id]?.avatarURL, sources[id]?.quoteAvatarURL].compactMap { $0 }
+            }
+        }
     }
 
     @MainActor
-    mutating func prepareImages() async {
-        var seen = Set(avatars.keys.map(ReadingImage.avatar) + previews.keys.map(ReadingImage.preview))
-        var pending: [ReadingImage] = []
-        for card in cards {
-            if case .company(let company) = card.content, case .remote(let url?) = company.avatar {
-                pending.append(.avatar(url))
-            }
-            for id in card.postIDs {
-                guard let source = sources[id] else { continue }
-                pending += [source.avatarURL, source.quoteAvatarURL].compactMap { $0.map(ReadingImage.avatar) }
-                pending += source.previewURLs.map(ReadingImage.preview)
-            }
-        }
-
+    mutating func preparePreviews() async {
+        var seen = Set(previews.keys)
         let scale = UIScreen.main.scale
-        let requests: [(ReadingImage, ImageLoader.Request)] = pending.compactMap { image in
-            guard seen.insert(image).inserted else { return nil }
-            switch image {
-            case .avatar(let url):
-                return ImageLoader.avatarRequest(url, size: 44).map { (image, $0) }
-            case .preview(let url):
-                let resolved = ImageLoader.request(for: url, targetSize: nil, scale: scale)
-                let request = ImageLoader.Request(url: resolved.url, pixelLimit: 640, scale: scale)
-                return (image, request)
-            }
+        let requests = cards.flatMap { card in
+            card.postIDs.flatMap { sources[$0]?.previewURLs ?? [] }
+        }.compactMap { url -> (URL, ImageLoader.Request)? in
+            guard seen.insert(url).inserted else { return nil }
+            let resolved = ImageLoader.request(for: url, targetSize: nil, scale: scale)
+            return (url, ImageLoader.Request(url: resolved.url, pixelLimit: 640, scale: scale))
         }
         let prepared = await ImageLoader.prepareReadingImages(requests)
-        for (key, image) in prepared {
-            switch key {
-            case .avatar(let url): avatars[url] = image
-            case .preview(let url): previews[url] = image
-            }
-        }
+        previews.merge(prepared) { saved, _ in saved }
+        hasPreparedPreviews = true
     }
 
     mutating func addSources(_ posts: [Int: Post]) {
@@ -166,7 +154,7 @@ struct TodayBriefProjection: Sendable {
 struct TodayBriefOverviewView: View {
     let brief: TodayBriefProjection
     let viewport: CGSize
-    let isRefreshing: Bool
+    let isLoadingSources: Bool
     let retryReport: () async -> Void
 
     var body: some View {
@@ -178,7 +166,7 @@ struct TodayBriefOverviewView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(TodayBriefStyle.horizontalInset)
             } else {
-                TodayBriefDeck(brief: brief, viewport: viewport, isRefreshing: isRefreshing, retryReport: retryReport)
+                TodayBriefDeck(brief: brief, viewport: viewport, isLoadingSources: isLoadingSources, retryReport: retryReport)
             }
         }
         .accessibilityIdentifier("today-overview")
@@ -191,11 +179,10 @@ private struct TodayOriginalsPanel: View {
     @State private var contentHeight: CGFloat?
 
     let sources: [TodaySourcePresentation]
-    let avatars: [URL: UIImage]
     let referenceCount: Int
     let width: CGFloat
     let isCurrent: Bool
-    let isRefreshing: Bool
+    let isLoadingSources: Bool
     let retryReport: () async -> Void
     let measure: (CGFloat) -> Void
 
@@ -212,7 +199,7 @@ private struct TodayOriginalsPanel: View {
         VStack(spacing: 0) {
             Group {
                 if let singleSource {
-                    TodaySourceAuthorView(source: singleSource, image: singleSource.avatarURL.flatMap { avatars[$0] })
+                    TodaySourceAuthorView(source: singleSource)
                 } else {
                     Text("原文").font(.headline)
                 }
@@ -235,12 +222,11 @@ private struct TodayOriginalsPanel: View {
                             Divider()
                         }
                         if singleSource == nil {
-                            TodaySourceAuthorView(source: source, image: source.avatarURL.flatMap { avatars[$0] })
+                            TodaySourceAuthorView(source: source)
                                 .accessibilityAddTraits(.isHeader)
                         }
                         TodayInlineSourceView(
                             source: source,
-                            quoteAvatar: source.quoteAvatarURL.flatMap { avatars[$0] },
                             width: max(1, width - TodayBriefStyle.horizontalInset * 2)
                         )
                     }
@@ -265,11 +251,14 @@ private struct TodayOriginalsPanel: View {
         let missing = referenceCount - sources.count
         if referenceCount == 0 {
             Text("暂无原文").font(.footnote).foregroundStyle(.secondary)
+        } else if missing > 0, isLoadingSources {
+            ProgressView("正在加载原文").controlSize(.small)
+                .font(.footnote)
         } else if missing > 0 {
             HStack {
                 Text("\(missing) 篇原文暂不可用").font(.footnote).foregroundStyle(.secondary)
                 Spacer(minLength: 8)
-                TodayReportRetryButton(isRefreshing: isRefreshing, retry: retryReport)
+                TodayReportRetryButton(isRefreshing: false, retry: retryReport)
             }
         }
     }
@@ -314,7 +303,7 @@ private struct TodayBriefDeck: View {
 
     let brief: TodayBriefProjection
     let viewport: CGSize
-    let isRefreshing: Bool
+    let isLoadingSources: Bool
     let retryReport: () async -> Void
 
     private enum DragAxis {
@@ -356,7 +345,6 @@ private struct TodayBriefDeck: View {
                         TodayBriefCardFace(
                             card: card,
                             source: card.postIDs.lazy.compactMap { brief.sources[$0] }.first,
-                            avatars: brief.avatars,
                             compact: cardHeight < 350 || cardWidth < 290
                         )
                         .opacity(contentOpacity)
@@ -524,11 +512,10 @@ private struct TodayBriefDeck: View {
                 let card = brief.cards[index]
                 TodayOriginalsPanel(
                     sources: card.postIDs.compactMap { brief.sources[$0] },
-                    avatars: brief.avatars,
                     referenceCount: card.postIDs.count,
                     width: width,
                     isCurrent: index == selection,
-                    isRefreshing: isRefreshing,
+                    isLoadingSources: isLoadingSources,
                     retryReport: retryReport,
                     measure: { reportedHeight in
                         guard showsOriginals else { return }
@@ -675,7 +662,6 @@ private struct TodayBriefDeckLayers<Layer: View>: View, Animatable {
 private struct TodayBriefCardFace: View {
     let card: TodayBriefProjection.Card
     let source: TodaySourcePresentation?
-    let avatars: [URL: UIImage]
     let compact: Bool
 
     var body: some View {
@@ -715,11 +701,10 @@ private struct TodayBriefCardFace: View {
             switch card.content {
             case let .event(event):
                 if let logo = TodaySystemAvatar.Source(companySystemKey: event.companySystemKey) {
-                    TodaySystemAvatar(source: logo, name: event.sourceLabel, size: size, avatars: avatars)
+                    TodaySystemAvatar(source: logo, name: event.sourceLabel, size: size)
                 } else if let source {
                     AvatarView(
-                        url: nil, name: source.author, size: size,
-                        loadingPolicy: .prepared(source.avatarURL.flatMap { avatars[$0] })
+                        url: source.avatarURL, name: source.author, size: size
                     )
                     .accessibilityHidden(true)
                 } else {
@@ -731,7 +716,7 @@ private struct TodayBriefCardFace: View {
                 }
                 Text(event.sourceLabel.isEmpty ? source?.author ?? "简报" : event.sourceLabel)
             case let .company(company):
-                TodaySystemAvatar(source: company.avatar, name: company.name, size: size, avatars: avatars)
+                TodaySystemAvatar(source: company.avatar, name: company.name, size: size)
                     .accessibilityHidden(true)
                 Text(company.name)
             }
@@ -1248,7 +1233,6 @@ private struct TodaySystemAvatar: View {
     let source: Source
     let name: String
     let size: CGFloat
-    let avatars: [URL: UIImage]
 
     nonisolated private static let companyAssets: [String: String] = [
         "altman": "TodayCompanyOpenAI",
@@ -1277,7 +1261,7 @@ private struct TodaySystemAvatar: View {
                 .frame(width: size, height: size)
                 .accessibilityLabel("\(name) 公司标识")
         case .remote(let url):
-            AvatarView(url: nil, name: name, size: size, loadingPolicy: .prepared(url.flatMap { avatars[$0] }))
+            AvatarView(url: url, name: name, size: size)
         }
     }
 }
