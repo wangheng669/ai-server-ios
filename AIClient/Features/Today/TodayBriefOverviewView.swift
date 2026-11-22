@@ -227,7 +227,8 @@ private struct TodayOriginalsPanel: View {
                         }
                         TodayInlineSourceView(
                             source: source,
-                            width: max(1, width - TodayBriefStyle.horizontalInset * 2)
+                            width: max(1, width - TodayBriefStyle.horizontalInset * 2),
+                            allowsLocalTranslation: isCurrent
                         )
                     }
                     sourceStatus

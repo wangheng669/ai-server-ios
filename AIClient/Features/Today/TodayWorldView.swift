@@ -587,7 +587,8 @@ struct TodayReadingEvent: Identifiable, Sendable {
 
 struct TodaySourcePresentation: Identifiable, Sendable {
     let post: Post
-    let text: String
+    let originalText: String
+    let chineseText: String?
     let reply: String?
     let quote: XQuotedPost?
     let author: String
@@ -601,9 +602,10 @@ struct TodaySourcePresentation: Identifiable, Sendable {
 
     init(post: Post) {
         self.post = post
-        text = XPostTextFormatter.simplifiedChinese(
-            post.hasTranslation ? post.displayContent : post.xStoredOriginalContent
-        )
+        originalText = XPostTextFormatter.simplifiedChinese(post.xStoredOriginalContent)
+        chineseText = post.hasTranslation
+            ? LocalTranslatedText.chineseText(post.displayContent).map(XPostTextFormatter.simplifiedChinese)
+            : nil
         reply = post.xReplyContext?.displayText
         let sourceQuote = post.xQuotedPost
         quote = sourceQuote
@@ -645,11 +647,25 @@ struct TodaySourceAuthorView: View {
 struct TodayInlineSourceView: View {
     let source: TodaySourcePresentation
     let width: CGFloat
+    let allowsLocalTranslation: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if !source.text.isEmpty {
-                Text(source.text).font(.body).lineSpacing(4).textSelection(.enabled)
+            if !source.originalText.isEmpty || source.chineseText != nil {
+                Group {
+                    if let chineseText = source.chineseText {
+                        Text(chineseText)
+                    } else {
+                        LocalTranslatedText(
+                            original: source.originalText,
+                            detail: true,
+                            enabled: allowsLocalTranslation && source.post.sourceName == "X"
+                        )
+                    }
+                }
+                .font(.body)
+                .lineSpacing(4)
+                .textSelection(.enabled)
             }
             if let reply = source.reply, !reply.isEmpty {
                 Text("回复：\(reply)")

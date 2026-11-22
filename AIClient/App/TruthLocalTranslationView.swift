@@ -123,7 +123,7 @@ struct LocalTranslatedText: View {
 
     private var existingChinese: String? { Self.chineseText(serverChinese) }
 
-    static func chineseText(_ serverChinese: String?) -> String? {
+    nonisolated static func chineseText(_ serverChinese: String?) -> String? {
         guard let serverChinese else { return nil }
         let recognizer = NLLanguageRecognizer()
         recognizer.processString(serverChinese)
