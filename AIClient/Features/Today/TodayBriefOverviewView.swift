@@ -3,13 +3,12 @@ import UIKit
 
 enum TodayBriefStyle {
     static let horizontalInset: CGFloat = 22
-    static let toolsRowHeight: CGFloat = 44
-    static let toolsSpacing: CGFloat = 4
     static let maximumCardWidth: CGFloat = 480
-    static let cardCornerRadius: CGFloat = 28
+    static let cardCornerRadius: CGFloat = 22
     static let surface = Color(uiColor: .systemBackground)
     static let rule = Color(uiColor: .separator).opacity(0.28)
     static let secondary = Color(uiColor: .secondaryLabel)
+    static let ink = Color(uiColor: UIColor(red: 0.094, green: 0.145, blue: 0.118, alpha: 1))
     static var surfaceOutline: Color { accent.opacity(0.16) }
     static let accent = Color(uiColor: UIColor { traits in
         traits.userInterfaceStyle == .dark
@@ -18,10 +17,49 @@ enum TodayBriefStyle {
     })
 }
 
+private struct TodayMenuSurface: ViewModifier {
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 18)
+        content
+            .background(TodayBriefStyle.surface, in: shape)
+            .overlay { shape.strokeBorder(TodayBriefStyle.surfaceOutline).allowsHitTesting(false) }
+            .shadow(color: TodayBriefStyle.accent.opacity(0.14), radius: 10, y: 5)
+    }
+}
+
+enum TodayBriefDate {
+    private static let iso = Date.ISO8601FormatStyle(timeZoneSeparator: .colon)
+    private static let fractionalISO = Date.ISO8601FormatStyle(timeZoneSeparator: .colon, includingFractionalSeconds: true)
+    private static let dateOnly = formatter("yyyy-MM-dd")
+    private static let editionLabel = formatter("M 月 d 日 · EEE")
+    private static let timeLabel = formatter("M 月 d 日 HH:mm")
+
+    private static func formatter(_ format: String) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        formatter.dateFormat = format
+        return formatter
+    }
+
+    static func edition(_ date: String) -> String? {
+        dateOnly.date(from: date).map(editionLabel.string)
+    }
+
+    static func timestamp(_ value: String) -> String? {
+        ((try? fractionalISO.parse(value)) ?? (try? iso.parse(value))).map(timeLabel.string)
+    }
+
+    static func timestamp(_ date: Date) -> String {
+        timeLabel.string(from: date)
+    }
+}
+
 enum TodayOverviewSelection {
     static func supplementarySystems(
         in section: TodayWorldFinalReportSection,
-        overview: TodayWorldFinalReportOverview
+        overview: TodayWorldFinalReportOverview,
+        highlightedFollowUps: [String: Set<String>]
     ) -> [TodayWorldFinalReportSystem] {
         let highlights = overview.highlights.map { (item: $0, postIDs: Set($0.postIDs)) }
         return section.systems.filter { system in
@@ -31,26 +69,43 @@ enum TodayOverviewSelection {
             guard !matches.isEmpty, !system.postIDs.isEmpty else { return true }
             let covered = Set(matches.flatMap(\.postIDs))
             let displayed = matches.map(\.text)
+            let watch = TodayReadingEvent.canonical(system.watchItem ?? "")
+            let hasAdditionalWatch = !watch.isEmpty && highlightedFollowUps[system.systemKey]?.contains(watch) != true
             // Sharing one source does not mean the entire company report is covered.
             return !Set(system.postIDs).isSubset(of: covered)
                 || !TodayReadingEvent.additionalDetails(system.facts.map(\.text), excluding: displayed).isEmpty
-                || !(system.watchItem ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || hasAdditionalWatch
         }
     }
 }
 
 struct TodayBriefProjection: Sendable {
+    private struct FollowUpKey: Equatable {
+        let systems: Set<String>
+        let posts: Set<Int>
+        let text: String
+
+        init?(systems: [String], posts: [Int], body: String?) {
+            self.systems = Set(systems)
+            self.posts = Set(posts.filter { $0 > 0 })
+            text = TodayReadingEvent.canonical(body ?? "")
+            guard !self.systems.isEmpty, !self.posts.isEmpty, !text.isEmpty else { return nil }
+        }
+    }
+
     fileprivate struct CompanyCard: Sendable {
         let name: String
         let avatar: TodaySystemAvatar.Source
         let text: String?
         let postIDs: [Int]
 
-        init(_ system: TodayWorldFinalReportSystem) {
+        init(_ system: TodayWorldFinalReportSystem, fact: TodayWorldFinalReportFact?) {
             name = todayBriefSystemName(system.systemName)
             avatar = TodaySystemAvatar.Source(system)
-            text = TodayReadingEvent.additionalDetails(system.facts.map(\.text), excluding: []).first
-                ?? system.watchItem.flatMap { $0.isEmpty ? nil : "后续关注 · " + $0 }
+            let detail = fact.flatMap { TodayReadingEvent.additionalDetails([$0.text], excluding: []).first }
+            let watch = system.watchItem.flatMap { $0.isEmpty ? nil : "后续关注 · " + $0 }
+            let headline = system.headline.isEmpty ? nil : system.headline
+            text = detail ?? watch ?? headline
             postIDs = Array(Set(system.postIDs.filter { $0 > 0 })).sorted()
         }
     }
@@ -63,6 +118,16 @@ struct TodayBriefProjection: Sendable {
 
         let id: String
         let content: Content
+        let followUps: [String]
+        let title: String?
+        let section: String
+
+        var sourceLabel: String {
+            switch content {
+            case let .event(event): event.sourceLabel
+            case let .company(company): company.name
+            }
+        }
 
         var text: String? {
             switch content {
@@ -84,49 +149,37 @@ struct TodayBriefProjection: Sendable {
     fileprivate let cards: [Card]
     let sourceIDs: [Int]
     private(set) var sources: [Int: TodaySourcePresentation] = [:]
-    private(set) var avatars: [URL: UIImage] = [:]
     private(set) var previews: [URL: UIImage] = [:]
-    var preparedImageCount: Int { avatars.count + previews.count }
+    private(set) var hasPreparedPreviews = false
 
-    private enum ReadingImage: Hashable, Sendable {
-        case avatar(URL)
-        case preview(URL)
+    var avatarURLs: [URL] {
+        cards.flatMap { card in
+            let companyAvatar: URL?
+            if case .company(let company) = card.content, case .remote(let url) = company.avatar {
+                companyAvatar = url
+            } else {
+                companyAvatar = nil
+            }
+            return [companyAvatar].compactMap { $0 } + card.postIDs.flatMap { id in
+                [sources[id]?.avatarURL, sources[id]?.quoteAvatarURL].compactMap { $0 }
+            }
+        }
     }
 
     @MainActor
-    mutating func prepareImages() async {
-        var seen = Set(avatars.keys.map(ReadingImage.avatar) + previews.keys.map(ReadingImage.preview))
-        var pending: [ReadingImage] = []
-        for card in cards {
-            if case .company(let company) = card.content, case .remote(let url?) = company.avatar {
-                pending.append(.avatar(url))
-            }
-            for id in card.postIDs {
-                guard let source = sources[id] else { continue }
-                pending += [source.avatarURL, source.quoteAvatarURL].compactMap { $0.map(ReadingImage.avatar) }
-                pending += source.previewURLs.map(ReadingImage.preview)
-            }
-        }
-
+    mutating func preparePreviews() async {
+        var seen = Set(previews.keys)
         let scale = UIScreen.main.scale
-        let requests: [(ReadingImage, ImageLoader.Request)] = pending.compactMap { image in
-            guard seen.insert(image).inserted else { return nil }
-            switch image {
-            case .avatar(let url):
-                return ImageLoader.avatarRequest(url, size: 44).map { (image, $0) }
-            case .preview(let url):
-                let resolved = ImageLoader.request(for: url, targetSize: nil, scale: scale)
-                let request = ImageLoader.Request(url: resolved.url, pixelLimit: 640, scale: scale)
-                return (image, request)
-            }
+        let requests = cards.flatMap { card in
+            card.postIDs.flatMap { sources[$0]?.previewURLs ?? [] }
+        }.compactMap { url -> (URL, ImageLoader.Request)? in
+            guard seen.insert(url).inserted else { return nil }
+            let resolved = ImageLoader.request(for: url, targetSize: nil, scale: scale)
+            return (url, ImageLoader.Request(url: resolved.url, pixelLimit: 640, scale: scale))
         }
         let prepared = await ImageLoader.prepareReadingImages(requests)
-        for (key, image) in prepared {
-            switch key {
-            case .avatar(let url): avatars[url] = image
-            case .preview(let url): previews[url] = image
-            }
-        }
+        previews.merge(prepared) { saved, _ in saved }
+        hasPreparedPreviews = true
     }
 
     mutating func addSources(_ posts: [Int: Post]) {
@@ -141,24 +194,58 @@ struct TodayBriefProjection: Sendable {
         date = edition.date
         isPartial = report.completenessStatus == "partial"
         let overview = report.overview
-        let highlights = overview.highlights.map { TodayReadingEvent.highlight($0, systems: systems) }
-        let watchItems = overview.watchItems.map { TodayReadingEvent.highlight($0, systems: systems) }
+        var remainingWatches = overview.watchItems.map { item in
+            (item: item, key: FollowUpKey(systems: item.systemKeys, posts: item.postIDs, body: item.context))
+        }
+        func takeFollowUps(for key: FollowUpKey?) -> [String] {
+            guard let key else { return [] }
+            let matched = remainingWatches.filter { $0.key == key }
+            remainingWatches.removeAll { $0.key == key }
+            return TodayReadingEvent.unique(matched.map(\.item.text))
+        }
+
+        var highlightedFollowUps: [String: Set<String>] = [:]
+        let highlights = overview.highlights.map { item in
+            let event = TodayReadingEvent.highlight(item, systems: systems)
+            let key = FollowUpKey(systems: item.systemKeys, posts: item.postIDs, body: item.text)
+            let followUps = takeFollowUps(for: key)
+            for system in item.systemKeys {
+                highlightedFollowUps[system, default: []].formUnion(followUps.map(TodayReadingEvent.canonical))
+            }
+            return Card(
+                id: "highlight-" + event.id, content: .event(event), followUps: followUps,
+                title: item.title, section: "重点"
+            )
+        }
         var companyCards: [Card] = []
         for section in report.sections {
-            let eligibleIDs = Set(TodayOverviewSelection.supplementarySystems(in: section, overview: overview).map(\.id))
+            let eligibleIDs = Set(TodayOverviewSelection.supplementarySystems(
+                in: section, overview: overview, highlightedFollowUps: highlightedFollowUps
+            ).map(\.id))
             for group in section.groups {
                 for system in group.systems where eligibleIDs.contains(system.id) {
-                    let company = CompanyCard(system)
+                    let fact = system.facts.first { !TodayReadingEvent.canonical($0.text).isEmpty }
+                    let key = fact.flatMap {
+                        FollowUpKey(systems: [system.systemKey], posts: $0.postIDs, body: $0.text)
+                    }
                     companyCards.append(Card(
                         id: "company-\(section.id)-\(group.id)-\(system.id)",
-                        content: .company(company)
+                        content: .company(CompanyCard(system, fact: fact)),
+                        followUps: takeFollowUps(for: key),
+                        title: system.headline,
+                        section: section.sectionName
                     ))
                 }
             }
         }
-        cards = highlights.map { Card(id: "highlight-" + $0.id, content: .event($0)) }
-            + companyCards
-            + watchItems.map { Card(id: "watch-" + $0.id, content: .event($0)) }
+        let standaloneWatches = remainingWatches.map { watch in
+            let event = TodayReadingEvent.highlight(watch.item, systems: systems)
+            return Card(
+                id: "watch-" + event.id, content: .event(event), followUps: [],
+                title: watch.item.title, section: "后续关注"
+            )
+        }
+        cards = highlights + companyCards + standaloneWatches
         sourceIDs = Set(cards.flatMap(\.postIDs)).sorted()
     }
 }
@@ -166,7 +253,8 @@ struct TodayBriefProjection: Sendable {
 struct TodayBriefOverviewView: View {
     let brief: TodayBriefProjection
     let viewport: CGSize
-    let isRefreshing: Bool
+    let isLoadingSources: Bool
+    let isHeaderPanelOpen: Bool
     let retryReport: () async -> Void
 
     var body: some View {
@@ -178,7 +266,10 @@ struct TodayBriefOverviewView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(TodayBriefStyle.horizontalInset)
             } else {
-                TodayBriefDeck(brief: brief, viewport: viewport, isRefreshing: isRefreshing, retryReport: retryReport)
+                TodayBriefDeck(
+                    brief: brief, viewport: viewport, isLoadingSources: isLoadingSources,
+                    isHeaderPanelOpen: isHeaderPanelOpen, retryReport: retryReport
+                )
             }
         }
         .accessibilityIdentifier("today-overview")
@@ -189,18 +280,18 @@ private struct TodayOriginalsPanel: View {
     @AccessibilityFocusState private var headingFocused: Bool
     @State private var headerHeight: CGFloat?
     @State private var contentHeight: CGFloat?
+    @State private var selectedSourceID: Int?
 
     let sources: [TodaySourcePresentation]
-    let avatars: [URL: UIImage]
     let referenceCount: Int
     let width: CGFloat
     let isCurrent: Bool
-    let isRefreshing: Bool
+    let isLoadingSources: Bool
     let retryReport: () async -> Void
     let measure: (CGFloat) -> Void
 
-    private var singleSource: TodaySourcePresentation? {
-        referenceCount == 1 ? sources.first : nil
+    private var selectedSource: TodaySourcePresentation? {
+        sources.first { $0.id == selectedSourceID } ?? sources.first
     }
 
     private var naturalHeight: CGFloat? {
@@ -210,38 +301,70 @@ private struct TodayOriginalsPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Group {
-                if let singleSource {
-                    TodaySourceAuthorView(source: singleSource, image: singleSource.avatarURL.flatMap { avatars[$0] })
-                } else {
-                    Text("原文").font(.headline)
+            VStack(alignment: .leading, spacing: 0) {
+                Group {
+                    if let selectedSource {
+                        TodaySourceAuthorView(source: selectedSource)
+                    } else {
+                        Text("来源").font(.headline)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .padding(.trailing, 44)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityFocused($headingFocused)
+                if sources.count > 1, let selectedSource {
+                    HStack {
+                        Text("来源").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Menu {
+                            ForEach(sources) { source in
+                                let label = [source.author, source.time].compactMap { $0 }.joined(separator: " · ")
+                                Button {
+                                    selectedSourceID = source.id
+                                } label: {
+                                    if source.id == selectedSource.id {
+                                        Label(label, systemImage: "checkmark")
+                                    } else {
+                                        Text(label)
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text(selectedSource.author)
+                                    .lineLimit(1)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption2)
+                            }
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(TodayBriefStyle.accent)
+                            .padding(.horizontal, 10)
+                            .frame(minHeight: 36)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .strokeBorder(TodayBriefStyle.surfaceOutline)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .accessibilityLabel("选择来源")
+                        .accessibilityValue([selectedSource.author, selectedSource.time].compactMap { $0 }.joined(separator: "，"))
+                    }
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .padding(.trailing, 44)
             .padding(.horizontal, TodayBriefStyle.horizontalInset)
             .padding(.vertical, 9)
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(.isHeader)
-            .accessibilityFocused($headingFocused)
             .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { headerHeight = $0 }
             TodayBriefStyle.rule.frame(height: 1)
                 .padding(.horizontal, TodayBriefStyle.horizontalInset)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    ForEach(sources) { source in
-                        if source.id != sources.first?.id {
-                            Divider()
-                        }
-                        if singleSource == nil {
-                            TodaySourceAuthorView(source: source, image: source.avatarURL.flatMap { avatars[$0] })
-                                .accessibilityAddTraits(.isHeader)
-                        }
+                    if let source = selectedSource {
                         TodayInlineSourceView(
                             source: source,
-                            quoteAvatar: source.quoteAvatarURL.flatMap { avatars[$0] },
-                            width: max(1, width - TodayBriefStyle.horizontalInset * 2)
+                            width: max(1, width - TodayBriefStyle.horizontalInset * 2),
+                            allowsTranslation: isCurrent
                         )
                     }
                     sourceStatus
@@ -250,6 +373,7 @@ private struct TodayOriginalsPanel: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { contentHeight = $0 }
             }
+            .id(selectedSource?.id)
             .scrollBounceBehavior(.basedOnSize)
             .scrollIndicators(.hidden)
         }
@@ -264,12 +388,15 @@ private struct TodayOriginalsPanel: View {
     private var sourceStatus: some View {
         let missing = referenceCount - sources.count
         if referenceCount == 0 {
-            Text("暂无原文").font(.footnote).foregroundStyle(.secondary)
+            Text("暂无来源内容").font(.footnote).foregroundStyle(.secondary)
+        } else if missing > 0, isLoadingSources {
+            ProgressView("正在加载来源").controlSize(.small)
+                .font(.footnote)
         } else if missing > 0 {
             HStack {
-                Text("\(missing) 篇原文暂不可用").font(.footnote).foregroundStyle(.secondary)
+                Text("\(missing) 条来源暂不可用").font(.footnote).foregroundStyle(.secondary)
                 Spacer(minLength: 8)
-                TodayReportRetryButton(isRefreshing: isRefreshing, retry: retryReport)
+                TodayReportRetryButton(isRefreshing: false, retry: retryReport)
             }
         }
     }
@@ -292,34 +419,30 @@ private struct TodayReportRetryButton: View {
     }
 }
 
-private struct TodayBriefCardButtonStyle: PrimitiveButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .onTapGesture { configuration.trigger() }
-            .accessibilityAction { configuration.trigger() }
-    }
-}
-
 private struct TodayBriefDeck: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.rootTabIsActive) private var rootTabIsActive
     @State private var selectedIndex = 0
     @State private var showsOriginals = false
+    @State private var showsDirectory = false
     @State private var originalsHeights: [String: CGFloat] = [:]
-    @State private var readingHeight: CGFloat?
-    @State private var dragAxis: DragAxis?
-    @State private var shuffle: Shuffle?
-    @State private var isSettling = false
-    @GestureState private var isDragging = false
+    @State private var summaryHeights: [String: CGFloat] = [:]
+    @State private var settlement: Settlement?
+    @GestureState private var drag: Drag?
 
     let brief: TodayBriefProjection
     let viewport: CGSize
-    let isRefreshing: Bool
+    let isLoadingSources: Bool
+    let isHeaderPanelOpen: Bool
     let retryReport: () async -> Void
 
     private enum DragAxis {
         case horizontal
         case vertical
+
+        init(_ translation: CGSize) {
+            self = abs(translation.width) > abs(translation.height) ? .horizontal : .vertical
+        }
     }
 
     private struct Shuffle {
@@ -327,102 +450,289 @@ private struct TodayBriefDeck: View {
         var progress: CGFloat = 0
     }
 
-    fileprivate static let layerSpacing: CGFloat = 15
+    private struct Drag {
+        let selection: Int
+        let axis: DragAxis
+        var shuffle: Shuffle?
+    }
+
+    private struct Settlement {
+        let id = UUID()
+        var shuffle: Shuffle
+    }
+
+    private var shuffle: Shuffle? {
+        settlement?.shuffle ?? (drag?.selection == selectedIndex ? drag?.shuffle : nil)
+    }
+
+    fileprivate static let layerSpacing: CGFloat = 7
     private let shape = RoundedRectangle(cornerRadius: TodayBriefStyle.cardCornerRadius)
 
     var body: some View {
-        let deckPadding: CGFloat = 30
-        let toolsHeight = TodayBriefStyle.toolsRowHeight + TodayBriefStyle.toolsSpacing
-        let backLayers = min(2, brief.cards.count - 1)
+        let backLayers = min(1, brief.cards.count - 1)
         let stackHeight = CGFloat(backLayers) * Self.layerSpacing
-        let maximumHeight = max(0, viewport.height - toolsHeight - deckPadding - stackHeight)
-        let cardHeight = min(468, maximumHeight)
+        let stagePadding: CGFloat = 26
+        let maximumHeight = max(210, viewport.height - 52 - stagePadding - stackHeight)
         let cardWidth = min(max(0, viewport.width - TodayBriefStyle.horizontalInset * 2), TodayBriefStyle.maximumCardWidth)
         let selection = min(selectedIndex, brief.cards.count - 1)
-        Group {
-            if showsOriginals {
-                originalsDeck(selection: selection, width: cardWidth, maximumHeight: maximumHeight, backLayers: backLayers)
-            } else {
-                TodayBriefDeckLayers(
-                    selection: selection,
-                    cardCount: brief.cards.count,
-                    cardWidth: cardWidth,
-                    viewportWidth: viewport.width,
-                    direction: shuffle?.direction ?? 1,
-                    progress: shuffle?.progress ?? 0
-                ) { index, contentOpacity, shadowOpacity in
-                    let card = brief.cards[index]
-                    cardLayer(card, index: index, selection: selection) {
-                        TodayBriefCardFace(
-                            card: card,
-                            source: card.postIDs.lazy.compactMap { brief.sources[$0] }.first,
-                            avatars: brief.avatars,
-                            compact: cardHeight < 350 || cardWidth < 290
-                        )
-                        .opacity(contentOpacity)
-                        .frame(height: cardHeight)
-                        .modifier(CardSurface(shape: shape, width: cardWidth, shadowOpacity: shadowOpacity))
+        let cardHeight = summaryHeights[brief.cards[selection].id] ?? min(350, maximumHeight)
+        VStack(spacing: 8) {
+            readingProgress(selection: selection, width: cardWidth)
+            ZStack(alignment: .top) {
+                if showsOriginals {
+                    Color.clear.contentShape(Rectangle())
+                        .onTapGesture { setOriginals(false) }
+                        .accessibilityHidden(true)
+                }
+                summaryDeck(selection: selection, width: cardWidth, height: cardHeight, maximumHeight: maximumHeight)
+                    .opacity(showsOriginals ? 0 : 1)
+                    .allowsHitTesting(!showsOriginals)
+                    .accessibilityHidden(showsOriginals)
+                if showsOriginals {
+                    originalsDeck(selection: selection, width: cardWidth, maximumHeight: maximumHeight, backLayers: backLayers)
+                        .transition(.opacity)
+                }
+            }
+            .padding(.top, 6)
+            .frame(width: viewport.width, height: max(maximumHeight, cardHeight) + stackHeight + stagePadding, alignment: .top)
+            .clipped()
+            .contentShape(Rectangle())
+            .simultaneousGesture(swipeGesture(cardWidth: cardWidth), including: showsDirectory ? .none : .all)
+            .accessibilityHidden(showsDirectory)
+            .overlay(alignment: .top) {
+                if showsDirectory {
+                    ZStack(alignment: .top) {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture { showsDirectory = false }
+                            .accessibilityHidden(true)
+                        directory(selection: selection)
+                            .frame(width: cardWidth)
+                            .modifier(TodayMenuSurface())
+                            .padding(.top, 6)
                     }
-                    .id(card.id)
                 }
             }
         }
-        .padding(.top, 12)
-        .frame(width: viewport.width, height: (showsOriginals ? maximumHeight : cardHeight) + stackHeight + deckPadding, alignment: .top)
-        .clipped()
-        .background {
-            if showsOriginals {
-                Color.clear.contentShape(Rectangle())
-                    .onTapGesture { setOriginals(false) }
-                    .accessibilityHidden(true)
+        .onChange(of: brief.cards.map(\.id)) { previous, current in
+            if let id = previous.indices.contains(selectedIndex) ? previous[selectedIndex] : nil,
+               let index = current.firstIndex(of: id) {
+                selectedIndex = index
+            } else {
+                selectedIndex = min(selectedIndex, max(0, current.count - 1))
             }
+            settlement = nil
+            summaryHeights = summaryHeights.filter { current.contains($0.key) }
+            originalsHeights = originalsHeights.filter { current.contains($0.key) }
         }
-        .contentShape(Rectangle())
-        .simultaneousGesture(swipeGesture(cardWidth: cardWidth))
-        .onChange(of: isDragging) { _, dragging in
-            if !dragging {
-                dragAxis = nil
-                finishShuffle(commit: false)
-            }
+        .onChange(of: isHeaderPanelOpen) { _, open in
+            if open { showsDirectory = false }
         }
         .onChange(of: rootTabIsActive) { _, active in
-            if !active { endOriginals() }
+            if !active {
+                showsDirectory = false
+                settlement = nil
+                endOriginals()
+            }
         }
         .accessibilityIdentifier("today-card-pager")
     }
 
+    private func summaryDeck(selection: Int, width: CGFloat, height: CGFloat, maximumHeight: CGFloat) -> some View {
+        let lastIndex = brief.cards.count - 1
+        let next = shuffle.flatMap { adjacentIndex(from: selection, direction: $0.direction) }
+        let promotion = shuffle?.progress ?? 0
+        return ZStack(alignment: .top) {
+            if brief.cards.count > 1, selection == lastIndex || next == lastIndex {
+                let opacity = selection == lastIndex ? 1 - promotion : promotion
+                let lastHeight = summaryHeights[brief.cards[lastIndex].id] ?? height
+                backingCard(width: width, height: lastHeight)
+                    .opacity(opacity)
+            }
+            summaryCards(selection: selection, width: width, height: height, maximumHeight: maximumHeight)
+        }
+    }
+
+    private func summaryCards(selection: Int, width: CGFloat, height: CGFloat, maximumHeight: CGFloat) -> some View {
+        TodayBriefDeckLayers(
+            selection: selection,
+            cardCount: brief.cards.count,
+            cardWidth: width,
+            viewportWidth: viewport.width,
+            frontHeight: height,
+            cardHeight: { summaryHeights[brief.cards[$0].id] },
+            direction: showsOriginals ? 1 : shuffle?.direction ?? 1,
+            progress: showsOriginals ? 0 : shuffle?.progress ?? 0
+        ) { index, visibleHeight, contentOpacity, depth in
+            let card = brief.cards[index]
+            TodayBriefCardFace(
+                card: card,
+                source: card.postIDs.lazy.compactMap { brief.sources[$0] }.first,
+                maximumHeight: maximumHeight,
+                openSource: { setOriginals(true) }
+            )
+            .frame(width: width)
+            .fixedSize(horizontal: false, vertical: true)
+            .onGeometryChange(for: CGFloat.self, of: { ceil($0.size.height) }) { measured in
+                if summaryHeights[card.id] != measured { summaryHeights[card.id] = measured }
+            }
+            .opacity(contentOpacity)
+            .frame(height: visibleHeight, alignment: .top)
+            .clipShape(shape)
+            .modifier(CardSurface(
+                shape: shape, width: width, shadowOpacity: 0.07 - 0.045 * depth, backingDepth: depth
+            ))
+            .allowsHitTesting(index == selection)
+            .accessibilityHidden(index != selection)
+            .accessibilityIdentifier("today-card-\(card.id)")
+            .id(card.id)
+        }
+    }
+
+    private func readingProgress(selection: Int, width: CGFloat) -> some View {
+        HStack(spacing: 10) {
+            Button { showsDirectory.toggle() } label: {
+                HStack(spacing: 6) {
+                    Text("\(selection + 1) / \(brief.cards.count)").monospacedDigit()
+                    Image(systemName: "list.bullet").accessibilityHidden(true)
+                }
+                .font(.subheadline.weight(.semibold))
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(TodayBriefStyle.accent)
+            .accessibilityLabel("本期目录")
+            .accessibilityValue("第 \(selection + 1) 张，共 \(brief.cards.count) 张")
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment: advance(1)
+                case .decrement: advance(-1)
+                @unknown default: break
+                }
+            }
+            .accessibilityIdentifier("today-card-position")
+
+            GeometryReader { track in
+                Capsule().fill(TodayBriefStyle.accent.opacity(0.10))
+                    .overlay(alignment: .leading) {
+                        Capsule().fill(TodayBriefStyle.accent)
+                            .frame(width: track.size.width * CGFloat(selection + 1) / CGFloat(brief.cards.count))
+                    }
+            }
+            .frame(height: 3)
+            .accessibilityHidden(true)
+            if selection == brief.cards.count - 1 {
+                Text("本期末尾")
+                    .font(.caption)
+                    .foregroundStyle(TodayBriefStyle.accent)
+                    .fixedSize()
+            }
+        }
+        .frame(width: width)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: selection)
+    }
+
+    private func directory(selection: Int) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("本期目录").font(.headline).accessibilityAddTraits(.isHeader)
+                Spacer()
+                Button { showsDirectory = false } label: {
+                    Image(systemName: "xmark")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("关闭目录")
+            }
+            .padding(.leading, 10)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(Array(brief.cards.enumerated()), id: \.element.id) { index, card in
+                            Button {
+                                settlement = nil
+                                selectedIndex = index
+                                showsDirectory = false
+                            } label: {
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    Text("\(index + 1)").monospacedDigit()
+                                        .foregroundStyle(TodayBriefStyle.accent)
+                                        .frame(minWidth: 22, alignment: .leading)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(card.title ?? card.text ?? card.sourceLabel)
+                                            .lineLimit(2)
+                                        if !card.sourceLabel.isEmpty {
+                                            Text(card.sourceLabel).font(.caption).foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    Spacer(minLength: 0)
+                                }
+                                .font(.subheadline)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .frame(minHeight: 44, alignment: .leading)
+                                .background(
+                                    TodayBriefStyle.accent.opacity(index == selection ? 0.1 : 0),
+                                    in: RoundedRectangle(cornerRadius: 8)
+                                )
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityAddTraits(index == selection ? .isSelected : [])
+                            .id(card.id)
+                        }
+                    }
+                }
+                .onAppear { proxy.scrollTo(brief.cards[selection].id, anchor: .center) }
+            }
+            .scrollIndicators(.hidden)
+            .frame(height: min(CGFloat(brief.cards.count) * 56, 272))
+        }
+        .padding([.horizontal, .bottom], 10)
+        .accessibilityIdentifier("today-card-directory")
+    }
+
     private func swipeGesture(cardWidth: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 14)
-            .updating($isDragging) { _, dragging, _ in dragging = true }
-            .onChanged { value in
-                guard brief.cards.count > 1, !isSettling else { return }
-                let horizontal = value.translation.width
-                if dragAxis == nil {
-                    dragAxis = abs(horizontal) > abs(value.translation.height) ? .horizontal : .vertical
+            .updating($drag) { value, state, _ in
+                guard settlement == nil, brief.cards.count > 1 else { return }
+                var current = state ?? Drag(selection: selectedIndex, axis: DragAxis(value.translation))
+                if current.axis == .horizontal, current.selection == selectedIndex {
+                    current.shuffle = swipe(for: value.translation.width, cardWidth: cardWidth)
                 }
-                guard dragAxis == .horizontal else { return }
-                let progress = reduceMotion ? 0 : min(1, abs(horizontal) / max(1, cardWidth * 0.84))
-                shuffle = Shuffle(direction: horizontal < 0 ? 1 : -1, progress: progress)
+                state = current
             }
             .onEnded { value in
-                defer { dragAxis = nil }
-                guard dragAxis == .horizontal else { return }
                 let horizontal = value.translation.width
+                guard (drag?.axis ?? DragAxis(value.translation)) == .horizontal,
+                      let swipe = swipe(for: horizontal, cardWidth: cardWidth) else { return }
                 let projected = value.predictedEndTranslation.width
-                let movedFarEnough = abs(horizontal) >= max(48, cardWidth * 0.22)
+                let movedFarEnough = abs(horizontal) >= max(40, cardWidth * 0.18)
                 let flicked = abs(horizontal) >= 22 && horizontal * projected > 0 && abs(projected) >= cardWidth * 0.46
-                finishShuffle(commit: movedFarEnough || flicked)
+                finishShuffle(swipe, commit: movedFarEnough || flicked)
             }
+    }
+
+    private func swipe(for translation: CGFloat, cardWidth: CGFloat) -> Shuffle? {
+        guard translation != 0 else { return nil }
+        let direction = translation < 0 ? 1 : -1
+        guard adjacentIndex(from: selectedIndex, direction: direction) != nil else { return nil }
+        let progress = reduceMotion ? 0 : min(1, abs(translation) / max(1, cardWidth * 0.84))
+        return Shuffle(direction: direction, progress: progress)
     }
 
     private func advance(_ direction: Int) {
-        guard brief.cards.count > 1, shuffle == nil else { return }
-        shuffle = Shuffle(direction: direction)
-        finishShuffle(commit: true)
+        guard shuffle == nil else { return }
+        finishShuffle(Shuffle(direction: direction), commit: true)
     }
 
-    private func adjacentIndex(from selection: Int, direction: Int) -> Int {
-        (selection + direction + brief.cards.count) % brief.cards.count
+    private func adjacentIndex(from selection: Int, direction: Int) -> Int? {
+        let index = selection + direction
+        return brief.cards.indices.contains(index) ? index : nil
     }
 
     private func setOriginals(_ visible: Bool) {
@@ -435,112 +745,72 @@ private struct TodayBriefDeck: View {
 
     private func endOriginals() {
         showsOriginals = false
-        readingHeight = nil
-        originalsHeights.removeAll(keepingCapacity: true)
     }
 
-    private func growReader(to height: CGFloat) {
-        guard showsOriginals, height > (readingHeight ?? 0) else { return }
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
-            readingHeight = height
-        }
-    }
+    private func finishShuffle(_ swipe: Shuffle, commit: Bool) {
+        guard settlement == nil, let destination = adjacentIndex(from: selectedIndex, direction: swipe.direction) else { return }
+        let next = commit ? destination : nil
+        let target: CGFloat = next == nil ? 0 : 1
+        let remaining = abs(target - swipe.progress)
 
-    private func finishShuffle(commit: Bool) {
-        guard let shuffle, !isSettling, brief.cards.count > 1 else { return }
-        let count = brief.cards.count
-        let selection = min(selectedIndex, count - 1)
-        let next = adjacentIndex(from: selection, direction: shuffle.direction)
-        let target: CGFloat = commit ? 1 : 0
-
-        if reduceMotion || abs(target - shuffle.progress) < 0.001 {
-            completeShuffle(commit ? next : nil)
+        if reduceMotion || remaining < 0.001 {
+            completeShuffle(next)
             return
         }
 
-        isSettling = true
-        let duration = (showsOriginals ? 0.29 : 0.62) * max(0.36, abs(target - shuffle.progress))
-        withAnimation(.easeInOut(duration: duration), completionCriteria: .logicallyComplete) {
-            self.shuffle?.progress = target
+        let pending = Settlement(shuffle: swipe)
+        settlement = pending
+        let duration = (showsOriginals ? 0.28 : 0.40) * max(0.45, remaining)
+        let animation: Animation = showsOriginals
+            ? .easeOut(duration: duration)
+            : .timingCurve(0.24, 0.16, 0.31, 1, duration: duration)
+        withAnimation(animation, completionCriteria: .logicallyComplete) {
+            settlement?.shuffle.progress = target
         } completion: {
-            completeShuffle(commit ? next : nil)
+            if settlement?.id == pending.id { completeShuffle(next) }
         }
     }
 
     private func completeShuffle(_ next: Int?) {
-        if let next { selectedIndex = next }
-        shuffle = nil
-        isSettling = false
-        if showsOriginals, readingHeight == nil { readingHeight = 211 }
-        let selection = min(selectedIndex, brief.cards.count - 1)
-        if let height = originalsHeights[brief.cards[selection].id] { growReader(to: height) }
-    }
-
-    @ViewBuilder
-    private func cardLayer<Surface: View>(
-        _ card: TodayBriefProjection.Card, index: Int, selection: Int, @ViewBuilder surface: () -> Surface
-    ) -> some View {
-        if index == selection {
-            Button { setOriginals(true) } label: { surface() }
-                .buttonStyle(TodayBriefCardButtonStyle())
-                .accessibilityHint("查看原文")
-                .accessibilityValue("第 \(index + 1) 张，共 \(brief.cards.count) 张")
-                .accessibilityAdjustableAction { direction in
-                    switch direction {
-                    case .increment: advance(1)
-                    case .decrement: advance(-1)
-                    @unknown default: break
-                    }
-                }
-                .accessibilityIdentifier("today-card-\(card.id)")
-                .transition(.identity)
-        } else {
-            surface()
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-                .transition(.identity)
+        withTransaction(Transaction(animation: nil)) {
+            if let next { selectedIndex = next }
+            settlement = nil
         }
     }
 
     private func originalsDeck(selection: Int, width: CGFloat, maximumHeight: CGFloat, backLayers: Int) -> some View {
-        let height = min(maximumHeight, readingHeight ?? 211)
-        let next = shuffle.map { adjacentIndex(from: selection, direction: $0.direction) }
+        let height = min(420, maximumHeight, originalsHeights[brief.cards[selection].id] ?? 211)
+        let next = shuffle.flatMap { adjacentIndex(from: selection, direction: $0.direction) }
 
         return ZStack(alignment: .top) {
-            ForEach((1..<(backLayers + 1)).reversed(), id: \.self) { layer in
-                let depth = CGFloat(layer)
-                Color.clear.frame(height: height)
-                    .modifier(CardSurface(shape: shape, width: width, shadowOpacity: 0.06))
-                    .scaleEffect(1 - 0.03 * depth, anchor: .bottom)
-                    .offset(x: 16 * depth, y: Self.layerSpacing * depth)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
+            if backLayers > 0 {
+                backingCard(width: width, height: height)
             }
 
             OriginalsPages(
                 selection: selection, next: next, direction: shuffle?.direction ?? 1,
-                width: width, height: height, progress: shuffle?.progress ?? 0
+                width: width, height: height, progress: shuffle?.progress ?? 0,
+                heightAnimation: reduceMotion ? nil : .easeOut(duration: 0.2)
             ) { index in
                 let card = brief.cards[index]
                 TodayOriginalsPanel(
                     sources: card.postIDs.compactMap { brief.sources[$0] },
-                    avatars: brief.avatars,
                     referenceCount: card.postIDs.count,
                     width: width,
                     isCurrent: index == selection,
-                    isRefreshing: isRefreshing,
+                    isLoadingSources: isLoadingSources,
                     retryReport: retryReport,
                     measure: { reportedHeight in
-                        guard showsOriginals else { return }
-                        originalsHeights[card.id] = reportedHeight
-                        if index == selection && shuffle == nil { growReader(to: reportedHeight) }
+                        if showsOriginals, originalsHeights[card.id] != reportedHeight {
+                            originalsHeights[card.id] = reportedHeight
+                        }
                     }
                 )
                 .environment(\.preparedReadingMedia, brief.previews)
                 .id(card.id)
             }
             .clipShape(shape)
-            .modifier(CardSurface(shape: shape, width: width, shadowOpacity: 0.14))
+            .modifier(CardSurface(shape: shape, width: width, shadowOpacity: 0.07))
             .overlay(alignment: .topTrailing) {
                 Button { setOriginals(false) } label: {
                     Image(systemName: "xmark")
@@ -552,29 +822,43 @@ private struct TodayBriefDeck: View {
                 .foregroundStyle(.secondary)
                 .padding(.top, 9)
                 .padding(.trailing, TodayBriefStyle.horizontalInset)
-                .accessibilityLabel("关闭原文")
+                .accessibilityLabel("关闭阅读")
                 .accessibilityIdentifier("today-close-originals")
             }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("today-originals-panel")
             .accessibilityAction(.escape) { setOriginals(false) }
-            .accessibilityAction(named: Text("下一张原文")) { advance(1) }
-            .accessibilityAction(named: Text("上一张原文")) { advance(-1) }
+            .accessibilityAction(named: Text("下一张")) { advance(1) }
+            .accessibilityAction(named: Text("上一张")) { advance(-1) }
         }
-        .offset(x: -CGFloat(backLayers) * 4)
+        .offset(x: -CGFloat(backLayers) * 2)
+    }
+
+    private func backingCard(width: CGFloat, height: CGFloat) -> some View {
+        Color.clear.frame(height: height)
+            .modifier(CardSurface(shape: shape, width: width, shadowOpacity: 0.025, backingDepth: 1))
+            .scaleEffect(0.988, anchor: .bottom)
+            .rotationEffect(.degrees(0.7))
+            .offset(x: 7, y: Self.layerSpacing)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 
     private struct CardSurface: ViewModifier {
         let shape: RoundedRectangle
         let width: CGFloat
         let shadowOpacity: CGFloat
+        var backingDepth: CGFloat = 0
 
         func body(content: Content) -> some View {
             content
                 .frame(width: width)
                 .background {
                     shape.fill(TodayBriefStyle.surface)
-                        .shadow(color: TodayBriefStyle.accent.opacity(shadowOpacity), radius: 13, x: 0, y: 6)
+                        .overlay {
+                            shape.fill(TodayBriefStyle.accent.opacity(0.025 * backingDepth))
+                        }
+                        .shadow(color: TodayBriefStyle.accent.opacity(shadowOpacity), radius: 8, x: 0, y: 3)
                 }
                 .overlay { shape.strokeBorder(TodayBriefStyle.surfaceOutline).allowsHitTesting(false) }
                 .contentShape(shape)
@@ -589,6 +873,7 @@ private struct OriginalsPages<Page: View>: View, Animatable {
     let width: CGFloat
     let height: CGFloat
     var progress: CGFloat
+    let heightAnimation: Animation?
     @ViewBuilder let page: (Int) -> Page
 
     var animatableData: CGFloat {
@@ -601,7 +886,9 @@ private struct OriginalsPages<Page: View>: View, Animatable {
             ForEach([selection] + [next].compactMap { $0 }, id: \.self) { index in
                 let isCurrent = index == selection
                 page(index)
-                    .frame(width: width, height: height, alignment: .top)
+                    .animation(heightAnimation) { view in
+                        view.frame(width: width, height: height, alignment: .top)
+                    }
                     .offset(x: (isCurrent ? -progress : 1 - progress) * CGFloat(direction) * width)
                     .allowsHitTesting(isCurrent)
                     .accessibilityHidden(!isCurrent)
@@ -616,9 +903,11 @@ private struct TodayBriefDeckLayers<Layer: View>: View, Animatable {
     let cardCount: Int
     let cardWidth: CGFloat
     let viewportWidth: CGFloat
+    let frontHeight: CGFloat
+    let cardHeight: (Int) -> CGFloat?
     let direction: Int
     var progress: CGFloat
-    @ViewBuilder let layer: (_ index: Int, _ contentOpacity: CGFloat, _ shadowOpacity: CGFloat) -> Layer
+    @ViewBuilder let layer: (_ index: Int, _ height: CGFloat, _ contentOpacity: CGFloat, _ depth: CGFloat) -> Layer
 
     var animatableData: CGFloat {
         get { progress }
@@ -626,13 +915,17 @@ private struct TodayBriefDeckLayers<Layer: View>: View, Animatable {
     }
 
     var body: some View {
-        let stackSize = min(3, cardCount)
+        let stackSize = min(2, cardCount)
         let front = stack(from: selection, size: stackSize)
-        let destination = stack(from: selection + direction, size: stackSize)
+        let candidate = stack(from: selection + direction, size: stackSize)
+        let destination = candidate.isEmpty ? front : candidate
         let visible = front + destination.filter { !front.contains($0) }
         let fraction = min(1, max(0, progress))
-        let arc = sin(.pi * fraction)
-        let stackInset = CGFloat(stackSize - 1) * 4
+        let promotion = smoothProgress(fraction)
+        let reveal = smoothProgress(fraction / 0.38)
+        let destinationHeight = destination.first.flatMap(cardHeight) ?? frontHeight
+        let promotedHeight = frontHeight + (destinationHeight - frontHeight) * promotion
+        let stackInset = CGFloat(stackSize - 1) * 2
         let entryTravel = (viewportWidth + cardWidth) / 2 + 24
 
         ZStack(alignment: .top) {
@@ -641,85 +934,126 @@ private struct TodayBriefDeckLayers<Layer: View>: View, Animatable {
                 let target = destination.firstIndex(of: index)
                 let sourceDepth = CGFloat(source ?? stackSize - 1)
                 let targetDepth = CGFloat(target ?? stackSize - 1)
-                let isReturning = direction < 0 && target == 0 && fraction > 0
-                let depth = isReturning ? 0 : sourceDepth + (targetDepth - sourceDepth) * fraction
-                let flight = direction > 0 && index == selection ? arc : 0
+                let isEntering = target == 0 && source != 0
+                let isReturning = direction < 0 && isEntering
+                let depth = isReturning ? 0 : sourceDepth + (targetDepth - sourceDepth) * promotion
+                let isLeaving = direction > 0 && index == selection
+                let flight = isLeaving ? fraction : 0
                 let approach = isReturning ? 1 - fraction : 0
-                let rank = (fraction < 0.56 ? source : target) ?? stackSize
-                let rearOpacity = min(1, max(0, (fraction - 0.56) / 0.44))
+                let rank = source ?? stackSize
+                let rearOpacity = smoothProgress((fraction - 0.38) / 0.55)
                 let outgoingOpacity = min(1, (1 - fraction) * 4)
                 let shuffleOpacity = source == nil ? rearOpacity : target == nil ? outgoingOpacity : 1
-                let cardOpacity = isReturning ? min(1, fraction * 8) : shuffleOpacity
-                let textOpacity = min(1, max(0, 1 - depth * 1.54 + flight * 0.75))
-                let shadowOpacity = 0.06 + 0.08 * max(0, 1 - depth)
+                let cardOpacity = isReturning ? 1 : shuffleOpacity
+                let textOpacity = contentOpacity(
+                    source: source, target: target, isReturning: isReturning,
+                    isLeaving: isLeaving, reveal: reveal, promotion: promotion
+                )
 
-                layer(index, textOpacity, shadowOpacity)
-                    .scaleEffect(1 - 0.03 * depth, anchor: .bottom)
-                    .rotationEffect(.degrees(-13 * flight - 6 * approach))
+                layer(index, isLeaving ? frontHeight : promotedHeight, textOpacity, depth)
+                    .scaleEffect(1 - 0.012 * depth, anchor: .bottom)
+                    .rotationEffect(.degrees(0.7 * depth - 13 * flight - 6 * approach))
                     .offset(
-                        x: 16 * depth - stackInset - 0.92 * cardWidth * flight - entryTravel * approach,
+                        x: 7 * depth - stackInset - entryTravel * (flight + approach),
                         y: TodayBriefDeck.layerSpacing * depth - 18 * flight
                     )
                     .opacity(cardOpacity)
-                    .zIndex(isReturning ? 1 : -Double(rank))
+                    .zIndex(isReturning || isLeaving ? 1 : -Double(rank))
                     .transition(.identity)
             }
         }
     }
 
+    private func smoothProgress(_ progress: CGFloat) -> CGFloat {
+        let t = min(1, max(0, progress))
+        return t * t * (3 - 2 * t)
+    }
+
+    private func contentOpacity(
+        source: Int?, target: Int?, isReturning: Bool, isLeaving: Bool,
+        reveal: CGFloat, promotion: CGFloat
+    ) -> CGFloat {
+        if isReturning || isLeaving { return 1 }
+        if target == 0 { return reveal }
+        return source == 0 ? 1 - promotion : 0
+    }
+
     private func stack(from first: Int, size: Int) -> [Int] {
-        (0..<size).map { (first + $0 + cardCount) % cardCount }
+        guard (0..<cardCount).contains(first) else { return [] }
+        return Array(first..<min(cardCount, first + size))
     }
 }
 
 private struct TodayBriefCardFace: View {
+    @State private var identityHeight: CGFloat = 40
+    @State private var followUpHeight: CGFloat = 0
+
     let card: TodayBriefProjection.Card
     let source: TodaySourcePresentation?
-    let avatars: [URL: UIImage]
-    let compact: Bool
+    let maximumHeight: CGFloat
+    let openSource: () -> Void
+
+    private var summary: String? {
+        if let text = card.text, !text.isEmpty { return text }
+        return card.followUps.isEmpty && !card.postIDs.isEmpty ? "暂无摘要" : nil
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: compact ? 14 : 22) {
+        VStack(alignment: .leading, spacing: 14) {
             identity
-
-            if let text = card.text {
-                ViewThatFits(in: .vertical) {
-                    bodyText(text)
-                    ScrollView {
-                        bodyText(text)
-                    }
-                    .scrollIndicators(.hidden)
-                }
-                .frame(maxHeight: .infinity, alignment: .top)
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { identityHeight = $0 }
+            if let summary {
+                TodaySummaryText(
+                    text: summary,
+                    maximumHeight: min(265, max(52, maximumHeight - identityHeight - followUpHeight - 64)),
+                    openSource: openSource
+                )
+            }
+            if !card.followUps.isEmpty {
+                followUps
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: openSource)
+                    .accessibilityAction { openSource() }
+                    .accessibilityHint("打开阅读")
+                    .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { followUpHeight = $0 }
             }
         }
         .multilineTextAlignment(.leading)
-        .padding(compact ? 18 : 24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .clipShape(RoundedRectangle(cornerRadius: TodayBriefStyle.cardCornerRadius))
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var followUps: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("后续关注")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(TodayBriefStyle.accent)
+            ForEach(card.followUps, id: \.self) { text in
+                Text(text)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(3)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 9)
+        .background(TodayBriefStyle.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+        .fixedSize(horizontal: false, vertical: true)
         .accessibilityElement(children: .combine)
     }
 
-    private func bodyText(_ text: String) -> some View {
-        Text(text)
-            .font(compact ? .body : .title2)
-            .foregroundStyle(.primary)
-            .lineSpacing(compact ? 4 : 7)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
     private var identity: some View {
-        let size: CGFloat = compact ? 32 : 40
+        let size: CGFloat = 40
         return HStack(spacing: 10) {
             switch card.content {
             case let .event(event):
                 if let logo = TodaySystemAvatar.Source(companySystemKey: event.companySystemKey) {
-                    TodaySystemAvatar(source: logo, name: event.sourceLabel, size: size, avatars: avatars)
+                    TodaySystemAvatar(source: logo, name: event.sourceLabel, size: size)
                 } else if let source {
                     AvatarView(
-                        url: nil, name: source.author, size: size,
-                        loadingPolicy: .prepared(source.avatarURL.flatMap { avatars[$0] })
+                        url: source.avatarURL, name: source.author, size: size
                     )
                     .accessibilityHidden(true)
                 } else {
@@ -729,16 +1063,79 @@ private struct TodayBriefCardFace: View {
                         .background(.background, in: Circle())
                         .accessibilityHidden(true)
                 }
-                Text(event.sourceLabel.isEmpty ? source?.author ?? "简报" : event.sourceLabel)
             case let .company(company):
-                TodaySystemAvatar(source: company.avatar, name: company.name, size: size, avatars: avatars)
+                TodaySystemAvatar(source: company.avatar, name: company.name, size: size)
                     .accessibilityHidden(true)
-                Text(company.name)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(card.sourceLabel.isEmpty ? source?.author ?? "简报" : card.sourceLabel)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(TodayBriefStyle.accent)
+                Text(card.section)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
-        .font(.subheadline.weight(.semibold))
-        .foregroundStyle(TodayBriefStyle.accent)
         .lineLimit(1)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct TodaySummaryText: View {
+    @ScaledMetric(relativeTo: .body) private var textSize = 18.0
+    @State private var textHeight: CGFloat?
+    @State private var showsFade = false
+    @State private var scrolledFromTop = false
+
+    let text: String
+    let maximumHeight: CGFloat
+    let openSource: () -> Void
+
+    var body: some View {
+        let height = min(textHeight ?? maximumHeight, maximumHeight)
+        ScrollView {
+            Text(text)
+                .font(.system(size: textSize))
+                .foregroundStyle(TodayBriefStyle.ink)
+                .lineSpacing(6)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture(perform: openSource)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { openSource() }
+                .accessibilityHint("打开阅读")
+                .onGeometryChange(for: CGFloat.self, of: { ceil($0.size.height) }) { textHeight = $0 }
+                .onGeometryChange(for: Bool.self, of: {
+                    $0.frame(in: .named("today-summary-viewport")).maxY > height + 1
+                }) { showsFade = $0 }
+                .onGeometryChange(for: Bool.self, of: {
+                    $0.frame(in: .named("today-summary-viewport")).minY < -1
+                }) { scrolledFromTop = $0 }
+        }
+        .coordinateSpace(name: "today-summary-viewport")
+        .frame(height: height)
+        .scrollBounceBehavior(.basedOnSize)
+        .scrollIndicators(.hidden)
+        .overlay(alignment: .top) {
+            if scrolledFromTop {
+                LinearGradient(colors: [TodayBriefStyle.surface, .clear], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 12)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if showsFade && (textHeight ?? 0) > height {
+                LinearGradient(
+                    colors: [.clear, TodayBriefStyle.surface],
+                    startPoint: .top, endPoint: .bottom
+                )
+                .frame(height: 18)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+        }
     }
 }
 
@@ -756,13 +1153,80 @@ enum AliyunRecharge {
 struct TodayEditionNotice {
     let message: String?
     let isPartial: Bool
+    let missingCount: Int?
+    let reasons: [String]
+    let publishedAt: String?
     let canRetry: Bool
+
+    var label: String {
+        if isPartial {
+            if let missingCount { return "\(missingCount) 项缺失" }
+            return "内容不完整"
+        }
+        return "日报状态"
+    }
 }
 
-struct TodayToolsButton: View {
+struct TodayEditionStatusButton: View {
+    let notice: TodayEditionNotice
+    let isOpen: Bool
+    let toggle: () -> Void
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(spacing: 4) {
+                Image(systemName: "info.circle")
+                Text(notice.label)
+                Image(systemName: isOpen ? "chevron.up" : "chevron.down").font(.caption2)
+            }
+            .font(.caption.weight(.medium))
+            .padding(.horizontal, 4)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color(uiColor: UIColor(red: 0.52, green: 0.32, blue: 0.13, alpha: 1)))
+        .accessibilityLabel(notice.label)
+        .accessibilityIdentifier("today-edition-status")
+    }
+}
+
+struct TodayEditionStatusDetails: View {
+    let notice: TodayEditionNotice
+    let isRefreshing: Bool
+    let retry: () async -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if notice.isPartial {
+                Text(notice.label)
+                    .font(.subheadline.weight(.semibold))
+                    .accessibilityIdentifier("today-partial-edition")
+                ForEach(notice.reasons, id: \.self) { reason in
+                    Text(reason)
+                }
+            }
+            if let message = notice.message {
+                Text(message).accessibilityIdentifier("today-cached-edition")
+            }
+            if let publishedAt = notice.publishedAt {
+                Text("本期发布于 \(publishedAt)").foregroundStyle(.secondary)
+            }
+            if notice.canRetry {
+                TodayReportRetryButton(isRefreshing: isRefreshing, retry: retry)
+            }
+        }
+        .font(.footnote)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 15))
+    }
+}
+
+struct TodayToolsMenu<Heading: View, Report: View>: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
-    @State private var showsTools = false
+    @State private var headingHeight: CGFloat = 63
     @State private var rechargeUnavailable = false
     @State private var updateUnavailable = false
     @AppStorage("focus.requestedUpdateRelease") private var requestedUpdateRelease = ""
@@ -772,7 +1236,6 @@ struct TodayToolsButton: View {
     @State private var updateCheckAttempt = 0
     @State private var updateCheckState: UpdateCheckState = .idle
     @State private var availableUpdate: AvailableUpdate?
-    @State private var showsBilling = false
 
     private enum UpdateCheckState {
         case idle, checking, current, updateAvailable, failed
@@ -811,44 +1274,43 @@ struct TodayToolsButton: View {
     }
 
     @Binding var waitingForRechargeReturn: Bool
+    @Binding var showsTools: Bool
     let balance: AliyunAccountBalance?
     let dailyCosts: DisplaySnapshotCache.Entry<AIUsageDailyCosts>?
     let isLoading: Bool
     let needsRetry: Bool
     let retry: () async -> Void
-    let editionNotice: TodayEditionNotice?
-    let isRefreshingReport: Bool
-    let retryReport: () async -> Void
+    let viewport: CGSize
+    @ViewBuilder let heading: () -> Heading
+    @ViewBuilder let report: (CGFloat) -> Report
 
     var body: some View {
-        Button {
-            showsTools.toggle()
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(TodayBriefStyle.accent)
-                .frame(width: 44, height: 44)
-                .background(TodayBriefStyle.surface, in: Circle())
-                .overlay { Circle().strokeBorder(TodayBriefStyle.surfaceOutline) }
-                .overlay(alignment: .topTrailing) {
-                    if editionNotice != nil || availableUpdate != nil {
-                        Circle()
-                            .fill(editionNotice != nil ? Color.orange : TodayBriefStyle.accent)
-                            .frame(width: 7, height: 7)
-                            .padding(4)
-                            .accessibilityHidden(true)
-                    }
-                }
-                .contentShape(Circle())
+        let width = max(0, min(TodayBriefStyle.maximumCardWidth, viewport.width - TodayBriefStyle.horizontalInset * 2))
+        VStack(spacing: 8) {
+            HStack(alignment: .bottom, spacing: 4) {
+                heading()
+                toolsButton
+            }
+            .frame(width: width)
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { headingHeight = $0 }
+            report(headingHeight)
+                .allowsHitTesting(!showsTools)
+                .accessibilityHidden(showsTools)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("今日选项")
-        .accessibilityValue(toolsStatus)
-        .accessibilityHint("查看余额、更新和日报状态")
-        .accessibilityIdentifier("today-tools")
-        .popover(isPresented: $showsTools, arrowEdge: .top) {
-            toolsPanel
-                .presentationCompactAdaptation(.popover)
+        .frame(maxWidth: .infinity, minHeight: max(0, viewport.height), alignment: .top)
+        .overlay(alignment: .top) {
+            if showsTools {
+                ZStack(alignment: .top) {
+                    Color.clear.contentShape(Rectangle())
+                        .onTapGesture { showsTools = false }
+                        .accessibilityHidden(true)
+                    toolsPanel
+                        .frame(width: min(292, width))
+                        .modifier(TodayMenuSurface())
+                        .frame(width: width, alignment: .trailing)
+                }
+                .padding(.top, headingHeight + 5)
+            }
         }
         .task(id: completedUpdateVersion) {
             guard completedUpdateVersion != nil else { return }
@@ -875,10 +1337,31 @@ struct TodayToolsButton: View {
         }
     }
 
-    private var toolsStatus: String {
-        [editionNotice != nil ? "有日报状态提示" : nil, availableUpdate != nil ? "有可用更新" : nil]
-            .compactMap { $0 }
-            .joined(separator: "，")
+    private var toolsButton: some View {
+        Button {
+            showsTools.toggle()
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(TodayBriefStyle.accent)
+                .frame(width: 44, height: 44)
+                .background(TodayBriefStyle.accent.opacity(showsTools ? 0.08 : 0), in: Circle())
+                .overlay(alignment: .topTrailing) {
+                    if availableUpdate != nil {
+                        Circle()
+                            .fill(TodayBriefStyle.accent)
+                            .frame(width: 7, height: 7)
+                            .padding(4)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("今日选项")
+        .accessibilityValue(availableUpdate == nil ? "" : "有可用更新")
+        .accessibilityHint("查看余额、费用、充值和更新")
+        .accessibilityIdentifier("today-tools")
     }
 
     private var toolsPanel: some View {
@@ -886,15 +1369,15 @@ struct TodayToolsButton: View {
             toolsContent
             ScrollView { toolsContent }
                 .scrollBounceBehavior(.basedOnSize)
+                .frame(maxHeight: 320)
         }
-        .frame(width: 292)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("today-tools-panel")
         .onAppear(perform: showCompletedUpdate)
         .alert("无法打开支付宝", isPresented: $rechargeUnavailable) {
             Button("知道了", role: .cancel) {}
         } message: {
-            Text("请在已安装支付宝的 iPhone 上点击「充值」，前往阿里云官方充值页。")
+            Text("请在已安装支付宝的 iPhone 上点击「支付宝充值」，前往阿里云官方充值页。")
         }
         .alert("无法发起安装", isPresented: $updateUnavailable) {
             Button("知道了", role: .cancel) {}
@@ -911,38 +1394,14 @@ struct TodayToolsButton: View {
 
     private var toolsContent: some View {
         VStack(alignment: .leading, spacing: 4) {
-            balanceControl
-            if showsBilling {
-                billingDetails
-            }
+            balanceControl.padding(.bottom, 6)
+            billingDetails
+            rechargeButton
             Divider()
             updateControl
-            if let editionNotice {
-                Divider().padding(.vertical, 6)
-                editionStatus(editionNotice)
-            }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-    }
-
-    private func editionStatus(_ notice: TodayEditionNotice) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if let message = notice.message {
-                Label(message, systemImage: notice.canRetry ? "exclamationmark.circle" : "clock")
-                    .accessibilityIdentifier("today-cached-edition")
-            }
-            if notice.isPartial {
-                Label("本期内容尚不完整", systemImage: "info.circle")
-                    .accessibilityIdentifier("today-partial-edition")
-            }
-            if notice.canRetry {
-                TodayReportRetryButton(isRefreshing: isRefreshingReport, retry: retryReport)
-            }
-        }
-        .font(.footnote)
-        .foregroundStyle(.secondary)
-        .padding(.bottom, 4)
+        .padding(.vertical, 12)
     }
 
     @ViewBuilder
@@ -965,14 +1424,16 @@ struct TodayToolsButton: View {
         VStack(alignment: .leading, spacing: 4) {
             if let availableUpdate { updateButton(availableUpdate) }
             Button { updateCheckAttempt += 1 } label: {
-                Group {
+                HStack(spacing: 8) {
                     if updateCheckState == .checking {
-                        HStack(spacing: 8) {
-                            ProgressView().controlSize(.small)
-                            Text("正在检查更新…")
-                        }
+                        ProgressView().controlSize(.small)
+                        Text("正在检查更新…")
                     } else {
                         Label("检查更新", systemImage: "arrow.clockwise")
+                    }
+                    Spacer(minLength: 0)
+                    if let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String {
+                        Text(version).font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 .modifier(TodayToolActionLabel())
@@ -1108,65 +1569,50 @@ struct TodayToolsButton: View {
     }
 
     private var balanceControl: some View {
-        Button {
-            showsBilling.toggle()
-        } label: {
-            HStack(spacing: 5) {
-                Text("阿里云余额").foregroundStyle(TodayBriefStyle.secondary)
-                Spacer(minLength: 8)
-                Text(balance?.formattedAmount ?? (needsRetry ? "暂不可用" : "—"))
-                    .fontWeight(.semibold)
-                    .monospacedDigit()
-                    .accessibilityIdentifier("today-aliyun-balance")
-                Image(systemName: showsBilling ? "chevron.up" : "chevron.down")
-                    .font(.caption2.weight(.semibold))
-                    .accessibilityHidden(true)
-            }
-            .modifier(TodayToolActionLabel())
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Text("阿里云余额").font(.subheadline.weight(.medium))
+            Spacer(minLength: 8)
+            Text(balance?.formattedAmount ?? (needsRetry ? "暂不可用" : "—"))
+                .font(.title2.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(TodayBriefStyle.accent)
+                .accessibilityIdentifier("today-aliyun-balance")
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("today-billing-details")
-        .accessibilityValue(showsBilling ? "已展开" : "已收起")
     }
 
     private var billingDetails: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 20) {
-                    billingCosts
-                    Spacer(minLength: 0)
-                    rechargeButton
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    billingCosts
-                    rechargeButton
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("模型调用费用").font(.caption.weight(.semibold))
+                if let dailyCosts {
+                    Text("\(TodayBriefDate.timestamp(dailyCosts.savedAt)) 快照")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
             }
-            if needsRetry || isLoading {
-                VStack(alignment: .leading, spacing: 4) {
-                    if let dailyCosts {
-                        Text("账务上次查询于 \(dailyCosts.savedAt, style: .time)")
-                    } else if isLoading {
-                        Text("正在获取账务数据…")
-                    }
-                    if needsRetry && !isLoading {
-                        Button("重新查询") { Task { await retry() } }
-                            .frame(minHeight: 44)
-                    }
-                }.font(.caption)
+            billingCosts
+            if isLoading {
+                ProgressView("正在获取账务数据…").controlSize(.small).font(.caption)
+            } else if needsRetry {
+                Button("重新查询") { Task { await retry() } }
+                    .font(.caption.weight(.medium))
+                    .frame(minHeight: 44)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 4)
-        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 16))
-        .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(TodayBriefStyle.surfaceOutline) }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .foregroundStyle(TodayBriefStyle.accent)
+        .background(TodayBriefStyle.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityIdentifier("today-billing-details")
     }
 
     private var billingCosts: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 20) {
                 costItem("今日花费", amount: dailyCosts?.value.todayCostCNY, identifier: "today-model-cost")
+                Spacer(minLength: 0)
                 costItem("昨日花费", amount: dailyCosts?.value.yesterdayCostCNY, identifier: "yesterday-model-cost")
+                Spacer(minLength: 0)
             }
             VStack(alignment: .leading, spacing: 8) {
                 costItem("今日花费", amount: dailyCosts?.value.todayCostCNY, identifier: "today-model-cost")
@@ -1201,10 +1647,13 @@ struct TodayToolsButton: View {
                 }
             }
         } label: {
-            Label("充值", systemImage: "arrow.up.right")
-                .font(.subheadline.weight(.semibold))
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
+            HStack(spacing: 8) {
+                Label("支付宝充值", systemImage: "wallet.bifold")
+                Spacer()
+                Image(systemName: "arrow.up.right")
+                    .accessibilityHidden(true)
+            }
+            .modifier(TodayToolActionLabel())
         }
         .buttonStyle(.plain)
         .foregroundStyle(TodayBriefStyle.accent)
@@ -1248,7 +1697,6 @@ private struct TodaySystemAvatar: View {
     let source: Source
     let name: String
     let size: CGFloat
-    let avatars: [URL: UIImage]
 
     nonisolated private static let companyAssets: [String: String] = [
         "altman": "TodayCompanyOpenAI",
@@ -1277,7 +1725,7 @@ private struct TodaySystemAvatar: View {
                 .frame(width: size, height: size)
                 .accessibilityLabel("\(name) 公司标识")
         case .remote(let url):
-            AvatarView(url: nil, name: name, size: size, loadingPolicy: .prepared(url.flatMap { avatars[$0] }))
+            AvatarView(url: url, name: name, size: size)
         }
     }
 }

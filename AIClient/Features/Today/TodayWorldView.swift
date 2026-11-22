@@ -25,6 +25,7 @@ final class TodayWorldStore: ObservableObject {
     @Published private(set) var report: TodayWorldYesterdayReportPayload?
     @Published private(set) var balance: AliyunAccountBalance?
     @Published private(set) var isLoading = false
+    @Published private(set) var isLoadingSources = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var brief: TodayBriefProjection?
     @Published private(set) var isShowingCachedEdition = false
@@ -33,12 +34,18 @@ final class TodayWorldStore: ObservableObject {
     @Published private var balanceRequest: (task: Task<Void, Never>, forced: Bool)?
     var isLoadingBalance: Bool { balanceRequest != nil }
     private var balanceKey: String?
-    private var checkedAt: Date?
+    private var reportRequest: Task<Void, Never>?
+    private var sourcePreparation: Task<Void, Never>?
+    private var avatarPrefetch: Task<Void, Never>?
     private var displayedEdition: TodayPublishedEdition?
     private let usesCostSnapshots: Bool
     private let usesPublishedSnapshots: Bool
     private let fetchReport: () async throws -> TodayWorldYesterdayReportPayload
     private let fetchBalance: (Bool) async throws -> AliyunAccountBalance
+
+    var needsPublicationCheck: Bool {
+        errorMessage != nil || brief?.isPartial == true || brief?.date != Self.billingDate(daysAgo: 1)
+    }
 
     init(fetchBalance: ((Bool) async throws -> AliyunAccountBalance)? = nil,
          fetchReport: (() async throws -> TodayWorldYesterdayReportPayload)? = nil) {
@@ -79,13 +86,12 @@ final class TodayWorldStore: ObservableObject {
               ),
               (Self.billingDate(daysAgo: 2)...Self.billingDate(daysAgo: 1)).contains(saved.value.edition.date) else { return }
         let snapshot = saved.value
-        var projection = await Task.detached(priority: .userInitiated) {
+        let projection = await Task.detached(priority: .userInitiated) {
             var projection = TodayBriefProjection(edition: snapshot.edition)
             projection.addSources(snapshot.sourcePosts)
             return projection
         }.value
-        await projection.prepareImages()
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, brief == nil else { return }
         displayedEdition = snapshot.edition
         brief = projection
         isShowingCachedEdition = true
@@ -102,78 +108,112 @@ final class TodayWorldStore: ObservableObject {
     }
 
     func loadReport(force: Bool = false) async {
-        let isStale = checkedAt.map { Date().timeIntervalSince($0) >= 60 } ?? true
-        guard !Task.isCancelled, !isLoading, force || report == nil || isStale else { return }
+        guard !Task.isCancelled else { return }
+        if let reportRequest {
+            await reportRequest.value
+            return
+        }
+        let request = Task { await refreshReport(retrySources: force) }
+        reportRequest = request
+        await request.value
+    }
+
+    private func refreshReport(retrySources: Bool) async {
         isLoading = true
         if errorMessage != nil { errorMessage = nil }
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            reportRequest = nil
+        }
         let baseURL = ServerConfiguration.currentURL
         let snapshotKey = baseURL.absoluteString
 
+        async let cachedEdition: Void = restoreEdition(key: snapshotKey)
         do {
-            async let networkReport = fetchReport()
-            await restoreEdition(key: snapshotKey)
-            let loadedReport = try await networkReport
-            guard !Task.isCancelled else { return }
+            let loadedReport = try await fetchReport()
             if let edition = TodayPublishedEdition(payload: loadedReport) {
-                try await prepareEdition(edition, baseURL: baseURL, retryImages: force)
+                if displayedEdition != edition {
+                    let projection = await Task.detached(priority: .userInitiated) {
+                        TodayBriefProjection(edition: edition)
+                    }.value
+                    cancelSourcePreparation()
+                    displayedEdition = edition
+                    brief = projection
+                }
                 if isShowingCachedEdition { isShowingCachedEdition = false }
-            } else if let brief, brief.date < loadedReport.date {
-                if !isShowingCachedEdition { isShowingCachedEdition = true }
             } else {
-                displayedEdition = nil
-                if brief != nil { brief = nil }
-                if isShowingCachedEdition { isShowingCachedEdition = false }
+                await cachedEdition
+                if let brief, brief.date < loadedReport.date {
+                    if !isShowingCachedEdition { isShowingCachedEdition = true }
+                } else {
+                    cancelSourcePreparation()
+                    displayedEdition = nil
+                    if brief != nil { brief = nil }
+                    if isShowingCachedEdition { isShowingCachedEdition = false }
+                }
             }
             if loadedReport != report { report = loadedReport }
-            checkedAt = Date()
             if usesPublishedSnapshots, displayedEdition == nil {
                 await DisplaySnapshotCache.editions.remove(key: snapshotKey)
             }
-        } catch is CancellationError {
-            return
         } catch {
-            guard !Task.isCancelled, (error as? URLError)?.code != .cancelled else { return }
-            errorMessage = NetworkErrorPresentation.message(for: error)
-            checkedAt = Date()
+            await cachedEdition
+            if (error as? URLError)?.code != .cancelled && !(error is CancellationError) {
+                errorMessage = NetworkErrorPresentation.message(for: error)
+            }
         }
+        prepareSources(baseURL: baseURL, retry: retrySources)
     }
 
-    private func prepareEdition(_ edition: TodayPublishedEdition, baseURL: URL, retryImages: Bool) async throws {
-        let current = displayedEdition == edition ? brief : nil
-        var projection: TodayBriefProjection
-        if let current {
-            projection = current
-        } else {
-            projection = await Task.detached(priority: .userInitiated) {
-                TodayBriefProjection(edition: edition)
-            }.value
-        }
-        try Task.checkCancellation()
+    private func cancelSourcePreparation() {
+        sourcePreparation?.cancel()
+        avatarPrefetch?.cancel()
+        avatarPrefetch = nil
+        sourcePreparation = nil
+        isLoadingSources = false
+    }
 
-        let missingIDs = projection.sourceIDs.filter { projection.sources[$0] == nil }
-        let fetchedPosts = try await fetchTodayEditionSources(ids: missingIDs, baseURL: baseURL)
-        try Task.checkCancellation()
-        guard current == nil || !fetchedPosts.isEmpty || retryImages else { return }
+    private func prepareSources(baseURL: URL, retry: Bool) {
+        guard let edition = displayedEdition, let current = brief, sourcePreparation == nil else { return }
+        let missingIDs = current.sourceIDs.filter { current.sources[$0] == nil }
+        guard retry || !missingIDs.isEmpty || !current.hasPreparedPreviews else { return }
+        isLoadingSources = !missingIDs.isEmpty
+        sourcePreparation = Task {
+            defer {
+                if !Task.isCancelled {
+                    isLoadingSources = false
+                    sourcePreparation = nil
+                }
+            }
 
-        if !fetchedPosts.isEmpty {
-            projection = await Task.detached(priority: .userInitiated) { [projection] in
-                var prepared = projection
-                prepared.addSources(fetchedPosts)
-                return prepared
-            }.value
-        }
-        await projection.prepareImages()
-        try Task.checkCancellation()
-        let sourcePostsChanged = current == nil || !fetchedPosts.isEmpty
-        if sourcePostsChanged || current?.preparedImageCount != projection.preparedImageCount {
-            displayedEdition = edition
+            let fetchedPosts = (try? await fetchTodayEditionSources(ids: missingIDs, baseURL: baseURL)) ?? [:]
+            guard !Task.isCancelled else { return }
+            var projection = current
+            if !fetchedPosts.isEmpty {
+                projection = await Task.detached(priority: .userInitiated) {
+                    var updated = current
+                    updated.addSources(fetchedPosts)
+                    return updated
+                }.value
+                guard !Task.isCancelled else { return }
+                brief = projection
+            }
+            isLoadingSources = false
+
+            let avatarURLs = projection.avatarURLs
+            avatarPrefetch?.cancel()
+            avatarPrefetch = Task {
+                await ImageLoader.prefetchAvatars(avatarURLs, maximumCount: avatarURLs.count)
+            }
+
+            if usesPublishedSnapshots, !current.hasPreparedPreviews || !fetchedPosts.isEmpty {
+                let snapshot = TodayEditionSnapshot(edition: edition, sourcePosts: projection.sources.mapValues(\.post))
+                await DisplaySnapshotCache.editions.save(snapshot, key: baseURL.absoluteString, at: Date())
+            }
+            guard !Task.isCancelled else { return }
+            await projection.preparePreviews()
+            guard !Task.isCancelled else { return }
             brief = projection
-        }
-
-        if usesPublishedSnapshots, sourcePostsChanged {
-            let snapshot = TodayEditionSnapshot(edition: edition, sourcePosts: projection.sources.mapValues(\.post))
-            await DisplaySnapshotCache.editions.save(snapshot, key: baseURL.absoluteString, at: Date())
         }
     }
 
@@ -301,6 +341,9 @@ struct TodayWorldView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store: TodayWorldStore
     @State private var waitingForRechargeReturn = false
+    @State private var showsStatus = false
+    @State private var showsTools = false
+    @State private var statusHeight: CGFloat = 0
 
     init(store: TodayWorldStore) {
         _store = StateObject(wrappedValue: store)
@@ -314,12 +357,20 @@ struct TodayWorldView: View {
             .background(TodayBriefStyle.surface)
             .toolbar(.hidden, for: .navigationBar)
         }
-        .task(id: rootTabIsActive) {
-            guard rootTabIsActive else { return }
-            await loadReport()
+        .task(id: rootTabIsActive && scenePhase == .active) {
+            guard rootTabIsActive, scenePhase == .active else { return }
+            await store.loadReport()
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(60)) }
+                catch { return }
+                if store.needsPublicationCheck { await store.loadReport() }
+            }
         }
         .task(id: rootTabIsActive && scenePhase == .active) {
             guard rootTabIsActive, scenePhase == .active else { return }
+            let refresh = waitingForRechargeReturn
+            waitingForRechargeReturn = false
+            await store.loadBalance(force: refresh)
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
             while let day = calendar.dateInterval(of: .day, for: Date()) {
@@ -328,59 +379,88 @@ struct TodayWorldView: View {
                 await store.loadBalance()
             }
         }
-        .onChange(of: scenePhase) { _, phase in
-            guard rootTabIsActive, phase == .active else { return }
-            Task { await loadReport() }
-        }
     }
 
     private func pageContent(viewport: CGSize) -> some View {
         let readingHeight = max(0, viewport.height - bottomChromeHeight - 8)
-        let topInset = store.brief == nil ? 0 : min(32, max(0, (readingHeight - 480) / 6))
+        let topInset = min(18, max(0, (readingHeight - 420) / 8))
         return ScrollView {
-            VStack(spacing: TodayBriefStyle.toolsSpacing) {
-                toolsButton
-                if let brief = store.brief {
-                    TodayBriefOverviewView(
-                        brief: brief,
-                        viewport: CGSize(width: viewport.width, height: readingHeight - topInset),
-                        isRefreshing: store.isLoading,
-                        retryReport: { await store.loadReport(force: true) }
-                    )
-                    .id(brief.date)
-                } else {
-                    emptyReportView
+            TodayToolsMenu(
+                waitingForRechargeReturn: $waitingForRechargeReturn,
+                showsTools: $showsTools,
+                balance: store.balance,
+                dailyCosts: store.dailyCosts,
+                isLoading: store.isLoadingBalance,
+                needsRetry: store.balanceNeedsRetry,
+                retry: { await store.loadBalance(force: true) },
+                viewport: CGSize(width: viewport.width, height: readingHeight - topInset)
+            ) {
+                pageHeading
+            } report: { headingHeight in
+                VStack(spacing: 8) {
+                    if showsStatus, let editionNotice {
+                        TodayEditionStatusDetails(
+                            notice: editionNotice,
+                            isRefreshing: store.isLoading,
+                            retry: { await store.loadReport(force: true) }
+                        )
+                        .frame(maxWidth: TodayBriefStyle.maximumCardWidth)
+                        .padding(.horizontal, TodayBriefStyle.horizontalInset)
+                        .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { statusHeight = $0 }
+                    }
+                    if let brief = store.brief {
+                        TodayBriefOverviewView(
+                            brief: brief,
+                            viewport: CGSize(
+                                width: viewport.width,
+                                height: readingHeight - topInset - headingHeight - 8
+                                    - (showsStatus && editionNotice != nil ? statusHeight + 8 : 0)
+                            ),
+                            isLoadingSources: store.isLoading || store.isLoadingSources,
+                            isHeaderPanelOpen: showsTools,
+                            retryReport: { await store.loadReport(force: true) }
+                        )
+                        .id(brief.date)
+                    } else {
+                        emptyReportView
+                    }
                 }
             }
             .padding(.top, topInset)
-            .frame(maxWidth: .infinity, minHeight: readingHeight, alignment: .top)
         }
         .scrollIndicators(.hidden)
         .scrollBounceBehavior(.basedOnSize)
         .padding(.bottom, bottomChromeHeight + 8)
+        .onChange(of: showsTools) { _, open in
+            if open { showsStatus = false }
+        }
+        .onChange(of: rootTabIsActive) { _, active in
+            if !active {
+                showsTools = false
+                showsStatus = false
+            }
+        }
     }
 
-    private var toolsButton: some View {
-        TodayToolsButton(
-            waitingForRechargeReturn: $waitingForRechargeReturn,
-            balance: store.balance,
-            dailyCosts: store.dailyCosts,
-            isLoading: store.isLoadingBalance,
-            needsRetry: store.balanceNeedsRetry,
-            retry: { await store.loadBalance(force: true) },
-            editionNotice: editionNotice,
-            isRefreshingReport: store.isLoading,
-            retryReport: { await store.loadReport(force: true) }
-        )
-        .frame(maxWidth: TodayBriefStyle.maximumCardWidth, alignment: .trailing)
-        .frame(height: TodayBriefStyle.toolsRowHeight)
-        .padding(.horizontal, TodayBriefStyle.horizontalInset)
-    }
-
-    private func loadReport() async {
-        let refresh = waitingForRechargeReturn
-        waitingForRechargeReturn = false
-        await store.load(force: refresh)
+    @ViewBuilder
+    private var pageHeading: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("今日")
+                .font(.largeTitle.weight(.semibold))
+                .foregroundStyle(TodayBriefStyle.ink)
+                .accessibilityAddTraits(.isHeader)
+            if let date = store.brief?.date ?? store.report?.date,
+               let label = TodayBriefDate.edition(date) {
+                Text(label).font(.subheadline.weight(.medium)).foregroundStyle(TodayBriefStyle.ink)
+            }
+        }
+        Spacer(minLength: 4)
+        if let editionNotice {
+            TodayEditionStatusButton(notice: editionNotice, isOpen: showsStatus) {
+                showsTools = false
+                showsStatus.toggle()
+            }
+        }
     }
 
     private var emptyReportView: some View {
@@ -475,8 +555,29 @@ struct TodayWorldView: View {
         guard let brief = store.brief else { return nil }
         let error = store.errorMessage.map { "\($0)。正在查看上次加载的日报。" }
         let message = error ?? (store.isShowingCachedEdition ? cachedEditionStatus : nil)
-        guard message != nil || brief.isPartial else { return nil }
-        return TodayEditionNotice(message: message, isPartial: brief.isPartial, canRetry: error != nil)
+        let report = store.report.flatMap { $0.date == brief.date ? $0 : nil }
+        let contentIssues = (report?.diagnostics ?? []).filter { $0.scope == "content" }
+        let visibleIssues = contentIssues.filter { $0.reasonCode != "subscriber_only" }
+        let subscriberItemIDs = Set(contentIssues.filter { $0.reasonCode == "subscriber_only" }.map(\.itemID))
+            .subtracting(visibleIssues.map(\.itemID))
+        let hiddenCount = (report?.report.final?.failedItems ?? [])
+            .filter { !$0.itemID.isEmpty && subscriberItemIDs.contains($0.itemID) }.count
+        let missingCount = report?.generation?.unfinishedIssueCount.map { max(0, $0 - hiddenCount) }
+        let isPartial = report != nil && brief.isPartial
+            && (hiddenCount == 0 || missingCount != 0 || !visibleIssues.isEmpty)
+        guard message != nil || isPartial else { return nil }
+        let reasons = visibleIssues.map { issue in
+            if let name = issue.systemName, !name.isEmpty { return "\(todayBriefSystemName(name)) · \(issue.reason)" }
+            return issue.reason
+        }
+        return TodayEditionNotice(
+            message: message,
+            isPartial: isPartial,
+            missingCount: missingCount.flatMap { $0 > 0 ? $0 : nil },
+            reasons: TodayReadingEvent.unique(reasons),
+            publishedAt: report?.completedAt.flatMap(TodayBriefDate.timestamp),
+            canRetry: error != nil
+        )
     }
 }
 
@@ -549,7 +650,7 @@ struct TodayReadingEvent: Identifiable, Sendable {
 
 struct TodaySourcePresentation: Identifiable, Sendable {
     let post: Post
-    let text: String
+    let originalText: String
     let reply: String?
     let quote: XQuotedPost?
     let author: String
@@ -563,16 +664,14 @@ struct TodaySourcePresentation: Identifiable, Sendable {
 
     init(post: Post) {
         self.post = post
-        text = XPostTextFormatter.simplifiedChinese(
-            post.hasTranslation ? post.displayContent : post.xStoredOriginalContent
-        )
-        reply = post.xReplyContext?.displayText
+        originalText = post.xStoredOriginalContent
+        reply = post.xReplyContext?.text
         let sourceQuote = post.xQuotedPost
         quote = sourceQuote
         author = post.authorName
         avatarURL = post.avatarURL
         quoteAvatarURL = sourceQuote?.author?.profileImageURL.flatMap(URL.init(string:))
-        time = post.formattedTime
+        time = post.articlePostAt.flatMap(TodayBriefDate.timestamp) ?? post.formattedTime
         hasMedia = post.previewURL != nil || !post.videoURLs.isEmpty
         let mainPreviews = if !post.videoURLs.isEmpty {
             [post.xFeedVideoPoster].compactMap { $0 }
@@ -588,14 +687,15 @@ struct TodaySourcePresentation: Identifiable, Sendable {
 
 struct TodaySourceAuthorView: View {
     let source: TodaySourcePresentation
-    let image: UIImage?
 
     var body: some View {
         HStack(spacing: 10) {
-            AvatarView(url: nil, name: source.author, size: 30, loadingPolicy: .prepared(image))
+            AvatarView(url: source.avatarURL, name: source.author, size: 40)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-                Text(source.author).font(.subheadline.weight(.semibold))
+                Text(source.author)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(TodayBriefStyle.accent)
                 if let time = source.time {
                     Text(time).font(.caption).foregroundStyle(.secondary)
                 }
@@ -607,13 +707,36 @@ struct TodaySourceAuthorView: View {
 
 struct TodayInlineSourceView: View {
     let source: TodaySourcePresentation
-    let quoteAvatar: UIImage?
     let width: CGFloat
+    let allowsTranslation: Bool
+    @State private var showsTranslation = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if !source.text.isEmpty {
-                Text(source.text).font(.body).lineSpacing(4).textSelection(.enabled)
+            if !source.originalText.isEmpty {
+                Text(source.originalText)
+                    .font(.body)
+                    .foregroundStyle(TodayBriefStyle.ink)
+                    .lineSpacing(5)
+                    .textSelection(.enabled)
+            }
+            if allowsTranslation, source.post.sourceName == "X",
+               LocalTranslatedText.sourceLanguage(source.originalText) != nil {
+                DisclosureGroup("查看译文", isExpanded: $showsTranslation) {
+                    if showsTranslation {
+                        if let chinese = LocalTranslatedText.validTranslation(
+                            source.post.displayContent, original: source.originalText
+                        ) {
+                            Text(chinese)
+                        } else {
+                            LocalTranslatedText(
+                                original: source.originalText, detail: true, translationOnly: true, field: .body
+                            )
+                        }
+                    }
+                }
+                .font(.callout)
+                .textSelection(.enabled)
             }
             if let reply = source.reply, !reply.isEmpty {
                 Text("回复：\(reply)")
@@ -627,7 +750,7 @@ struct TodayInlineSourceView: View {
                     quote: quote,
                     availableWidth: width,
                     isDetail: true,
-                    avatarLoadingPolicy: .prepared(quoteAvatar)
+                    showsOriginalText: true
                 )
             }
         }
