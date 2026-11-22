@@ -21,6 +21,10 @@ PROJECT = Path(__file__).resolve().parent.parent
 BUNDLE_ID = "com.wangheng.aiserverclient"
 CONFIG = Path.home() / ".local/share/focus-direct-install/config.json"
 WORK_ROOT = Path.home() / ".cache/ai-server-ios"
+RELEASE_ROOT = CONFIG.parent / "releases"
+ARCHIVE_NAME = "VerifiedAIServerClient.xcarchive.zip"
+IPA_NAME = "Focus-AdHoc.ipa"
+RECEIPT_NAME = "release.json"
 
 
 def require(condition, message):
@@ -55,11 +59,11 @@ def fetch(url, path, status=200, byte_range=None):
     require(result.stdout == str(status), f"Expected HTTP {status}, got {result.stdout}")
 
 
-def build_app(work, config, entry_url, version, build):
+def build_app(work, config, entry_url, version, build, source_commit):
     source = work / "source"
     source.mkdir()
     snapshot = work / "source.tar"
-    command(["git", "archive", "--output", str(snapshot), "HEAD"], cwd=PROJECT)
+    command(["git", "archive", "--output", str(snapshot), source_commit], cwd=PROJECT)
     command(["tar", "-xf", str(snapshot), "-C", str(source)])
     snapshot.unlink()
 
@@ -83,16 +87,79 @@ def build_app(work, config, entry_url, version, build):
     return archive
 
 
-def prepare_archive(config, entry_url, version, build):
-    WORK_ROOT.mkdir(exist_ok=True, parents=True)
-    work = Path(tempfile.mkdtemp(prefix="focus-adhoc-build.", dir=WORK_ROOT))
-    print(f"Building {version} ({build}). Logs: {work}", flush=True)
-    archive = build_app(work, config, entry_url, version, build)
-    stage = Path(tempfile.mkdtemp(prefix="focus-adhoc-export.", dir=WORK_ROOT))
-    archive_zip = stage / "VerifiedAIServerClient.xcarchive.zip"
-    command(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", archive, archive_zip])
-    print(f"archive_path={archive_zip}")
-    print(f"archive_sha256={sha256(archive_zip)}")
+def binary_uuids(path):
+    output = command(["dwarfdump", "--uuid", path], capture_output=True, text=True).stdout
+    return sorted(re.findall(r"^UUID: ([0-9A-Fa-f-]{36})", output, re.MULTILINE))
+
+
+def app_binary_uuids(app, symbols=None):
+    identifiers = {}
+    for component in [app, *sorted((app / "PlugIns").glob("*.appex"))]:
+        info = plistlib.loads((component / "Info.plist").read_bytes())
+        name = info["CFBundleExecutable"]
+        require(Path(name).name == name, "Invalid app executable name")
+        uuids = binary_uuids(component / name)
+        bundle = info["CFBundleIdentifier"]
+        require(uuids and bundle not in identifiers, f"Missing or duplicate binary identity for {bundle}")
+        if symbols is not None:
+            dwarf = symbols / f"{component.name}.dSYM" / "Contents/Resources/DWARF" / name
+            require(dwarf.is_file() and binary_uuids(dwarf) == uuids, f"Missing or mismatched dSYM for {bundle}")
+        identifiers[bundle] = uuids
+    return identifiers
+
+
+def read_handoff(handoff, identity):
+    require(handoff.is_dir() and not handoff.is_symlink() and handoff.stat().st_uid == os.getuid()
+            and not (handoff.stat().st_mode & 0o077), "Release handoff must be a private owned directory")
+    path = handoff / RECEIPT_NAME
+    require(path.is_file() and not path.is_symlink(), "Release handoff receipt is missing")
+    receipt = json.loads(path.read_bytes())
+    require(receipt["identity"] == identity, "Build already prepared with a different source or release configuration")
+    require(receipt["status"] in ("prepared", "published"), "Release receipt has invalid status")
+    archive = handoff / ARCHIVE_NAME
+    require(archive.is_file() and not archive.is_symlink() and sha256(archive) == receipt["archive_sha256"],
+            "Prepared archive checksum differs")
+    return receipt
+
+
+def prepare_archive(config, entry_url, identity, handoff):
+    if handoff.exists():
+        receipt = read_handoff(handoff, identity)
+    else:
+        version, build = identity["version"], identity["build"]
+        print(f"Building {version} ({build}) from {identity['source_commit']}", flush=True)
+        with tempfile.TemporaryDirectory(prefix=".focus-adhoc-prepare.", dir=WORK_ROOT) as temp:
+            work = Path(temp)
+            stage = work / "handoff"
+            stage.mkdir()
+            try:
+                archive = build_app(work, config, entry_url, version, build, identity["source_commit"])
+                app = archive / "Products/Applications/AIServerClient.app"
+                archive_zip = stage / ARCHIVE_NAME
+                command(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", archive, archive_zip])
+                receipt = {
+                    "identity": identity,
+                    "archive_sha256": sha256(archive_zip),
+                    "binary_uuids": app_binary_uuids(app, archive / "dSYMs"),
+                    "package": f"build-{version}-{build}-{secrets.token_hex(8)}",
+                    "status": "prepared",
+                }
+                write_atomic(stage / RECEIPT_NAME, json.dumps(receipt, indent=2).encode())
+                stage.rename(handoff)
+            except BaseException:
+                log = work / "archive.log"
+                if log.is_file():
+                    diagnostics = CONFIG.parent / "diagnostics"
+                    diagnostics.mkdir(exist_ok=True)
+                    saved = diagnostics / f"{handoff.name}-{identity['source_commit'][:12]}.log"
+                    write_atomic(saved, log.read_bytes())
+                    print(f"Build log: {saved}", flush=True)
+                raise
+    print(f"archive_path={handoff / ARCHIVE_NAME}")
+    print(f"archive_sha256={receipt['archive_sha256']}")
+    signed = handoff / IPA_NAME
+    if signed.is_file() and not signed.is_symlink():
+        print(f"signed_ipa={signed}")
 
 
 def component_plist(args):
@@ -145,6 +212,7 @@ def verify_app(work, ipa, config, entry_url, version, build):
                     "Expected production push notifications for Ad Hoc distribution")
         print(f"Verified Ad Hoc signature and registered device: {bundle_id}", flush=True)
     require(verified_ids == expected_ids, "Expected both notification extensions")
+    return app_binary_uuids(app)
 
 
 def install_manifest(assets, version):
@@ -225,17 +293,26 @@ def publish(work, channel, entry_url, package, base, assets, ipa, manifest_path,
     latest = channel / "latest.json"
     previous = latest.read_bytes() if latest.exists() else None
     content = json.dumps({"version": version, "build": build, "package": package.name}).encode()
-    stage = Path(tempfile.mkdtemp(prefix=".staging-", dir=channel))
     package_available = False
     promoted = False
     try:
-        shutil.copyfile(ipa, stage / "Focus.ipa")
-        shutil.copyfile(manifest_path, stage / "manifest.plist")
-        for size in (57, 512):
-            command(["sips", "-z", str(size), str(size), str(icon), "--out", str(stage / f"icon-{size}.png")],
-                    stdout=subprocess.DEVNULL)
-        stage.rename(package)
-        package_available = True
+        require(not package.is_symlink(), "Public package must be a real directory")
+        if package.exists():
+            require(package.is_dir()
+                    and (package / "manifest.plist").read_bytes() == manifest_path.read_bytes()
+                    and sha256(package / "Focus.ipa") == sha256(ipa),
+                    "Existing package differs from the release handoff")
+        else:
+            with tempfile.TemporaryDirectory(prefix=".staging-", dir=channel) as staging:
+                stage = Path(staging) / "package"
+                stage.mkdir()
+                shutil.copyfile(ipa, stage / "Focus.ipa")
+                shutil.copyfile(manifest_path, stage / "manifest.plist")
+                for size in (57, 512):
+                    command(["sips", "-z", str(size), str(size), str(icon), "--out", str(stage / f"icon-{size}.png")],
+                            stdout=subprocess.DEVNULL)
+                stage.rename(package)
+                package_available = True
         manifest_readback = work / "public-manifest.plist"
         fetch(base + "manifest.plist", manifest_readback)
         require(manifest_readback.read_bytes() == manifest_path.read_bytes(), "Public manifest differs")
@@ -251,8 +328,9 @@ def publish(work, channel, entry_url, package, base, assets, ipa, manifest_path,
             write_atomic(page, INSTALL_PAGE)
         fetch(entry_url + "?check=" + secrets.token_hex(8), work / "public-install.html")
         require((work / "public-install.html").read_bytes() == INSTALL_PAGE, "Public install page differs")
-        write_atomic(latest, content)
-        promoted = True
+        if previous != content:
+            write_atomic(latest, content)
+            promoted = True
         fetch(entry_url.rsplit("/", 1)[0] + "/latest.json?check=" + secrets.token_hex(8), work / "public-latest.json")
         require((work / "public-latest.json").read_bytes() == content, "Public latest version differs")
     except BaseException:
@@ -261,7 +339,8 @@ def publish(work, channel, entry_url, package, base, assets, ipa, manifest_path,
                 latest.unlink()
             else:
                 write_atomic(latest, previous)
-        shutil.rmtree(package if package_available else stage)
+        if package_available:
+            shutil.rmtree(package)
         raise
 
 
@@ -290,31 +369,71 @@ def main():
                 "Commit the intended source in a clean worktree first")
         require(not channel.is_symlink(), "Direct-install channel must be a real directory")
         channel.mkdir(exist_ok=True)
-        latest = channel / "latest.json"
-        if latest.exists():
-            current = json.loads(latest.read_bytes())
-            require(target_version > version_key(current["version"], current["build"]),
-                    "The direct-install page already serves this build or a newer one")
-        if args.prepare:
-            prepare_archive(config, entry_url, args.version, args.build)
-            return
         WORK_ROOT.mkdir(exist_ok=True, parents=True)
-        work = Path(tempfile.mkdtemp(prefix="focus-adhoc-publish.", dir=WORK_ROOT))
-        ipa = work / "Focus-AdHoc.ipa"
-        shutil.copyfile(args.signed_ipa, ipa)
-        verify_app(work, ipa, config, entry_url, args.version, args.build)
-        if latest.exists():
-            shutil.copyfile(latest, work / "previous-latest.json")
-        package = channel / f"build-{args.version}-{args.build}-{secrets.token_hex(8)}"
-        base = f"{config['public_origin']}/img/{channel_name}/{package.name}/"
+        require(WORK_ROOT.resolve() == WORK_ROOT and WORK_ROOT.stat().st_uid == os.getuid(),
+                "Direct-install work root must be an owned directory")
+        configuration = json.dumps([entry_url, config["team_id"], config["device_udid"]]).encode()
+        commit = command(["git", "rev-parse", "HEAD"], cwd=PROJECT, capture_output=True, text=True).stdout.strip()
+        identity = {
+            "source_commit": commit,
+            "version": args.version,
+            "build": args.build,
+            "configuration_sha256": hashlib.sha256(configuration).hexdigest(),
+        }
+        key = json.dumps([entry_url, target_version]).encode()
+        handoff = WORK_ROOT / f"focus-adhoc-export.{hashlib.sha256(key).hexdigest()}"
+        latest = channel / "latest.json"
+        current = json.loads(latest.read_bytes()) if latest.exists() else None
+        current_version = version_key(current["version"], current["build"]) if current else (0, 0, 0, 0)
+        if args.prepare:
+            require(target_version > current_version, "The direct-install page already serves this build or a newer one")
+            prepare_archive(config, entry_url, identity, handoff)
+            return
+
+        ipa = handoff / IPA_NAME
+        require(args.signed_ipa.absolute() == ipa and ipa.is_file() and not ipa.is_symlink(),
+                "Use the signed IPA from this build's prepare handoff")
+        receipt = read_handoff(handoff, identity)
+        package_name = receipt["package"]
+        require(re.fullmatch(rf"build-{re.escape(args.version)}-{args.build}-[0-9a-f]{{16}}", package_name),
+                "Invalid package identity in release receipt")
+        require(target_version > current_version or (target_version == current_version and current
+                and current["package"] == package_name), "The direct-install page already serves another build or a newer one")
+
+        RELEASE_ROOT.mkdir(mode=0o700, exist_ok=True)
+        require(RELEASE_ROOT.resolve() == RELEASE_ROOT and RELEASE_ROOT.stat().st_uid == os.getuid()
+                and not (RELEASE_ROOT.stat().st_mode & 0o077)
+                and RELEASE_ROOT.stat().st_dev == handoff.stat().st_dev,
+                "Release storage must be private, owned and on the handoff filesystem")
+        destination = RELEASE_ROOT / package_name
+        require(not destination.exists() and not destination.is_symlink(), "Release record already exists")
+        package = channel / package_name
+        base = f"{config['public_origin']}/img/{channel_name}/{package_name}/"
         assets = {kind: base + file for kind, file in {
             "software-package": "Focus.ipa", "display-image": "icon-57.png", "full-size-image": "icon-512.png",
         }.items()}
-        manifest = work / "manifest.plist"
-        manifest.write_bytes(install_manifest(assets, args.version))
         icon = PROJECT / "AIClient/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png"
-        publish(work, channel, entry_url, package, base, assets, ipa, manifest, icon, args.version, args.build)
+
+        ipa_sha256 = sha256(ipa)
+        if receipt["status"] == "published":
+            require(receipt["ipa_sha256"] == ipa_sha256, "Signed IPA differs from the published release receipt")
+        with tempfile.TemporaryDirectory(prefix=".focus-adhoc-verify.", dir=WORK_ROOT) as temp:
+            work = Path(temp)
+            uuids = verify_app(work, ipa, config, entry_url, args.version, args.build)
+            require(uuids == receipt["binary_uuids"], "Signed IPA binaries differ from the prepared archive")
+            require(ipa_sha256 == sha256(ipa), "Signed IPA changed during verification")
+            manifest = work / "manifest.plist"
+            manifest.write_bytes(install_manifest(assets, args.version))
+            publish(work, channel, entry_url, package, base, assets, ipa, manifest, icon, args.version, args.build)
+
+        require(ipa_sha256 == sha256(ipa), "Signed IPA changed during public verification")
+        receipt.update(status="published", ipa_sha256=ipa_sha256,
+                       public_readback_at=datetime.now(timezone.utc).isoformat())
+        write_atomic(handoff / RECEIPT_NAME, json.dumps(receipt, indent=2).encode())
+        handoff.rename(destination)
+        print(f"release_record={destination / RECEIPT_NAME}")
         print(f"Published {args.version} ({args.build}): {entry_url}", flush=True)
+
 
 
 if __name__ == "__main__":
