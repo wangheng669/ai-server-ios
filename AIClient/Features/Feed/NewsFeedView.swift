@@ -262,6 +262,7 @@ struct NewsFeedView: View {
                     }
                 }
             } else {
+                model.setXTimelineScrolling(false)
                 model.stopRealtime()
             }
         }
@@ -1179,6 +1180,7 @@ struct NewsFeedView: View {
             ScrollViewReader { proxy in
                 List {
                     ForEach(Array(posts.enumerated()), id: \.element.id) { index, post in
+                        let isPaginationRow = post.id == paginationPostID || index == posts.count - 1
                         let displayed = model.postForDisplay(post)
                         NewsCardView(post: displayed, onOpen: {
                             openPost(model.postForDisplay(post, includePending: true))
@@ -1197,9 +1199,10 @@ struct NewsFeedView: View {
                                 let upcoming = Array(posts.dropFirst(index + 1).prefix(7))
                                 model.prefetchXTimelineImages(for: upcoming)
                             }
-                            .task(id: post.id == paginationPostID ? nextPage : nil) {
-                                guard isActive, !Task.isCancelled, nextPage != nil,
-                                      post.id == paginationPostID, model.errorMessage == nil else { return }
+                            .task(id: isPaginationRow ? nextPage : nil) {
+                                guard isActive, isPaginationRow, !Task.isCancelled,
+                                      let nextPage, nextPage == model.xTimelineNextPage,
+                                      model.errorMessage == nil else { return }
                                 // Finish the page request even when a fast swipe recycles its anchor row.
                                 await Task {
                                     await model.loadMoreIfNeeded(current: post, thresholdPostID: post.id)

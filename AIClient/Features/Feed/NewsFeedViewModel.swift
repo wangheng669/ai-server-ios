@@ -592,6 +592,8 @@ final class NewsFeedViewModel: ObservableObject {
 
     func selectXUser(_ user: XFeedUser?) async {
         guard source == .x, selectedXUserID != user?.id else { return }
+        pendingXPostUpdates.removeAll(keepingCapacity: true)
+        setXTimelineScrolling(false)
         selectedXUserID = user?.id
         selectedXAuthor = user?.screenName
         posts = []
@@ -916,7 +918,9 @@ final class NewsFeedViewModel: ObservableObject {
                     posts = posts.map { changes[$0.id] ?? $0 }
                     cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
                     persistCurrentSnapshot()
-                    pretranslateTimeline(Array(changes.values))
+                    let updatedPosts = Array(changes.values)
+                    schedulePresentationPrewarm(for: updatedPosts)
+                    pretranslateTimeline(updatedPosts)
                 }
             }
         }
