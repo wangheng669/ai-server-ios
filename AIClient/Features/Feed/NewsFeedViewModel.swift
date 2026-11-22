@@ -164,7 +164,7 @@ final class NewsFeedViewModel: ObservableObject {
     @Published private(set) var isSwitchingSource = false
     @Published private(set) var pendingRealtimePosts: [Post] = []
     @Published private var xPresentations: [Int: XPresentation] = [:]
-    let xTimelineActivity = XTimelineActivity()
+    private(set) var isXTimelineScrolling = false
     @Published private(set) var rssFeeds: [RSSFeedSource] = []
     @Published private(set) var selectedRSSFeedID: Int?
     @Published private(set) var selectedRSSPosts: [Post] = []
@@ -869,24 +869,9 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     private func resolvedXTranslation(tweetID: String, sourceText: String) async throws -> String {
-        let cache = FeedTranslationCache.shared
-        let key = FeedTranslationCache.key(sourceText, language: "x/" + tweetID)
-        if let saved = cache.text(key),
-           let value = LocalTranslatedText.validTranslation(saved, original: sourceText) {
-            return value
-        }
-        guard cache.canAttempt(key) else { throw APIError.invalidResponse }
-        do {
-            let received = try await fetchXTranslation(tweetID).text
-            guard let value = LocalTranslatedText.validTranslation(received, original: sourceText) else {
-                throw APIError.invalidResponse
-            }
-            cache.save(value, key: key)
-            return value
-        } catch {
-            if !Task.isCancelled { cache.failed(key) }
-            throw error
-        }
+        try await FeedTranslationCache.shared.translateXPost(
+            tweetID: tweetID, original: sourceText, using: fetchXTranslation
+        )
     }
 
     private static func containsHanCharacters(_ value: String) -> Bool {
@@ -894,19 +879,19 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     func setXTimelineScrolling(_ isScrolling: Bool) {
-        guard xTimelineActivity.isScrolling != isScrolling else { return }
-        xTimelineActivity.isScrolling = isScrolling
+        guard isXTimelineScrolling != isScrolling else { return }
+        isXTimelineScrolling = isScrolling
         if !isScrolling { scheduleXPresentationPublish() }
     }
 
     private func scheduleXPresentationPublish() {
-        guard !xTimelineActivity.isScrolling, xPresentationPublishTask == nil,
+        guard !isXTimelineScrolling, xPresentationPublishTask == nil,
               !pendingXPresentations.isEmpty || !pendingXPostUpdates.isEmpty else { return }
         xPresentationPublishTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(120))
             guard let self else { return }
             xPresentationPublishTask = nil
-            guard !xTimelineActivity.isScrolling else { return }
+            guard !isXTimelineScrolling else { return }
             if !pendingXPresentations.isEmpty {
                 xPresentations.merge(pendingXPresentations) { _, latest in latest }
                 pendingXPresentations.removeAll(keepingCapacity: true)
@@ -1353,10 +1338,9 @@ final class NewsFeedViewModel: ObservableObject {
         let candidates = Array(posts.prefix(10))
         for post in candidates where post.needsXTranslation && xPresentation(for: post.id)?.translation == nil {
             guard let tweetID = post.xTweetID else { continue }
-            let original = post.xStoredOriginalContent
-            let key = FeedTranslationCache.key(original, language: "x/" + tweetID)
-            if let saved = FeedTranslationCache.shared.text(key),
-               let value = LocalTranslatedText.validTranslation(saved, original: original) {
+            if let value = FeedTranslationCache.shared.cachedXTranslation(
+                tweetID: tweetID, original: post.xStoredOriginalContent
+            ) {
                 stageXPresentation(for: post.id) { $0.translation = value }
             }
         }
@@ -1388,14 +1372,12 @@ final class NewsFeedViewModel: ObservableObject {
     private func schedulePresentationPrewarm(for posts: [Post], source: FeedSource? = nil) {
         let page = source ?? self.source
         Task(priority: .utility) { await FeedPresentationPrewarmer.shared.warm(posts, source: page) }
-        guard #available(iOS 26.0, *), [.x, .truth, .rss, .youtube].contains(page) else { return }
+        guard #available(iOS 26.0, *), [.truth, .rss, .youtube].contains(page) else { return }
         Task {
             let originals = posts.prefix(10).flatMap { post -> [String] in
                 switch page {
                 case .truth:
                     return LocalTranslatedText.chineseText(post.truthChineseContent) == nil ? [post.originalDisplayContent] : []
-                case .x:
-                    return [XPostTextFormatter.timelineText(post.displayContent)]
                 case .rss, .youtube:
                     let title = LocalTranslatedText.chineseText(post.feedChineseTitle) == nil ? [post.feedOriginalTitle] : []
                     return page == .rss ? title + [post.rssListContent] : title
