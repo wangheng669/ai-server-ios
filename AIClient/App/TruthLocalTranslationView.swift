@@ -307,6 +307,26 @@ enum FeedTranslationField: String {
     case summary = "摘要"
     case body = "正文"
     case reply = "回复"
+    case quote = "引用"
+}
+
+struct FeedReaderTranslationText: View {
+    let original: String?
+    let chinese: String?
+    let field: FeedTranslationField
+    let isActive: Bool
+
+    var body: some View {
+        if let text = LocalTranslatedText.chineseText(chinese) ?? LocalTranslatedText.chineseText(original) {
+            Text(text)
+        } else if let original, !original.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if isActive {
+                LocalTranslatedText(original: original, detail: true, translationOnly: true, field: field)
+            } else {
+                Text("\(field.rawValue)待翻译").foregroundStyle(.secondary)
+            }
+        }
+    }
 }
 
 /// Translation is presentation-only: the original Post, links and article blocks stay intact.

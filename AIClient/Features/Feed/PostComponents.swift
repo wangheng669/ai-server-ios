@@ -2133,7 +2133,8 @@ struct XFeedQuotedPostCard: View {
     let availableWidth: CGFloat
     var enablesTextSelection = false
     var isDetail = false
-    var showsOriginalText = false
+    var showsTranslationOnly = false
+    var isTranslationActive = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -2158,7 +2159,14 @@ struct XFeedQuotedPostCard: View {
                 }
             }
 
-            if let text = showsOriginalText ? quote.originalText : quote.displayText {
+            if showsTranslationOnly {
+                FeedReaderTranslationText(
+                    original: quote.originalText, chinese: quote.textZH, field: .quote, isActive: isTranslationActive
+                )
+                .font(.system(size: 16))
+                .lineSpacing(3)
+                .textSelection(.enabled)
+            } else if let text = quote.displayText {
                 quotedText(text)
             }
 
