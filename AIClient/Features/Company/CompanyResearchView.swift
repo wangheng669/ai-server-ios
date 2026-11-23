@@ -902,7 +902,7 @@ struct CompanyResearchView: View {
                 }
             }
             if let consensus = company.consensus {
-                researchBlock("市场一致预期") {
+                researchBlock(isHistoricalConsensus(company) ? "历史一致预期" : "市场一致预期") {
                     Text("\(consensus.period) · 截至 \(consensus.asOfDate)")
                         .font(.caption).foregroundStyle(.secondary)
                     ForEach(consensus.metrics, id: \.label) { metric in
@@ -914,6 +914,10 @@ struct CompanyResearchView: View {
                         Text(metric.note).font(.caption2).foregroundStyle(.tertiary)
                     }
                     Text(consensus.note).font(.caption).foregroundStyle(.secondary).lineSpacing(3)
+                    Link(destination: consensus.source.url) {
+                        Label(consensus.source.title, systemImage: "arrow.up.right")
+                            .font(.caption)
+                    }
                 }
             }
             researchBlock("估值说明") {
@@ -1127,7 +1131,7 @@ struct CompanyResearchView: View {
     private func displayedFinancialPeriods(_ company: CompanyResearchProfile) -> [CompanyResearchChartPeriod] {
         let range = financialRange.rawValue
         let forecasts = (company.financials.forecasts ?? [])
-            .filter { $0.range == range }
+            .filter { $0.range == range && !isHistoricalConsensus(company) }
             .map { CompanyResearchChartPeriod(period: "\($0.period)E", revenue: $0.revenue, netProfit: $0.netProfit, isForecast: true) }
         if financialRange != .annual {
             return financialRange.periods(in: company.financials).map {
@@ -1140,7 +1144,15 @@ struct CompanyResearchView: View {
     }
 
     private func hasForecast(_ company: CompanyResearchProfile) -> Bool {
+        !isHistoricalConsensus(company) &&
         company.financials.forecasts?.contains { $0.range == financialRange.rawValue } == true
+    }
+
+    private func isHistoricalConsensus(_ company: CompanyResearchProfile) -> Bool {
+        guard let consensus = company.consensus,
+              let latestFiling = ((company.financials.quarters ?? []) + (company.financials.interims ?? []))
+                .compactMap(\.filedOn).max() else { return false }
+        return consensus.asOfDate < latestFiling
     }
 
     private func reportedFinancialTable(_ periods: [CompanyResearchFinancialPeriod]) -> some View {

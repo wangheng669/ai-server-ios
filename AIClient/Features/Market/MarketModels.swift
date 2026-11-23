@@ -382,6 +382,9 @@ struct MarketQuote: Codable, Identifiable, Hashable {
 
     var marketDisplayFormattedPercent: String {
         if hasSuspiciousIndexMove { return "待核验" }
+        guard hasActiveExtendedSessionQuote || (previousClose ?? 0) > 0 || changePercent != nil else {
+            return "—"
+        }
         let value = marketDisplayPercentValue
         return String(format: "%@%.2f%%", value >= 0 ? "+" : "−", abs(value))
     }

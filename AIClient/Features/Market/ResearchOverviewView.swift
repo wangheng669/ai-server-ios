@@ -191,7 +191,9 @@ private struct ResearchOverviewView: View {
 
     private var globalMarkets: some View {
         VStack(spacing: 4) {
-            sectionHeading("全球市场", trailing: marketDate) { onOpenMarketQuotes(.unitedStates) }
+            sectionHeading("全球市场", trailing: store.isShowingCachedSnapshot ? "缓存行情" : "全部") {
+                onOpenMarketQuotes(.unitedStates)
+            }
             VStack(spacing: 0) {
                 ForEach(primaryMarkets, id: \.1) { title, symbol in
                     ResearchStyle.divider.frame(height: 0.5)
@@ -218,8 +220,8 @@ private struct ResearchOverviewView: View {
             HStack(spacing: 9) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(.subheadline).foregroundStyle(ResearchStyle.muted)
-                    if quote?.stale == true {
-                        Text("行情待更新").font(.caption2).foregroundStyle(ResearchStyle.muted)
+                    if let subtitle = quoteSubtitle(quote) {
+                        Text(subtitle).font(.caption2).foregroundStyle(ResearchStyle.muted)
                     }
                 }
                 .lineLimit(1).minimumScaleFactor(0.75)
@@ -307,7 +309,7 @@ private struct ResearchOverviewView: View {
 
     private func metric(_ title: String, symbol: String, yield: Bool) -> some View {
         let quote = store.quote(symbol: symbol)
-        let change = quote?.marketDisplayChangeValue
+        let change = quote.flatMap { $0.previousClose == nil ? nil : $0.marketDisplayChangeValue }
         return Button { onOpenMarketDetail(symbol) } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.caption).foregroundStyle(ResearchStyle.muted)
@@ -316,6 +318,9 @@ private struct ResearchOverviewView: View {
                     .lineLimit(1).minimumScaleFactor(0.7)
                 Text(change.map { String(format: yield ? "%+.0f bp" : "%+.2f 点", $0 * (yield ? 100 : 1)) } ?? "—")
                     .font(.caption2).foregroundStyle(ResearchStyle.tint(quote))
+                if let subtitle = quoteSubtitle(quote) {
+                    Text(subtitle).font(.caption2).foregroundStyle(ResearchStyle.muted)
+                }
             }
             .monospacedDigit().frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 12).contentShape(Rectangle())
@@ -343,7 +348,8 @@ private struct ResearchOverviewView: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
                     Text(title).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
-                    Text(symbol).font(.caption2).foregroundStyle(ResearchStyle.muted)
+                    Text(quote?.hasIndicativeOvernightPrice == true ? "\(symbol) · 夜盘参考" : symbol)
+                        .font(.caption2).foregroundStyle(ResearchStyle.muted)
                 }
                 Text(quote?.marketDisplayFormattedPercent ?? "—")
                     .font(.system(size: 16, weight: .medium)).foregroundStyle(ResearchStyle.tint(quote))
@@ -434,21 +440,14 @@ private struct ResearchOverviewView: View {
 
 
 
-    private static let marketDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.dateFormat = "M月d日"
-        return formatter
-    }()
-
-    private var marketDate: String {
-        // Markets close in different time zones; identify the displayed snapshot as an update.
-        let isCached = store.isShowingCachedSnapshot
-        guard let timestamp = store.quote(symbol: "^GSPC")?.timestamp else {
-            return isCached ? "缓存行情" : "指数与股票"
+    private func quoteSubtitle(_ quote: MarketQuote?) -> String? {
+        guard let quote else { return "暂无行情" }
+        if quote.stale == true { return "行情待更新" }
+        if quote.tradingSession == .closed, let date = quote.quality?.tradingDate {
+            return "\(date.suffix(5)) 收盘"
         }
-        let date = Date(timeIntervalSince1970: Double(timestamp) / 1000)
-        return Self.marketDateFormatter.string(from: date) + (isCached ? "缓存行情" : "更新")
+        if let minutes = quote.visibleDelayMinutes { return "延迟\(minutes)分钟" }
+        return nil
     }
 }
 
@@ -518,7 +517,7 @@ private struct ResearchStockQuotes: View {
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
-                    Text(active ? quote.displayCode : "\(quote.displayCode) · 待更新")
+                    Text(stockSubtitle(quote, active: active))
                         .font(.caption2)
                         .foregroundStyle(ResearchStyle.muted)
                         .lineLimit(1)
@@ -555,6 +554,14 @@ private struct ResearchStockQuotes: View {
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("research-stock-\(quote.symbol)")
+    }
+
+    private func stockSubtitle(_ quote: MarketQuote, active: Bool) -> String {
+        if !active { return "\(quote.displayCode) · 待更新" }
+        if !showsExtendedHours, quote.tradingSession == .closed, let date = quote.quality?.tradingDate {
+            return "\(quote.displayCode) · \(date.suffix(5)) 收盘"
+        }
+        return quote.displayCode
     }
 
 }
