@@ -120,9 +120,11 @@ struct PostDetailView: View {
             else { standardDetail }
         }
         .overlay(alignment: .bottomTrailing) {
-            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭动态详情")
-                .padding(.trailing, 16)
-                .padding(.bottom, sheetCloseBottomPadding)
+            if post.sourceName != "Truth" {
+                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭动态详情")
+                    .padding(.trailing, 16)
+                    .padding(.bottom, sheetCloseBottomPadding)
+            }
         }
         .navigationDestination(item: $selectedXAuthor) { author in
             XAuthorPostsView(author: author)
@@ -1140,47 +1142,42 @@ struct PostDetailView: View {
     }
 
     private var truthDetail: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
                 truthDetailAuthor
+                Spacer(minLength: 0)
+                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭动态详情")
+            }
+            .frame(maxWidth: 640)
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
 
-                TruthLocalTranslationView(post: post, detail: true)
-                    .font(.body)
-                    .lineSpacing(6)
-                    .textSelection(.enabled)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    TruthLocalTranslationView(post: post, detail: true, openOriginal: truthOriginalAction)
+                        .font(.body)
+                        .lineSpacing(6)
 
-                if let link = post.linkURL,
-                   let scheme = link.scheme?.lowercased(),
-                   ["https", "http"].contains(scheme), link.host != nil {
-                    VStack(spacing: 6) {
-                        Divider()
-                        Button {
-                            presentedArticleLink = InAppBrowserDestination(url: link, embeddedWebsiteSource: .truth)
-                        } label: {
-                            HStack {
-                                Text("查看原文网站")
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.caption.weight(.semibold))
-                                    .accessibilityHidden(true)
-                            }
-                            .font(.subheadline.weight(.semibold))
-                            .frame(minHeight: 44)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Color.accentColor)
-                        .accessibilityHint("在应用内打开 Truth Social")
+                    if let time = post.articlePostAt.flatMap(formatTruthTimestamp) ?? post.formattedTime {
+                        Text(time)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
                     }
                 }
+                .frame(maxWidth: 640, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 24)
+                .frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: 640, alignment: .leading)
-            .padding(.horizontal, 20)
-            .padding(.top, 24)
-            .padding(.bottom, 76)
-            .frame(maxWidth: .infinity)
         }
         .background(Color(uiColor: .systemBackground))
+    }
+
+    private var truthOriginalAction: (() -> Void)? {
+        guard let link = post.linkURL, let scheme = link.scheme?.lowercased(),
+              ["https", "http"].contains(scheme), link.host != nil else { return nil }
+        return { presentedArticleLink = InAppBrowserDestination(url: link, embeddedWebsiteSource: .truth) }
     }
 
     private var truthDetailAuthor: some View {
@@ -1195,8 +1192,8 @@ struct PostDetailView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("特朗普")
                     .font(.headline)
-                if let time = post.articlePostAt.flatMap(formatTruthTimestamp) ?? post.formattedTime {
-                    Text(time)
+                if let handle = post.authorHandle {
+                    Text(handle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

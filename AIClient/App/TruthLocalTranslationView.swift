@@ -262,19 +262,42 @@ final class FeedTranslationCache {
 struct TruthLocalTranslationView: View {
     let post: Post
     var detail = false
+    var openOriginal: (() -> Void)?
 
     var body: some View {
         let original = post.originalDisplayContent
         if post.isTruthMediaPlaceholder {
             if detail {
-                Text("此帖没有正文")
+                FeedTranslationText(text: Text("此帖没有正文"), openOriginal: openOriginal)
                     .foregroundStyle(.secondary)
             }
         } else if let chinese = LocalTranslatedText.chineseText(post.truthChineseContent)
                     ?? LocalTranslatedText.chineseText(original) {
-            Text(chinese)
+            FeedTranslationText(text: Text(chinese), openOriginal: openOriginal)
         } else {
-            LocalTranslatedText(original: original, detail: detail, translationOnly: true, field: .body)
+            LocalTranslatedText(
+                original: original, detail: detail, translationOnly: true, field: .body, openOriginal: openOriginal
+            )
+        }
+    }
+}
+
+private struct FeedTranslationText: View {
+    let text: Text
+    let openOriginal: (() -> Void)?
+
+    var body: some View {
+        if let openOriginal {
+            Button(action: openOriginal) {
+                text
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("在应用内打开原文网站")
+        } else {
+            text
         }
     }
 }
@@ -294,6 +317,7 @@ struct LocalTranslatedText: View {
     var enabled = true
     var translationOnly = false
     var field: FeedTranslationField? = nil
+    var openOriginal: (() -> Void)?
 
     private static let recognizedLanguages: NSCache<NSString, NSString> = {
         let cache = NSCache<NSString, NSString>()
@@ -369,10 +393,11 @@ struct LocalTranslatedText: View {
         } else if enabled, let language = Self.sourceLanguage(original) {
             if #available(iOS 18.0, *) {
                 FeedDeviceTranslatedText(original: original, detail: detail, sourceIdentifier: language,
-                                         translationOnly: translationOnly, field: field)
+                                         translationOnly: translationOnly, field: field, openOriginal: openOriginal)
                     .id(language + ":" + original)
             } else if let field {
-                Text("\(field.rawValue)译文暂不可用").foregroundStyle(.secondary)
+                FeedTranslationText(text: Text("\(field.rawValue)译文暂不可用"), openOriginal: openOriginal)
+                    .foregroundStyle(.secondary)
                 if detail, !translationOnly { DisclosureGroup("查看原文") { Text(original).textSelection(.enabled) } }
             } else if !translationOnly {
                 Text(original)
@@ -380,7 +405,8 @@ struct LocalTranslatedText: View {
         } else if !translationOnly {
             Text(original)
         } else if let field {
-            Text("\(field.rawValue)译文暂不可用").foregroundStyle(.secondary)
+            FeedTranslationText(text: Text("\(field.rawValue)译文暂不可用"), openOriginal: openOriginal)
+                .foregroundStyle(.secondary)
         }
     }
 }
@@ -486,6 +512,7 @@ private struct FeedDeviceTranslatedText: View {
     let translationOnly: Bool
     let field: FeedTranslationField?
     let rendersText: Bool
+    let openOriginal: (() -> Void)?
     let onTranslation: ((String) -> Void)?
     private let key: String
     @State private var display: FeedTranslationCache.DisplayState
@@ -500,7 +527,8 @@ private struct FeedDeviceTranslatedText: View {
 
     init(
         original: String, detail: Bool, sourceIdentifier: String, translationOnly: Bool,
-        field: FeedTranslationField?, rendersText: Bool = true, onTranslation: ((String) -> Void)? = nil
+        field: FeedTranslationField?, rendersText: Bool = true, openOriginal: (() -> Void)? = nil,
+        onTranslation: ((String) -> Void)? = nil
     ) {
         self.original = original
         self.detail = detail
@@ -508,6 +536,7 @@ private struct FeedDeviceTranslatedText: View {
         self.translationOnly = translationOnly
         self.field = field
         self.rendersText = rendersText
+        self.openOriginal = openOriginal
         self.onTranslation = onTranslation
         key = FeedTranslationCache.key(original, language: sourceIdentifier)
         _display = State(initialValue: FeedTranslationCache.shared.displayState(for: key))
@@ -517,9 +546,9 @@ private struct FeedDeviceTranslatedText: View {
         VStack(alignment: .leading, spacing: detail ? 8 : 0) {
             if rendersText {
                 if let translated = display.text {
-                    Text(translated)
+                    FeedTranslationText(text: Text(translated), openOriginal: openOriginal)
                 } else if let field {
-                    Text(status(for: field))
+                    FeedTranslationText(text: Text(status(for: field)), openOriginal: openOriginal)
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("feed-translation-status")
                 } else if !translationOnly {
