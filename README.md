@@ -59,4 +59,4 @@ GitHub `main` 是稳定代码源。开始前运行 `./ci/safe-sync.sh main`。�
 
 同一台 iPhone 已验证 Ad Hoc 构建 17 可直接覆盖到构建 18，原有本地设置文件保留。
 
-本机配置在 `~/.local/share/focus-direct-install/release-config.json`，由发布主机保管，文件权限为 `0600`。配置包括 HTTPS 公网入口 `public_origin`、静态资源目录 `public_img_root`、固定的随机目录名 `channel`、唯一的设备登记编号 `device_udid` 和签名团队 `team_id`。同一设备的后续构建继续使用同一个 `channel`。直装发布会把该页面地址写入已签名 App 的 `FocusDirectInstallURL`。
+本机配置在 `~/.local/share/focus-direct-install/release-config.json`，由发布主机保管，文件权限为 `0600`。配置包括 HTTPS 公网入口 `public_origin`、静态资源目录 `public_img_root`、固定的随机目录名 `channel`、设备登记编号数组 `device_udids` 和签名团队 `team_id`。新增设备时在数组里保留原设备，继续使用同一个 `channel`。签名工作流会登记名单中尚未登记的设备，发布器要求主 App 和两个通知扩展的设备名单都与配置一致。直装发布会把该页面地址写入已签名 App 的 `FocusDirectInstallURL`。

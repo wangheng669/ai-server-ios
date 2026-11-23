@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build, sign and publish an Ad Hoc build of 焦点 for the registered iPhone."""
+"""Build, sign and publish an Ad Hoc build of 焦点 for the configured devices."""
 
 import argparse
 import base64
@@ -264,7 +264,7 @@ def verify_app(work, ipa, config, entry_url, version, build):
         profile = component_plist(["security", "cms", "-D", "-i", component / "embedded.mobileprovision"])
         signed = component_plist(["codesign", "-d", "--entitlements", ":-", component])
         allowed = profile["Entitlements"]
-        require(profile["ProvisionedDevices"] == [config["device_udid"]],
+        require(sorted(device.upper() for device in profile["ProvisionedDevices"]) == config["device_udids"],
                 f"Unexpected device list in {bundle_id}")
         require(profile["TeamIdentifier"] == [config["team_id"]] and not profile.get("ProvisionsAllDevices"),
                 f"Unexpected profile team or distribution type in {bundle_id}")
@@ -285,7 +285,7 @@ def verify_app(work, ipa, config, entry_url, version, build):
             require(info["FocusDirectInstallURL"] == entry_url, "The app must open the fixed install page")
             require(signed.get("aps-environment") == allowed.get("aps-environment") == "production",
                     "Expected production push notifications for Ad Hoc distribution")
-        print(f"Verified Ad Hoc signature and registered device: {bundle_id}", flush=True)
+        print(f"Verified Ad Hoc signature and {len(config['device_udids'])} registered devices: {bundle_id}", flush=True)
     require(verified_ids == expected_ids, "Expected both notification extensions")
     return app_binary_uuids(app)
 
@@ -499,6 +499,8 @@ def export_signed(config, entry_url, identity, handoff, checksum, auth, lock_fd)
                                            "manageAppVersionAndBuildNumber": False}))
         key.write_bytes(private_key)
         try:
+            command(["ruby", Path(__file__).with_name("register-focus-adhoc-devices.rb"), key, key_id, issuer_id],
+                    input=json.dumps(config["device_udids"]), text=True, pass_fds=(lock_fd,))
             with (work / "export.log").open("wb") as log:
                 result = subprocess.run(["xcodebuild", "-exportArchive", "-archivePath", archive,
                                          "-exportOptionsPlist", options, "-exportPath", export,
@@ -674,7 +676,14 @@ def main():
     require(re.fullmatch(r"focus-update-[a-f0-9]{48}", channel_name), "Invalid private channel path")
     channel = Path(config["public_img_root"]).resolve(strict=True) / channel_name
     entry_url = f"{config['public_origin']}/img/{channel_name}/install.html"
-    configuration = json.dumps([entry_url, config["team_id"], config["device_udid"]]).encode()
+    devices = config["device_udids"]
+    require(isinstance(devices, list) and devices and all(
+        isinstance(device, str) and re.fullmatch(r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}|[0-9A-Fa-f]{40}", device)
+        for device in devices
+    ), "Expected a nonempty list of device UDIDs")
+    config["device_udids"] = sorted(device.upper() for device in devices)
+    require(len(set(config["device_udids"])) == len(devices), "Device UDIDs must be unique")
+    configuration = json.dumps([entry_url, config["team_id"], config["device_udids"]]).encode()
     identity = {"source_commit": args.source_commit, "version": args.version, "build": args.build,
                 "configuration_sha256": hashlib.sha256(configuration).hexdigest()}
     key = json.dumps([entry_url, target]).encode()
