@@ -19,9 +19,22 @@ udids.each do |udid|
     ).fetch("data")
   end
   attributes = device.fetch("attributes")
-  unless attributes.fetch("udid").casecmp?(udid) && attributes.fetch("status") == "ENABLED"
-    abort "Focus device ending in #{udid[-8, 8]} is not enabled in Apple Developer."
+  abort "Apple Developer returned a different device." unless attributes.fetch("udid").casecmp?(udid)
+
+  device_id = device.fetch("id")
+  device_path = "/v1/devices/#{device_id}"
+  status = attributes.fetch("status")
+  if status == "DISABLED"
+    response = client.patch(device_path, data: { type: "devices", id: device_id, attributes: { status: "ENABLED" } })
+    status = response.fetch("data").fetch("attributes").fetch("status")
   end
+  10.times do
+    break unless status == "PROCESSING"
+
+    sleep 6
+    status = client.get(device_path).fetch("data").fetch("attributes").fetch("status")
+  end
+  abort "Apple Developer status for Focus device ending in #{udid[-8, 8]}: #{status} (requires ENABLED)." unless status == "ENABLED"
 end
 
 puts "Apple Developer has #{udids.length} enabled devices for Focus."
