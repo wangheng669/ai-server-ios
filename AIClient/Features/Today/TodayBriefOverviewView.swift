@@ -1,3 +1,4 @@
+import OSLog
 import SwiftUI
 import UIKit
 
@@ -1224,6 +1225,10 @@ struct TodayEditionStatusDetails: View {
 }
 
 struct TodayToolsMenu<Heading: View, Report: View>: View {
+    private var updateLogger: Logger {
+        Logger(subsystem: Bundle.main.bundleIdentifier ?? "AIServerClient", category: "UpdateCheck")
+    }
+
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
     @State private var headingHeight: CGFloat = 63
@@ -1237,8 +1242,42 @@ struct TodayToolsMenu<Heading: View, Report: View>: View {
     @State private var updateCheckState: UpdateCheckState = .idle
     @State private var availableUpdate: AvailableUpdate?
 
-    private enum UpdateCheckState {
-        case idle, checking, current, updateAvailable, failed
+    private enum UpdateCheckState: Equatable {
+        case idle, checking, current, updateAvailable
+        case failed(UpdateCheckFailure)
+    }
+
+    private enum UpdateCheckFailure: Error, Equatable {
+        case configuration, invalidManifest
+        case server(Int)
+        case network(URLError.Code)
+
+        var isTransient: Bool {
+            switch self {
+            case .server(500), .server(502), .server(503), .server(504),
+                 .network(.timedOut), .network(.networkConnectionLost),
+                 .network(.notConnectedToInternet), .network(.cannotConnectToHost),
+                 .network(.cannotFindHost), .network(.dnsLookupFailed):
+                return true
+            default:
+                return false
+            }
+        }
+
+        var message: String {
+            switch self {
+            case .configuration:
+                return "当前版本缺少更新配置"
+            case .invalidManifest:
+                return "更新清单无效，请稍后重试"
+            case .server(429):
+                return "更新请求过于频繁，请稍后重试"
+            case .server(let status):
+                return "更新服务器返回错误（\(status)），请稍后重试"
+            case .network(let code):
+                return NetworkErrorPresentation.message(for: URLError(code))
+            }
+        }
     }
 
     private enum InstallerPresentation: Equatable {
@@ -1442,8 +1481,8 @@ struct TodayToolsMenu<Heading: View, Report: View>: View {
             .disabled(updateCheckState == .checking)
             .accessibilityIdentifier("today-check-update")
 
-            if updateCheckState == .failed {
-                Text("暂时无法检查更新")
+            if case .failed(let failure) = updateCheckState {
+                Text(failure.message)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("today-update-check-failed")
@@ -1490,28 +1529,25 @@ struct TodayToolsMenu<Heading: View, Report: View>: View {
 
     @MainActor
     private func checkForUpdate() async {
+        guard !Task.isCancelled else { return }
         updateCheckState = .checking
         do {
             guard let entry = installEntryURL, let installed = installedRelease else {
-                throw URLError(.badURL)
+                throw UpdateCheckFailure.configuration
             }
             let channel = entry.deletingLastPathComponent()
-            guard var components = URLComponents(url: channel.appendingPathComponent("latest.json"), resolvingAgainstBaseURL: false) else {
-                throw URLError(.badURL)
+            let published: PublishedVersion
+            do {
+                published = try await fetchPublishedVersion(in: channel)
+            } catch let failure as UpdateCheckFailure where failure.isTransient {
+                updateLogger.info("Retrying update check after \(String(describing: failure), privacy: .public)")
+                try await Task.sleep(for: .milliseconds(750))
+                published = try await fetchPublishedVersion(in: channel)
             }
-            components.queryItems = [.init(name: "check", value: UUID().uuidString)]
-            guard let url = components.url else { throw URLError(.badURL) }
-            var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 6)
-            request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-            let (data, response) = try await URLSession.shared.data(for: request)
             try Task.checkCancellation()
-            guard let response = response as? HTTPURLResponse, response.statusCode == 200 else {
-                throw URLError(.badServerResponse)
-            }
-            let published = try JSONDecoder().decode(PublishedVersion.self, from: data)
             guard let remote = numericVersion(published.version, build: published.build),
                   let installURL = published.installURL(in: channel) else {
-                throw URLError(.cannotParseResponse)
+                throw UpdateCheckFailure.invalidManifest
             }
             if installed.order.lexicographicallyPrecedes(remote) {
                 availableUpdate = AvailableUpdate(version: published.version, build: published.build, installURL: installURL)
@@ -1520,10 +1556,37 @@ struct TodayToolsMenu<Heading: View, Report: View>: View {
                 availableUpdate = nil
                 updateCheckState = .current
             }
+        } catch is CancellationError {
+            guard !Task.isCancelled else { return }
+            updateCheckState = .idle
         } catch {
             guard !Task.isCancelled else { return }
-            updateCheckState = .failed
+            let failure = error as? UpdateCheckFailure ?? .network(.unknown)
+            updateLogger.error("Update check failed: \(String(describing: failure), privacy: .public)")
+            updateCheckState = .failed(failure)
         }
+    }
+
+    private func fetchPublishedVersion(in channel: URL) async throws -> PublishedVersion {
+        let url = channel.appendingPathComponent("latest.json").appending(queryItems: [
+            .init(name: "check", value: UUID().uuidString)
+        ])
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8)
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch let error as URLError {
+            if error.code == .cancelled { throw CancellationError() }
+            throw UpdateCheckFailure.network(error.code)
+        }
+        guard let response = response as? HTTPURLResponse else { throw UpdateCheckFailure.invalidManifest }
+        guard response.statusCode == 200 else { throw UpdateCheckFailure.server(response.statusCode) }
+        guard let published = try? JSONDecoder().decode(PublishedVersion.self, from: data) else {
+            throw UpdateCheckFailure.invalidManifest
+        }
+        return published
     }
 
     private func requestInstallation(_ update: AvailableUpdate) {
