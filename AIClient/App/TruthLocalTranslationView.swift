@@ -262,9 +262,20 @@ final class FeedTranslationCache {
 struct TruthLocalTranslationView: View {
     let post: Post
     var detail = false
+
     var body: some View {
-        LocalTranslatedText(original: post.originalDisplayContent,
-                            serverChinese: post.truthChineseContent, detail: detail, field: .body)
+        let original = post.originalDisplayContent
+        if post.isTruthMediaPlaceholder {
+            if detail {
+                Text("此帖没有正文")
+                    .foregroundStyle(.secondary)
+            }
+        } else if let chinese = LocalTranslatedText.chineseText(post.truthChineseContent)
+                    ?? LocalTranslatedText.chineseText(original) {
+            Text(chinese)
+        } else {
+            LocalTranslatedText(original: original, detail: detail, translationOnly: true, field: .body)
+        }
     }
 }
 
@@ -362,12 +373,14 @@ struct LocalTranslatedText: View {
                     .id(language + ":" + original)
             } else if let field {
                 Text("\(field.rawValue)译文暂不可用").foregroundStyle(.secondary)
-                if detail { DisclosureGroup("查看原文") { Text(original).textSelection(.enabled) } }
+                if detail, !translationOnly { DisclosureGroup("查看原文") { Text(original).textSelection(.enabled) } }
             } else if !translationOnly {
                 Text(original)
             }
         } else if !translationOnly {
             Text(original)
+        } else if let field {
+            Text("\(field.rawValue)译文暂不可用").foregroundStyle(.secondary)
         }
     }
 }
