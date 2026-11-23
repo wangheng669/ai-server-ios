@@ -651,7 +651,8 @@ struct TodayReadingEvent: Identifiable, Sendable {
 struct TodaySourcePresentation: Identifiable, Sendable {
     let post: Post
     let originalText: String
-    let reply: String?
+    let chineseText: String?
+    let reply: XReplyContext?
     let quote: XQuotedPost?
     let author: String
     let avatarURL: URL?
@@ -665,7 +666,8 @@ struct TodaySourcePresentation: Identifiable, Sendable {
     init(post: Post) {
         self.post = post
         originalText = post.xStoredOriginalContent
-        reply = post.xReplyContext?.text
+        chineseText = post.hasTranslation && !post.needsXTranslation ? post.displayContent : nil
+        reply = post.xReplyContext
         let sourceQuote = post.xQuotedPost
         quote = sourceQuote
         author = post.authorName
@@ -709,38 +711,34 @@ struct TodayInlineSourceView: View {
     let source: TodaySourcePresentation
     let width: CGFloat
     let allowsTranslation: Bool
-    @State private var showsTranslation = false
+
+    private var chineseText: String? {
+        if let chinese = LocalTranslatedText.chineseText(source.chineseText) { return chinese }
+        guard let tweetID = source.post.xTweetID else { return nil }
+        return FeedTranslationCache.shared.cachedXTranslation(tweetID: tweetID, original: source.originalText)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if !source.originalText.isEmpty {
-                Text(source.originalText)
-                    .font(.body)
-                    .foregroundStyle(TodayBriefStyle.ink)
-                    .lineSpacing(5)
-                    .textSelection(.enabled)
-            }
-            if allowsTranslation, source.post.sourceName == "X",
-               LocalTranslatedText.sourceLanguage(source.originalText) != nil {
-                DisclosureGroup("查看译文", isExpanded: $showsTranslation) {
-                    if showsTranslation {
-                        if let chinese = LocalTranslatedText.validTranslation(
-                            source.post.displayContent, original: source.originalText
-                        ) {
-                            Text(chinese)
-                        } else {
-                            LocalTranslatedText(
-                                original: source.originalText, detail: true, translationOnly: true, field: .body
-                            )
-                        }
-                    }
+            FeedReaderTranslationText(
+                original: source.originalText, chinese: chineseText, field: .body, isActive: allowsTranslation
+            )
+            .font(.body)
+            .foregroundStyle(TodayBriefStyle.ink)
+            .lineSpacing(5)
+            .textSelection(.enabled)
+
+            if let reply = source.reply, reply.displayText != nil {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("回复")
+                    FeedReaderTranslationText(
+                        original: reply.text, chinese: reply.textZH, field: .reply, isActive: allowsTranslation
+                    )
                 }
-                .font(.callout)
+                .font(.subheadline)
+                .lineSpacing(4)
+                .foregroundStyle(.secondary)
                 .textSelection(.enabled)
-            }
-            if let reply = source.reply, !reply.isEmpty {
-                Text("回复：\(reply)")
-                    .font(.subheadline).lineSpacing(4).foregroundStyle(.secondary).textSelection(.enabled)
             }
             if source.hasMedia {
                 XFeedMediaView(post: source.post, timelineWidth: width, showsQuotedPost: false)
@@ -750,7 +748,8 @@ struct TodayInlineSourceView: View {
                     quote: quote,
                     availableWidth: width,
                     isDetail: true,
-                    showsOriginalText: true
+                    showsTranslationOnly: true,
+                    isTranslationActive: allowsTranslation
                 )
             }
         }
