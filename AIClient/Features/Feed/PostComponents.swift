@@ -127,6 +127,7 @@ extension View {
 
 struct InAppBrowserDestination: Identifiable, Equatable {
     let url: URL
+    var embeddedWebsiteSource: FeedSource?
     var id: String { url.absoluteString }
 }
 
@@ -612,14 +613,23 @@ private struct InAppBrowserCoverModifier: ViewModifier {
     func body(content: Content) -> some View {
         if horizontalSizeClass == .regular {
             content.appFullScreenCover(item: $destination) { destination in
-                InAppBrowserSheet(url: destination.url)
+                browser(for: destination)
             }
         } else {
             content.appSheet(item: $destination) { destination in
-                InAppBrowserSheet(url: destination.url)
+                browser(for: destination)
                 .appPresentationDetents([.large])
                 .appPresentationCornerRadius(28)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func browser(for destination: InAppBrowserDestination) -> some View {
+        if let source = destination.embeddedWebsiteSource {
+            EmbeddedWebPage(url: destination.url, source: source)
+        } else {
+            InAppBrowserSheet(url: destination.url)
         }
     }
 }

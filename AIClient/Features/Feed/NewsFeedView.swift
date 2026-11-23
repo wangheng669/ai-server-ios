@@ -1765,7 +1765,7 @@ private func rssDirectoryAvatarURL(for post: Post, feeds: [RSSFeedSource]) -> UR
     return feeds.first { $0.id == feedID }?.preferredAvatarURL
 }
 
-private struct EmbeddedWebPage: View {
+struct EmbeddedWebPage: View {
     let url: URL
     let source: FeedSource
     @StateObject private var model = EmbeddedWebViewModel()
@@ -3524,10 +3524,6 @@ struct NewsCardView: View, Equatable {
 
     private var truthCard: some View {
         let hasImages = !post.imageURLs.isEmpty
-        let hasMedia = hasImages || !post.videoURLs.isEmpty || post.previewURL != nil
-        let isMediaPlaceholder = hasMedia && post.originalDisplayContent.wholeMatch(
-            of: #/\[(?:图片帖子: [1-9][0-9]*张图片|视频帖子: [1-9][0-9]*个视频|媒体帖子(?:: [1-9][0-9]*张图片, [1-9][0-9]*个视频)?)\]/#
-        ) != nil
 
         return VStack(alignment: .leading, spacing: 8) {
             if let time = post.formattedTime {
@@ -3536,7 +3532,7 @@ struct NewsCardView: View, Equatable {
                     .foregroundStyle(.secondary)
             }
 
-            if !isMediaPlaceholder {
+            if !post.isTruthMediaPlaceholder {
                 TruthLocalTranslationView(post: post)
                     .font(.system(size: 15, weight: .regular))
                     .lineSpacing(3)

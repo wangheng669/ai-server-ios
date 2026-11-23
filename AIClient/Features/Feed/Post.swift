@@ -951,6 +951,12 @@ struct Post: Codable, Identifiable, Hashable {
         return ["in this article", "comments", "comment"].contains(normalized)
     }
     var truthChineseContent: String? { htmlText(contentZH) }
+    var isTruthMediaPlaceholder: Bool {
+        let hasMedia = !imageURLs.isEmpty || !videoURLs.isEmpty || previewURL != nil
+        return hasMedia && originalDisplayContent.wholeMatch(
+            of: #/\[(?:图片帖子: [1-9][0-9]*张图片|视频帖子: [1-9][0-9]*个视频|媒体帖子(?:: [1-9][0-9]*张图片, [1-9][0-9]*个视频)?)\]/#
+        ) != nil
+    }
     var truthFeedContent: String {
         guard let translated = truthChineseContent else { return originalDisplayContent }
         let markers = ["https://", "http://", "https：//", "http：//"]

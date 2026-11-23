@@ -57,7 +57,6 @@ struct PostDetailView: View {
     @State private var wikipediaEntitiesByParagraph: [Int: [WikipediaEntity]] = [:]
     @State private var selectedWikipediaEntity: WikipediaSelection?
     @State private var presentedWikipediaEntity: WikipediaEntity?
-    @State private var isTruthBookmarked: Bool
     @State private var isRSSBookmarked: Bool
     @State private var xComments: [XComment] = []
     @State private var isLoadingXComments = false
@@ -98,7 +97,6 @@ struct PostDetailView: View {
         _newYorkTimesArticle = State(initialValue: storedArticle)
         _isLoadingNewYorkTimesBody = State(initialValue: post.isNewYorkTimes && storedArticle == nil)
         _isLoadingQbitAIArticle = State(initialValue: post.isQbitAIArticle)
-        _isTruthBookmarked = State(initialValue: TruthBookmarkStore.contains(post.id))
         _isRSSBookmarked = State(initialValue: RSSBookmarkStore.contains(post.id))
         _isLoadingXFullText = State(initialValue:
             post.sourceName == "X"
@@ -209,7 +207,7 @@ struct PostDetailView: View {
 
     private var sheetCloseBottomPadding: CGFloat {
         post.isWeiboRSS || isWeChatArticle
-            || ["知乎", "Truth"].contains(post.sourceName) ? 72 : 16
+            || post.sourceName == "知乎" ? 72 : 16
     }
 
     private var hidesNavigationBar: Bool {
@@ -1142,164 +1140,69 @@ struct PostDetailView: View {
     }
 
     private var truthDetail: some View {
-        VStack(spacing: 0) {
-            truthDetailToolbar
-            Divider().opacity(0.55)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                truthDetailAuthor
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    truthDetailAuthor
-                        .padding(.top, 18)
+                TruthLocalTranslationView(post: post, detail: true)
+                    .font(.body)
+                    .lineSpacing(6)
+                    .textSelection(.enabled)
 
-                    Divider()
-                        .opacity(0.55)
-                        .padding(.top, 18)
-
-                    TruthLocalTranslationView(post: post, detail: true)
-                        .font(.system(size: 18, weight: .regular))
-                        .lineSpacing(6)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                        .padding(.top, 18)
-
-                    if !post.imageURLs.isEmpty || post.previewURL != nil {
-                        PostMediaGrid(
-                            post: post,
-                            singleImageMaxHeight: 360,
-                            singleImageContentMode: .fill,
-                            multiImageHeight: 180,
-                            availableWidth: max(UIScreen.main.bounds.width - 32, 240)
-                        )
-                        .padding(.top, 18)
-                    }
-
-                    Divider()
-                        .opacity(0.55)
-                        .padding(.top, 18)
-
-                    Text(truthSourceLine)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, 16)
-
-                    if post.linkURL != nil {
-                        Button { openOriginal() } label: {
+                if let link = post.linkURL,
+                   let scheme = link.scheme?.lowercased(),
+                   ["https", "http"].contains(scheme), link.host != nil {
+                    VStack(spacing: 6) {
+                        Divider()
+                        Button {
+                            presentedArticleLink = InAppBrowserDestination(url: link, embeddedWebsiteSource: .truth)
+                        } label: {
                             HStack {
-                                Text("在 Truth Social 中打开")
+                                Text("查看原文网站")
                                 Spacer()
                                 Image(systemName: "chevron.right")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(.secondary)
+                                    .font(.caption.weight(.semibold))
+                                    .accessibilityHidden(true)
                             }
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(.primary)
-                            .frame(height: 48)
+                            .font(.subheadline.weight(.semibold))
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .overlay(alignment: .top) { Divider().opacity(0.55) }
+                        .foregroundStyle(Color.accentColor)
+                        .accessibilityHint("在应用内打开 Truth Social")
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 30)
             }
+            .frame(maxWidth: 640, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.top, 24)
+            .padding(.bottom, 76)
+            .frame(maxWidth: .infinity)
         }
         .background(Color(uiColor: .systemBackground))
-        .safeAreaInset(edge: .bottom, spacing: 0) { truthDetailBottomBar }
-    }
-
-    private var truthDetailToolbar: some View {
-        HStack {
-            Spacer()
-
-            if let link = post.linkURL {
-                ShareLink(item: link) {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 19))
-                        .frame(width: 44, height: 44, alignment: .trailing)
-                }
-                .foregroundStyle(.primary)
-                .accessibilityLabel("分享帖子")
-            } else {
-                Color.clear.frame(width: 44, height: 44)
-            }
-        }
-        .padding(.horizontal, 16)
-        .frame(height: 50)
     }
 
     private var truthDetailAuthor: some View {
-        HStack(spacing: 11) {
+        HStack(spacing: 10) {
             Image("TruthMark")
                 .resizable()
                 .scaledToFill()
-                .frame(width: 52, height: 52)
+                .frame(width: 40, height: 40)
                 .clipShape(Circle())
+                .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text("特朗普")
-                        .font(.system(size: 17, weight: .bold))
-                    Image(systemName: "checkmark.seal.fill")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.red)
-                }
-                if let time = post.formattedTime {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("特朗普")
+                    .font(.headline)
+                if let time = post.articlePostAt.flatMap(formatTruthTimestamp) ?? post.formattedTime {
                     Text(time)
-                        .font(.system(size: 14))
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
-
-            Spacer(minLength: 6)
         }
-    }
-
-    private var truthDetailBottomBar: some View {
-        HStack(spacing: 0) {
-            Button {
-                isTruthBookmarked.toggle()
-                TruthBookmarkStore.set(isTruthBookmarked, postID: post.id)
-            } label: {
-                Label("收藏", systemImage: isTruthBookmarked ? "bookmark.fill" : "bookmark")
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .contentShape(Rectangle())
-            }
-
-            Divider().frame(height: 28)
-
-            if let link = post.linkURL {
-                ShareLink(item: link) {
-                    Label("分享", systemImage: "square.and.arrow.up")
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                    .contentShape(Rectangle())
-                }
-            } else {
-                Label("分享", systemImage: "square.and.arrow.up")
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .contentShape(Rectangle())
-            }
-
-            Divider().frame(height: 28)
-
-            Button { openOriginal() } label: {
-                Label("打开原帖", systemImage: "arrow.up.right.square")
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .contentShape(Rectangle())
-            }
-            .disabled(post.linkURL == nil)
-        }
-        .font(.system(size: 13.5, weight: .medium))
-        .foregroundStyle(.primary)
-        .frame(height: 58)
-        .background(.bar)
-        .overlay(alignment: .top) { Divider().opacity(0.65) }
-        .sensoryFeedback(.success, trigger: isTruthBookmarked)
-    }
-
-    private var truthSourceLine: String {
-        let time = post.articlePostAt.flatMap(formatTruthTimestamp) ?? post.formattedTime
-        return ["来源：Truth Social", time].compactMap { $0 }.joined(separator: "  ·  ")
+        .accessibilityElement(children: .combine)
     }
 
     private func formatTruthTimestamp(_ raw: String) -> String? {
@@ -3527,24 +3430,6 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
                 self.failureObserver = nil
             }
         }
-    }
-}
-
-private enum TruthBookmarkStore {
-    private static let key = "truth.bookmarkedPostIDs"
-
-    static func contains(_ postID: Int) -> Bool {
-        Set(UserDefaults.standard.array(forKey: key) as? [Int] ?? []).contains(postID)
-    }
-
-    static func set(_ isBookmarked: Bool, postID: Int) {
-        var values = Set(UserDefaults.standard.array(forKey: key) as? [Int] ?? [])
-        if isBookmarked {
-            values.insert(postID)
-        } else {
-            values.remove(postID)
-        }
-        UserDefaults.standard.set(values.sorted(), forKey: key)
     }
 }
 
