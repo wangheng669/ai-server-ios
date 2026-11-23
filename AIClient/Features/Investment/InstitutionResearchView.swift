@@ -492,7 +492,7 @@ struct InstitutionResearchDetail: View {
                 Link(destination: item.source.url) {
                     HStack {
                         VStack(alignment: .leading, spacing: 5) {
-                            Text("阅读官方原文").font(.subheadline.weight(.semibold))
+                            Text("打开官方来源").font(.subheadline.weight(.semibold))
                             Text(item.source.url.host ?? item.institution).font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()

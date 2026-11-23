@@ -234,6 +234,13 @@ struct ChinaMacroAPIObservation: Decodable {
     }
 }
 
+struct ChinaMacroSnapshot {
+    let years: [ChinaMacroYear]
+    let latestGrowth: ChinaMacroAPIObservation?
+    let latestInflation: ChinaMacroAPIObservation?
+    let generatedAt: Date
+}
+
 struct ChinaMacroService {
     private let session: URLSession
     private let appBaseURL: URL
@@ -243,7 +250,7 @@ struct ChinaMacroService {
         self.appBaseURL = appBaseURL
     }
 
-    func history(onCached: @escaping @MainActor ((years: [ChinaMacroYear], generatedAt: Date)) -> Void) async throws -> (years: [ChinaMacroYear], generatedAt: Date) {
+    func history(onCached: @escaping @MainActor (ChinaMacroSnapshot) -> Void) async throws -> ChinaMacroSnapshot {
         let url = appBaseURL.appending(path: "api/ios/v1/economy/china-macro")
         var request = URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData, timeoutInterval: 8)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -253,7 +260,13 @@ struct ChinaMacroService {
             guard !years.isEmpty, let generatedAt = Self.parseServerTimestamp(snapshot.generatedAt) else {
                 throw URLError(.cannotParseResponse)
             }
-            return (years, generatedAt)
+            let newest = snapshot.observations.sorted { $0.periodDate > $1.periodDate }
+            return ChinaMacroSnapshot(
+                years: years,
+                latestGrowth: newest.first { $0.metricKey == "gdp_growth_recent" },
+                latestInflation: newest.first { $0.metricKey == "inflation_recent" },
+                generatedAt: generatedAt
+            )
         }
     }
 
@@ -332,6 +345,8 @@ final class ChinaMacroStore {
     var years: [ChinaMacroYear] = []
     var isLoading = false
     var loadError = false
+    var latestGrowth: ChinaMacroAPIObservation?
+    var latestInflation: ChinaMacroAPIObservation?
     var lastUpdatedAt: Date?
     private var lastLoadedAt: Date?
     private let service: ChinaMacroService
@@ -353,18 +368,22 @@ final class ChinaMacroStore {
         do {
             let snapshot = try await service.history { cached in
                 guard self.years.isEmpty else { return }
-                self.years = cached.years
-                self.lastUpdatedAt = cached.generatedAt
+                self.apply(cached)
             }
-            years = snapshot.years
+            apply(snapshot)
             loadError = years.isEmpty
-            lastUpdatedAt = snapshot.generatedAt
             lastLoadedAt = Date()
         } catch is CancellationError {
             return
         } catch {
             loadError = true
         }
+    }
+    private func apply(_ snapshot: ChinaMacroSnapshot) {
+        years = snapshot.years
+        latestGrowth = snapshot.latestGrowth
+        latestInflation = snapshot.latestInflation
+        lastUpdatedAt = snapshot.generatedAt
     }
 }
 
@@ -518,62 +537,47 @@ struct ChinaMacroView: View {
     }
 
     private var snapshotBar: some View {
-        HStack(spacing: 8) {
+        let lpr = latest(.mortgageRate)
+        return HStack(spacing: 8) {
+            snapshotObservation("GDP 增速", observation: store.latestGrowth, tint: InvestmentDesign.accent)
+            snapshotObservation("CPI 同比", observation: store.latestInflation, tint: .orange)
             snapshotItem(
-                title: "增长",
-                value: latest(.gdpGrowth).flatMap { ChinaMacroMetric.gdpGrowth.value(in: $0) },
-                positiveText: "动能较强",
-                neutralText: "温和增长",
-                lowText: "动能偏弱",
-                tint: InvestmentDesign.accent
-            )
-            snapshotItem(
-                title: "物价",
-                value: latest(.inflation).flatMap { ChinaMacroMetric.inflation.value(in: $0) },
-                positiveText: "价格偏热",
-                neutralText: "价格温和",
-                lowText: "通胀低位",
-                tint: .orange
-            )
-            snapshotItem(
-                title: "利率",
-                value: latest(.mortgageRate).flatMap { ChinaMacroMetric.mortgageRate.value(in: $0) },
-                positiveText: "融资偏贵",
-                neutralText: "利率适中",
-                lowText: "利率较低",
+                "五年以上 LPR",
+                value: lpr.flatMap { ChinaMacroMetric.mortgageRate.value(in: $0) },
+                period: lpr?.periodLabel(for: .mortgageRate),
                 tint: .purple
             )
         }
     }
 
-    private func snapshotItem(
-        title: String,
-        value: Double?,
-        positiveText: String,
-        neutralText: String,
-        lowText: String,
-        tint: Color
-    ) -> some View {
-        let status: String = if let value {
-            value >= 5 ? positiveText : value >= 2 ? neutralText : lowText
-        } else {
-            "等待数据"
-        }
-        return VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(.caption2).foregroundStyle(.secondary)
-            HStack(spacing: 5) {
-                Circle().fill(tint).frame(width: 6, height: 6)
-                Text(status)
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+    @ViewBuilder
+    private func snapshotObservation(_ title: String, observation: ChinaMacroAPIObservation?, tint: Color) -> some View {
+        if let observation, let year = Int(observation.period.prefix(4)) {
+            Link(destination: observation.sourceURL) {
+                snapshotItem(title, value: observation.value, period: observation.periodLabel(year: year), tint: tint)
             }
+            .buttonStyle(.plain)
+        } else {
+            snapshotItem(title, value: nil, period: nil, tint: tint)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 11)
-        .padding(.vertical, 10)
+    }
+
+    private func snapshotItem(_ title: String, value: Double?, period: String?, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+            Text(value.map { "\(format($0))%" } ?? "—")
+                .font(.headline.monospacedDigit())
+                .foregroundStyle(tint)
+            Text(period ?? "等待数据")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
         .background(InvestmentDesign.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     private var unavailable: some View {
@@ -881,10 +885,7 @@ struct ChinaMacroView: View {
     private func latest(_ item: ChinaMacroMetric) -> ChinaMacroYear? { store.years.first { item.value(in: $0) != nil } }
 
     private var growthInsight: String {
-        guard let value = latest(.gdpGrowth).flatMap({ ChinaMacroMetric.gdpGrowth.value(in: $0) }) else {
-            return "观察经济增长与劳动力市场的长期变化"
-        }
-        return value >= 5 ? "经济增速保持较强韧性" : value >= 3 ? "经济维持温和增长" : "增长动能仍需修复"
+        "观察经济增长与劳动力市场的长期变化"
     }
 
     private func format(_ value: Double) -> String {
