@@ -1154,11 +1154,13 @@ struct PostDetailView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    TruthLocalTranslationView(post: post, detail: true, openOriginal: truthOriginalAction)
+                    TruthLocalTranslationView(post: post, openOriginal: truthOriginalAction)
                         .font(.body)
                         .lineSpacing(6)
 
-                    if let time = post.articlePostAt.flatMap(formatTruthTimestamp) ?? post.formattedTime {
+                    if let time = post.truthPublicationDate.map({
+                        $0.formatted(.dateTime.year().month().day().hour().minute().locale(Locale(identifier: "zh_CN")))
+                    }) ?? post.formattedTime {
                         Text(time)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -1175,8 +1177,7 @@ struct PostDetailView: View {
     }
 
     private var truthOriginalAction: (() -> Void)? {
-        guard let link = post.linkURL, let scheme = link.scheme?.lowercased(),
-              ["https", "http"].contains(scheme), link.host != nil else { return nil }
+        guard let link = post.truthPostURL else { return nil }
         return { presentedArticleLink = InAppBrowserDestination(url: link, embeddedWebsiteSource: .truth) }
     }
 
@@ -1200,16 +1201,6 @@ struct PostDetailView: View {
             }
         }
         .accessibilityElement(children: .combine)
-    }
-
-    private func formatTruthTimestamp(_ raw: String) -> String? {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let standard = ISO8601DateFormatter()
-        guard let date = fractional.date(from: raw) ?? standard.date(from: raw) else { return nil }
-        return date.formatted(
-            .dateTime.year().month().day().hour().minute().locale(Locale(identifier: "zh_CN"))
-        )
     }
 
     private var zhihuDetail: some View {

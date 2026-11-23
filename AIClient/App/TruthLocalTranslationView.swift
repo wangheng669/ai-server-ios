@@ -261,22 +261,19 @@ final class FeedTranslationCache {
 
 struct TruthLocalTranslationView: View {
     let post: Post
-    var detail = false
     var openOriginal: (() -> Void)?
 
     var body: some View {
-        let original = post.originalDisplayContent
         if post.isTruthMediaPlaceholder {
-            if detail {
-                FeedTranslationText(text: Text("此帖没有正文"), openOriginal: openOriginal)
-                    .foregroundStyle(.secondary)
-            }
+            FeedTranslationText(text: Text("此帖没有正文"), openOriginal: openOriginal)
+                .foregroundStyle(.secondary)
         } else if let chinese = LocalTranslatedText.chineseText(post.truthChineseContent)
-                    ?? LocalTranslatedText.chineseText(original) {
+                    ?? LocalTranslatedText.chineseText(post.originalDisplayContent) {
             FeedTranslationText(text: Text(chinese), openOriginal: openOriginal)
         } else {
             LocalTranslatedText(
-                original: original, detail: detail, translationOnly: true, field: .body, openOriginal: openOriginal
+                original: post.originalDisplayContent, detail: true,
+                translationOnly: true, field: .body, openOriginal: openOriginal
             )
         }
     }

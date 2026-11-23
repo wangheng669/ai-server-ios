@@ -1804,7 +1804,9 @@ struct PostMediaGrid: View {
     var cornerRadius: CGFloat = 8
     var videoContentMode: ContentMode = .fit
     var videoMaxHeight: CGFloat? = nil
+    var displaysVideoPlayer = true
     var onImageTap: (() -> Void)? = nil
+    var imageTapLabel: String? = nil
     @State private var gallerySelection: ImageGallerySelection?
     @State private var compactImageURLs: Set<URL> = []
     @State private var loadedSingleImageAspectRatio: CGFloat?
@@ -1838,6 +1840,10 @@ struct PostMediaGrid: View {
 
     private var contentImageURLs: [URL] {
         Array(allContentImageURLs.prefix(4))
+    }
+
+    private var imageAccessibilityLabel: String {
+        imageTapLabel ?? (onImageTap == nil ? "查看图片" : "查看文章详情")
     }
 
     private var resolvedSingleImageHeight: CGFloat {
@@ -1928,7 +1934,7 @@ struct PostMediaGrid: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             let urls = contentImageURLs
-            if let videoURL = post.feedPlaybackURL {
+            if displaysVideoPlayer, let videoURL = post.feedPlaybackURL {
                 XVideoPlayerView(
                     url: videoURL,
                     fallbackURL: post.feedPlaybackFallbackURL,
@@ -1955,7 +1961,7 @@ struct PostMediaGrid: View {
                 }
                 .frame(maxWidth: .infinity)
                 .buttonStyle(.plain)
-                .accessibilityLabel(onImageTap == nil ? "查看图片" : "查看文章详情")
+                .accessibilityLabel(imageAccessibilityLabel)
             } else if !urls.isEmpty {
                 LazyVGrid(columns: [.init(.flexible(), spacing: 3), .init(.flexible(), spacing: 3)], spacing: 3) {
                     ForEach(urls, id: \.self) { url in
@@ -1972,7 +1978,7 @@ struct PostMediaGrid: View {
                             .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel(onImageTap == nil ? "查看图片" : "查看文章详情")
+                        .accessibilityLabel(imageAccessibilityLabel)
                     }
                 }
             } else if let preview = post.previewURL {
@@ -1987,12 +1993,13 @@ struct PostMediaGrid: View {
                     )
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(onImageTap == nil ? "查看图片" : "查看文章详情")
+                .accessibilityLabel(imageAccessibilityLabel)
             }
         }
         .frame(maxWidth: availableWidth ?? .infinity, alignment: .leading)
         .clipped()
-        .task(id: post.videoURLs.first) {
+        .task(id: displaysVideoPlayer ? post.videoURLs.first : nil) {
+            guard displaysVideoPlayer else { return }
             if let video = post.videos?.first,
                let width = video.width,
                let height = video.height,

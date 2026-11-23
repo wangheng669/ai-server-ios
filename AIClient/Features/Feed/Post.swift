@@ -951,11 +951,23 @@ struct Post: Codable, Identifiable, Hashable {
         return ["in this article", "comments", "comment"].contains(normalized)
     }
     var truthChineseContent: String? { htmlText(contentZH) }
+    var truthPublicationDate: Date? {
+        guard let articlePostAt else { return nil }
+        let fractional = Date.ISO8601FormatStyle(timeZoneSeparator: .colon, includingFractionalSeconds: true)
+        let standard = Date.ISO8601FormatStyle(timeZoneSeparator: .colon)
+        return (try? fractional.parse(articlePostAt)) ?? (try? standard.parse(articlePostAt))
+    }
+    var truthPostURL: URL? {
+        guard let link = linkURL, let scheme = link.scheme?.lowercased(),
+              ["https", "http"].contains(scheme), link.host != nil else { return nil }
+        return link
+    }
     var isTruthMediaPlaceholder: Bool {
-        let hasMedia = !imageURLs.isEmpty || !videoURLs.isEmpty || previewURL != nil
-        return hasMedia && originalDisplayContent.wholeMatch(
+        guard !(images ?? []).isEmpty || !(videos ?? []).isEmpty else { return false }
+        guard let body = htmlText(content) ?? clean(text) ?? clean(summary) else { return true }
+        return body.wholeMatch(
             of: #/\[(?:图片帖子: [1-9][0-9]*张图片|视频帖子: [1-9][0-9]*个视频|媒体帖子(?:: [1-9][0-9]*张图片, [1-9][0-9]*个视频)?)\]/#
-        ) != nil
+        ) != nil || body.wholeMatch(of: #/(?i:RT:\s+)?https?:\/\/\S+/#) != nil
     }
     var truthFeedContent: String {
         guard let translated = truthChineseContent else { return originalDisplayContent }

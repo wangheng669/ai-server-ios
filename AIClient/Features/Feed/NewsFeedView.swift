@@ -167,6 +167,7 @@ struct NewsFeedView: View {
     @StateObject private var weiboFollowingModel = WeiboFollowingFeedModel()
     @State private var searchedXAuthor: XAuthorDestination?
     @State private var selectedPost: Post?
+    @State private var truthWebsiteURL: URL?
     @State private var isFeedChromeHidden = false
     @State private var isFeedAtTop = true
     @State private var sourceChromeStates: [FeedSource: Bool] = [:]
@@ -235,6 +236,9 @@ struct NewsFeedView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(uiColor: .systemBackground))
             .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(item: $truthWebsiteURL) { url in
+                EmbeddedWebPage(url: url, source: .truth, showsCloseButton: false)
+            }
         }
         .appFullScreenCover(item: $searchedXAuthor) { author in
             NavigationStack { XAuthorPostsView(author: author) }
@@ -1034,6 +1038,14 @@ struct NewsFeedView: View {
                 Group {
                     if source == .x {
                         xTimelineList(posts)
+                    } else if source == .truth {
+                        GeometryReader { geometry in
+                            virtualizedFeedList(
+                                source: source,
+                                posts: posts,
+                                truthWidth: min(640, max(1, geometry.size.width - 40))
+                            )
+                        }
                     } else {
                         feedList(for: source, posts: posts)
                     }
@@ -1271,13 +1283,26 @@ struct NewsFeedView: View {
 
     // Variable-height rich-text and media rows can stall LazyVStack placement.
     // Keep these sources in a virtualized List with a per-source scroll anchor.
-    private func virtualizedFeedList(source: FeedSource, posts: [Post]) -> some View {
+    private func virtualizedFeedList(source: FeedSource, posts: [Post], truthWidth: CGFloat? = nil) -> some View {
         let isActive = rootTabIsActive && model.source == source
         let canPaginate = isActive && !model.isLoading && !model.isSwitchingSource
+        let truthDates = truthWidth == nil ? [] : posts.map(\.truthPublicationDate)
         return ScrollViewReader { proxy in
             List {
+                if let truthWidth, let first = posts.first {
+                    truthTimelineHeader(handle: first.authorHandle, width: truthWidth)
+                }
                 ForEach(Array(posts.enumerated()), id: \.element.id) { index, post in
-                    feedPostCell(source: source, post: post, index: index, posts: posts)
+                    Group {
+                        if let truthWidth {
+                            truthTimelineCell(
+                                post: post, date: truthDates[index],
+                                previousDate: index > 0 ? truthDates[index - 1] : nil, width: truthWidth
+                            )
+                        } else {
+                            feedPostCell(source: source, post: post, index: index, posts: posts)
+                        }
+                    }
                         .id(post.id)
                         .onGeometryChange(for: Int?.self) { geometry in
                             geometry.frame(in: .named("feed-viewport-\(source.rawValue)")).maxY > 0 ? index : nil
@@ -1333,6 +1358,61 @@ struct NewsFeedView: View {
                 isAtTop: $isFeedAtTop
             ))
         }
+    }
+
+    private func truthTimelineHeader(handle: String?, width: CGFloat) -> some View {
+        HStack(spacing: 11) {
+            Image("TruthMark")
+                .resizable()
+                .scaledToFill()
+                .frame(width: 42, height: 42)
+                .clipShape(Circle())
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("特朗普")
+                    .font(.title3.weight(.semibold))
+                    .accessibilityAddTraits(.isHeader)
+                if let handle {
+                    Text(handle).font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(maxWidth: width, alignment: .leading)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity)
+        .overlay(alignment: .bottom) {
+            Divider().frame(maxWidth: width)
+        }
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    private func truthTimelineCell(post: Post, date: Date?, previousDate: Date?, width: CGFloat) -> some View {
+        let opensOriginal = post.truthPostURL.map { url in { truthWebsiteURL = url } }
+        return VStack(alignment: .leading, spacing: 0) {
+            if let date, previousDate.map({ Calendar.current.isDate($0, inSameDayAs: date) }) != true {
+                Text(date.formatted(.dateTime.month().day().locale(Locale(identifier: "zh_CN"))))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityAddTraits(.isHeader)
+                    .padding(.top, 12)
+            }
+            TruthTimelineRow(post: post, date: date, width: width, openOriginal: opensOriginal)
+                .accessibilityIdentifier("feed-post-\(post.id)")
+        }
+        .frame(maxWidth: width, alignment: .leading)
+        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity)
+        .alignmentGuide(.listRowSeparatorLeading) { dimensions in
+            (dimensions.width - width) / 2
+        }
+        .alignmentGuide(.listRowSeparatorTrailing) { dimensions in
+            (dimensions.width + width) / 2
+        }
+        .listRowSeparatorTint(Color.primary.opacity(0.08))
     }
 
     @ViewBuilder
@@ -1768,6 +1848,7 @@ private func rssDirectoryAvatarURL(for post: Post, feeds: [RSSFeedSource]) -> UR
 struct EmbeddedWebPage: View {
     let url: URL
     let source: FeedSource
+    var showsCloseButton = true
     @StateObject private var model = EmbeddedWebViewModel()
     @State private var isShowingWeiboAccountMenu = false
     @Environment(\.dismiss) private var dismiss
@@ -1817,8 +1898,10 @@ struct EmbeddedWebPage: View {
         .toolbar(.visible, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .overlay(alignment: .bottomTrailing) {
-            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭网页详情")
-                .padding(16)
+            if showsCloseButton {
+                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭网页详情")
+                    .padding(16)
+            }
         }
         .toolbar {
             if source == .weibo {
@@ -3184,6 +3267,85 @@ private final class XAttributedTextBox {
     init(_ value: AttributedString) { self.value = value }
 }
 
+private struct TruthTimelineRow: View {
+    let post: Post
+    let date: Date?
+    let width: CGFloat
+    let openOriginal: (() -> Void)?
+
+    private var time: String? {
+        date?.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)) ?? post.formattedTime
+    }
+
+    var body: some View {
+        let hasVideo = !(post.videos ?? []).isEmpty
+        let hasPreview = !post.feedImageURLs.isEmpty || post.previewURL != nil
+        let isMediaOnly = post.isTruthMediaPlaceholder
+        VStack(alignment: .leading, spacing: 6) {
+            if let time {
+                sourceText {
+                    Text(time)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if !isMediaOnly {
+                TruthLocalTranslationView(post: post, openOriginal: openOriginal)
+                    .font(.body)
+                    .lineSpacing(5)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if hasVideo {
+                sourceText { Label("视频帖", systemImage: "video") }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else if isMediaOnly, !hasPreview {
+                sourceText { Label("图片帖", systemImage: "photo") }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            if hasPreview {
+                PostMediaGrid(
+                    post: post,
+                    usesFeedSizedImages: true,
+                    singleImageMaxHeight: 320,
+                    multiImageHeight: 146,
+                    availableWidth: width,
+                    displaysVideoPlayer: false,
+                    onImageTap: openOriginal,
+                    imageTapLabel: "在应用内打开原文网站"
+                )
+                .disabled(openOriginal == nil)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 12)
+        .background {
+            if let openOriginal {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: openOriginal)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func sourceText<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        if let openOriginal {
+            Button(action: openOriginal) {
+                content()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("在应用内打开原文网站")
+        } else {
+            content()
+        }
+    }
+}
+
 struct NewsCardView: View, Equatable {
     @ObservedObject private var verificationStore = XAuthorVerificationStore.shared
     private static let xTimelineCache: NSCache<NSString, NSString> = {
@@ -3213,7 +3375,6 @@ struct NewsCardView: View, Equatable {
         else if usesWeChatStyle { weChatCard }
         else if post.isRSS { rssCard }
         else if post.sourceName == "知乎" { zhihuCard }
-        else if post.sourceName == "Truth" { truthCard }
         else if post.sourceName == "X" { xCard }
         else { socialCard }
     }
@@ -3520,41 +3681,6 @@ struct NewsCardView: View, Equatable {
             searchLocation = range.location + range.length
         }
         return Text(attributed)
-    }
-
-    private var truthCard: some View {
-        let hasImages = !post.imageURLs.isEmpty
-
-        return VStack(alignment: .leading, spacing: 8) {
-            if let time = post.formattedTime {
-                Text(time)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-            }
-
-            if !post.isTruthMediaPlaceholder {
-                TruthLocalTranslationView(post: post)
-                    .font(.system(size: 15, weight: .regular))
-                    .lineSpacing(3)
-                    .lineLimit(hasImages ? 2 : 3)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            PostMediaGrid(
-                post: post,
-                usesFeedSizedImages: true,
-                singleImageMaxHeight: 210,
-                singleImageContentMode: .fill,
-                multiImageHeight: 126,
-                availableWidth: max(UIScreen.main.bounds.width - 32, 240)
-            )
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 11)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .contain)
     }
 
     private var zhihuCard: some View {
