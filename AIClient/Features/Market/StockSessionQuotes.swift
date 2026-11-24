@@ -5,6 +5,7 @@ struct StockSessionQuotes {
         let value: Double
         let percent: Double
         var timestamp: Int64?
+        var isDelayed = false
     }
 
     struct Column: Identifiable {
@@ -18,7 +19,8 @@ struct StockSessionQuotes {
 
     init(quote: MarketQuote, chart: MarketChart?, extendedSession: MarketTradingSession, isCurrent: Bool) {
         let session = quote.tradingSession
-        let regular = Price(value: quote.price, percent: quote.percentValue)
+        let regular = Price(value: quote.price, percent: quote.percentValue,
+                            isDelayed: session == .regular && quote.hasDelayedSessionPrice)
         let post: Price?
         if session == .postmarket {
             post = Self.activePrice(quote, session: .postmarket)
@@ -48,11 +50,16 @@ struct StockSessionQuotes {
 
     private static func activePrice(_ quote: MarketQuote, session: MarketTradingSession) -> Price? {
         guard quote.tradingSession == session, let price = quote.sessionPrice, price.isFinite, price > 0 else { return nil }
-        return Price(value: price, percent: quote.marketDisplayPercentValue, timestamp: quote.marketAsOfTimestamp)
+        return Price(value: price, percent: quote.marketDisplayPercentValue, timestamp: quote.marketAsOfTimestamp,
+                     isDelayed: quote.hasDelayedSessionPrice)
     }
 }
 
 extension MarketQuote {
+    var hasDelayedSessionPrice: Bool {
+        quality?.status == "delayed" || visibleDelayMinutes != nil
+    }
+
     var hasIndicativeOvernightPrice: Bool {
         tradingSession == .overnight && sessionDataSource == "AlpacaOvernightIndicative"
     }
@@ -67,6 +74,7 @@ struct StockSessionPriceCell: View {
     var body: some View {
         let quote = column.price
         let time = quote?.timestamp.map(marketShortTimestamp)
+        let detail = [quote?.isDelayed == true ? "延迟" : nil, time].compactMap { $0 }.joined(separator: " · ")
         let price = quote.map {
             $0.value.formatted(.number.precision(.fractionLength(marketPriceDigits($0.value, symbol: symbol))))
         } ?? "—"
@@ -84,8 +92,8 @@ struct StockSessionPriceCell: View {
             if let percent {
                 Text(percent).font(.caption2.weight(.medium)).foregroundStyle(tint)
             }
-            if let time {
-                Text(time).font(showsTitle ? .caption2 : .system(size: 9)).foregroundStyle(muted)
+            if !detail.isEmpty {
+                Text(detail).font(showsTitle ? .caption2 : .system(size: 9)).foregroundStyle(muted)
             }
         }
         .monospacedDigit()
@@ -95,16 +103,36 @@ struct StockSessionPriceCell: View {
         .padding(.horizontal, showsTitle ? 9 : 4)
         .frame(maxWidth: .infinity, alignment: showsTitle ? .leading : .trailing)
         .background {
-            if column.highlighted {
+            if column.highlighted && quote?.isDelayed != true {
                 RoundedRectangle(cornerRadius: 6).fill(InvestmentDesign.accent.opacity(0.08))
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel([column.title, quote == nil ? "暂无行情" : price, percent, time].compactMap { $0 }.joined(separator: "，"))
+        .accessibilityLabel([column.title, quote == nil ? "暂无行情" : price, percent,
+                             quote?.isDelayed == true ? "延迟" : nil, time].compactMap { $0 }.joined(separator: "，"))
     }
 }
 
 extension MarketChart {
+    func matchesAfterHoursAnchor(for quote: MarketQuote) -> Bool {
+        guard self.quote.price == quote.price else { return false }
+        let session: String
+        switch quote.tradingSession {
+        case .premarket: session = "pre"
+        case .overnight: session = "overnight"
+        case .closed: return quote.quality?.tradingDate == tradingDate
+        default: return false
+        }
+        guard let timestamp = quote.marketAsOfTimestamp,
+              let active = analysis.sessionWindows.last(where: {
+                  $0.session == session && $0.startTimestamp <= timestamp && timestamp <= $0.endTimestamp
+              }),
+              let regular = analysis.sessionWindows.last(where: {
+                  $0.session == "regular" && $0.endTimestamp <= active.startTimestamp
+              }) else { return false }
+        return regular.tradingDate == tradingDate
+    }
+
     func stockAfterHoursEnd(for quote: MarketQuote) -> MarketChartPoint? {
         guard market == "US", interval == "1m", self.quote.price == quote.price,
               let window = analysis.sessionWindows.last(where: { $0.session == "post" && $0.tradingDate == tradingDate }),
@@ -130,9 +158,7 @@ extension MarketStore {
         guard let snapshot = chartSnapshot(symbol: symbol, range: .day) else { return nil }
         if snapshot.isRestored {
             guard let quote = quote(symbol: symbol),
-                  quote.quality?.tradingDate == snapshot.chart.tradingDate,
-                  let timestamp = quote.timestamp, timestamp == snapshot.chart.quote.providerTimestamp,
-                  quote.price == snapshot.chart.quote.price else { return nil }
+                  snapshot.chart.matchesAfterHoursAnchor(for: quote) else { return nil }
         }
         return snapshot.chart
     }
