@@ -272,14 +272,23 @@ private struct ResearchOverviewView: View {
                 Text(title)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(ResearchStyle.muted)
-                HStack(spacing: 4) {
-                    if showsPrice {
-                        Text(price(quote)).foregroundStyle(.primary)
+                if showsPrice {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 4) {
+                            Text(price(quote)).foregroundStyle(.primary)
+                            tickerChange(quote)
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(price(quote)).foregroundStyle(.primary)
+                            tickerChange(quote)
+                        }
                     }
-                    Text(quote?.marketDisplayFormattedPercent ?? "—")
-                        .foregroundStyle(ResearchStyle.tint(quote))
+                    .font(.caption2.weight(.semibold))
+                } else {
+                    tickerChange(quote)
+                        .font(.caption2.weight(.semibold))
                 }
-                .font(.caption2.weight(.semibold))
             }
             .monospacedDigit()
             .lineLimit(1)
@@ -291,6 +300,11 @@ private struct ResearchOverviewView: View {
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("research-market-\(symbol)")
+    }
+
+    private func tickerChange(_ quote: MarketQuote?) -> some View {
+        Text(quote?.marketDisplayFormattedPercent ?? "—")
+            .foregroundStyle(ResearchStyle.tint(quote))
     }
 
     private func marketIndicators(_ layout: AnyLayout) -> some View {
