@@ -3,6 +3,34 @@ import Translation
 import NaturalLanguage
 import CryptoKit
 
+struct XTranslationInput {
+    let tweetID: String
+    let original: String
+    var sourceLanguage: String? = nil
+    var replyContext: String? = nil
+
+    var key: String { FeedTranslationCache.xKey(tweetID: tweetID, original: original) }
+
+    var deviceLanguage: String? {
+        Self.deviceLanguage(for: original, sourceLanguage: sourceLanguage, replyContext: replyContext)
+    }
+
+    static func deviceLanguage(for original: String, sourceLanguage: String?, replyContext: String?) -> String? {
+        if let language = XDeviceTranslation.declaredLanguage(sourceLanguage) { return language }
+        let sample = LocalTranslatedText.languageSample(String(original.prefix(1_200)))
+        let letters = sample.unicodeScalars.filter(CharacterSet.letters.contains)
+        // Short Latin replies need a language hint from a substantial parent.
+        if (1...12).contains(letters.count), letters.allSatisfy({ $0.value <= 0x024F }) {
+            guard let replyContext else { return nil }
+            let parent = LocalTranslatedText.languageSample(String(replyContext.prefix(1_200)))
+            let parentLetters = parent.unicodeScalars.filter(CharacterSet.letters.contains)
+            guard parentLetters.count >= 20, parentLetters.allSatisfy({ $0.value <= 0x024F }) else { return nil }
+            return LocalTranslatedText.sourceLanguage(parent)
+        }
+        return LocalTranslatedText.sourceLanguage(original)
+    }
+}
+
 /// App-owned text cache. Apple owns the separate, shared on-device language models.
 @MainActor
 final class FeedTranslationCache {
@@ -39,6 +67,7 @@ final class FeedTranslationCache {
     private var failedUntil: [String: Date] = [:]
     private var translating = false
     private var activeXTranslations = Set<String>()
+    private var warmingXTranslations = Set<String>()
     private var xDeviceRequests: [String: DeviceRequest] = [:]
     private let xTranslationClock = ContinuousClock()
     private var xTranslationRetryAt: ContinuousClock.Instant?
@@ -54,13 +83,13 @@ final class FeedTranslationCache {
         }
     }
 
-    static func key(_ source: String, language: String) -> String {
+    nonisolated static func key(_ source: String, language: String) -> String {
         SHA256.hash(data: Data((language + "→zh-Hans:v1:" + source).utf8))
             .map { String(format: "%02x", $0) }.joined()
     }
     func text(_ key: String) -> String? { entries[key]?.text }
 
-    static func xKey(tweetID: String, original: String) -> String {
+    nonisolated static func xKey(tweetID: String, original: String) -> String {
         key(original, language: "x/" + tweetID)
     }
 
@@ -72,9 +101,17 @@ final class FeedTranslationCache {
     func translateXPost(
         tweetID: String,
         original: String,
+        sourceLanguage: String? = nil,
+        replyContext: String? = nil,
         using fetch: (String) async throws -> XTranslation
     ) async throws -> String {
         let key = Self.xKey(tweetID: tweetID, original: original)
+        if #available(iOS 26.0, *), text(key) == nil {
+            let keys = warmXTranslations([.init(
+                tweetID: tweetID, original: original, sourceLanguage: sourceLanguage, replyContext: replyContext
+            )])
+            await waitForXTranslations(keys, upTo: .milliseconds(800))
+        }
         let retryDeadline = xTranslationClock.now.advanced(by: .seconds(45))
         while true {
             try Task.checkCancellation()
@@ -87,7 +124,7 @@ final class FeedTranslationCache {
             let nextRequest = max(xPostRetryAt[tweetID] ?? now, xTranslationRetryAt ?? now)
             if nextRequest > now {
                 guard nextRequest <= retryDeadline else {
-                    requestXDeviceTranslation(key: key)
+                    requestXDeviceTranslation(key: key, sourceLanguage: sourceLanguage)
                     throw APIError.invalidResponse
                 }
                 try await xTranslationClock.sleep(until: nextRequest)
@@ -104,6 +141,7 @@ final class FeedTranslationCache {
                 defer { activeXTranslations.remove(tweetID) }
                 let response = try await fetch(tweetID)
                 try Task.checkCancellation()
+                if let translated = cachedXTranslation(tweetID: tweetID, original: original) { return translated }
                 guard response.tweetId == tweetID else { throw APIError.invalidResponse }
                 guard response.status != "not_required",
                       let value = LocalTranslatedText.validTranslation(response.text, original: original) else {
@@ -113,6 +151,7 @@ final class FeedTranslationCache {
                 save(value, key: key)
                 return value
             } catch let deferral as XTranslationDeferral {
+                requestXDeviceTranslation(key: key, sourceLanguage: sourceLanguage)
                 let retryAt = xTranslationClock.now.advanced(by: .seconds(deferral.seconds))
                 if deferral.isPostSpecific {
                     if xPostRetryAt.count > 400 { xPostRetryAt = xPostRetryAt.filter { $0.value > now } }
@@ -134,7 +173,8 @@ final class FeedTranslationCache {
 
     private func requestXDeviceTranslation(key: String, sourceLanguage: String? = nil) {
         let now = Date()
-        if let request = xDeviceRequests[key], request.expiresAt > now { return }
+        if let request = xDeviceRequests[key], request.expiresAt > now,
+           request.sourceLanguage != nil || sourceLanguage == nil { return }
         if xDeviceRequests.count > 400 { xDeviceRequests = xDeviceRequests.filter { $0.value.expiresAt > now } }
         let request = DeviceRequest(sourceLanguage: sourceLanguage, expiresAt: now.addingTimeInterval(600))
         xDeviceRequests[key] = request
@@ -199,30 +239,78 @@ final class FeedTranslationCache {
         }
         for (language, requests) in requestsByLanguage {
             guard !Task.isCancelled else { return }
-            guard await availability(for: language) == .installed else { continue }
-            do {
-                try await acquire()
-                defer { release() }
-                let pending = requests.filter { request in
-                    guard let key = request.clientIdentifier else { return false }
-                    return text(key) == nil && canAttempt(key)
-                }
-                guard !pending.isEmpty else { continue }
-                let session = TranslationSession(
-                    installedSource: Locale.Language(identifier: language), target: Locale.Language(identifier: "zh-Hans")
-                )
-                for try await response in session.translate(batch: pending) {
-                    try Task.checkCancellation()
-                    if let key = response.clientIdentifier,
-                       let value = LocalTranslatedText.validTranslation(response.targetText, original: response.sourceText) {
-                        save(value, key: key)
-                    }
-                }
-            } catch is CancellationError {
-                return
-            } catch {
-                // A row can still try its individual request after a batch error.
+            await pretranslate(requests, language: language)
+        }
+    }
+
+    @available(iOS 26.0, *)
+    @discardableResult
+    func warmXTranslations(_ inputs: [XTranslationInput]) -> [String] {
+        var requestsByLanguage: [String: [TranslationSession.Request]] = [:]
+        var keys: [String] = []
+        for input in inputs {
+            let key = input.key
+            guard text(key) == nil, canAttempt(key) else { continue }
+            if warmingXTranslations.contains(key) {
+                keys.append(key)
+                continue
             }
+            let original = input.original
+            guard !original.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !XPostTextFormatter.shouldWaitForFullText(original),
+                  let language = input.deviceLanguage else { continue }
+            if let cached = text(Self.key(original, language: language)),
+               let translated = LocalTranslatedText.validTranslation(cached, original: original) {
+                save(translated, key: key)
+                continue
+            }
+            if let status = availabilityByLanguage[language], status.value != .installed,
+               Date().timeIntervalSince(status.checkedAt) < 30 { continue }
+            warmingXTranslations.insert(key)
+            requestsByLanguage[language, default: []].append(.init(sourceText: original, clientIdentifier: key))
+            keys.append(key)
+        }
+        for (language, requests) in requestsByLanguage {
+            Task(priority: .utility) {
+                await pretranslate(requests, language: language)
+                warmingXTranslations.subtract(requests.compactMap(\.clientIdentifier))
+            }
+        }
+        return keys
+    }
+
+    func waitForXTranslations(_ keys: [String], upTo budget: Duration) async {
+        let deadline = xTranslationClock.now.advanced(by: budget)
+        while !Task.isCancelled, xTranslationClock.now < deadline,
+              keys.contains(where: { text($0) == nil && warmingXTranslations.contains($0) }) {
+            try? await xTranslationClock.sleep(until: min(deadline, xTranslationClock.now.advanced(by: .milliseconds(25))))
+        }
+    }
+
+    @available(iOS 26.0, *)
+    private func pretranslate(_ requests: [TranslationSession.Request], language: String) async {
+        guard await availability(for: language) == .installed else { return }
+        do {
+            try await acquire()
+            defer { release() }
+            let pending = requests.filter { request in
+                guard let key = request.clientIdentifier else { return false }
+                return text(key) == nil && canAttempt(key)
+            }
+            guard !pending.isEmpty else { return }
+            let session = TranslationSession(
+                installedSource: Locale.Language(identifier: language), target: Locale.Language(identifier: "zh-Hans")
+            )
+            for try await response in session.translate(batch: pending) {
+                try Task.checkCancellation()
+                if let key = response.clientIdentifier,
+                   text(key) == nil,
+                   let value = LocalTranslatedText.validTranslation(response.targetText, original: response.sourceText) {
+                    save(value, key: key)
+                }
+            }
+        } catch {
+            // A row can still try its individual request after a batch error.
         }
     }
 
@@ -506,21 +594,11 @@ struct XDeviceTranslation: View {
         }
 
         private func deviceLanguage(_ providerLanguage: String?) -> String? {
-            if let language = XDeviceTranslation.declaredLanguage(providerLanguage)
-                ?? XDeviceTranslation.declaredLanguage(sourceLanguage) {
-                return language
-            }
-            // A single Latin-script word can be ambiguous. A substantial parent
-            // in the same script supplies a stronger language signal.
-            let letters = LocalTranslatedText.languageSample(original).unicodeScalars.filter(CharacterSet.letters.contains)
-            if (1...12).contains(letters.count), letters.allSatisfy({ $0.value <= 0x024F }) {
-                guard let replyContext else { return nil }
-                let parent = LocalTranslatedText.languageSample(String(replyContext.prefix(1_200)))
-                let parentLetters = parent.unicodeScalars.filter(CharacterSet.letters.contains)
-                guard parentLetters.count >= 20, parentLetters.allSatisfy({ $0.value <= 0x024F }) else { return nil }
-                return LocalTranslatedText.sourceLanguage(parent)
-            }
-            return LocalTranslatedText.sourceLanguage(original)
+            XTranslationInput.deviceLanguage(
+                for: original,
+                sourceLanguage: XDeviceTranslation.declaredLanguage(providerLanguage) ?? sourceLanguage,
+                replyContext: replyContext
+            )
         }
     }
 }

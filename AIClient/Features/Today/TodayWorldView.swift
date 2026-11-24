@@ -200,6 +200,8 @@ final class TodayWorldStore: ObservableObject {
             }
             isLoadingSources = false
 
+            async let translationPrewarm: Void = prepareSourceTranslations(projection)
+
             let avatarURLs = projection.avatarURLs
             avatarPrefetch?.cancel()
             avatarPrefetch = Task {
@@ -214,7 +216,20 @@ final class TodayWorldStore: ObservableObject {
             await projection.preparePreviews()
             guard !Task.isCancelled else { return }
             brief = projection
+            await translationPrewarm
         }
+    }
+
+    private func prepareSourceTranslations(_ projection: TodayBriefProjection) async {
+        guard #available(iOS 26.0, *), !Task.isCancelled else { return }
+        let originals = projection.sourceIDs.prefix(12).flatMap { id -> [String] in
+            guard let source = projection.sources[id] else { return [] }
+            let body = source.chineseText == nil ? source.originalText : nil
+            let reply = LocalTranslatedText.chineseText(source.reply?.textZH) == nil ? source.reply?.text : nil
+            let quote = LocalTranslatedText.chineseText(source.quote?.textZH) == nil ? source.quote?.originalText : nil
+            return [body, reply, quote].compactMap { $0 }
+        }
+        await FeedTranslationCache.shared.pretranslate(originals)
     }
 
     private static func billingDate(daysAgo: Int = 0) -> String {
@@ -718,6 +733,19 @@ struct TodayInlineSourceView: View {
         return FeedTranslationCache.shared.cachedXTranslation(tweetID: tweetID, original: source.originalText)
     }
 
+    private func cachedTranslation(for input: XTranslationInput?) -> String? {
+        guard let input else { return nil }
+        return FeedTranslationCache.shared.cachedXTranslation(tweetID: input.tweetID, original: input.original)
+    }
+
+    private var quotedPost: XQuotedPost? {
+        guard var quote = source.quote else { return nil }
+        if let translated = cachedTranslation(for: source.post.xQuoteTranslationInput) {
+            quote.textZH = translated
+        }
+        return quote
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             FeedReaderTranslationText(
@@ -732,7 +760,10 @@ struct TodayInlineSourceView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("回复")
                     FeedReaderTranslationText(
-                        original: reply.text, chinese: reply.textZH, field: .reply, isActive: allowsTranslation
+                        original: reply.text,
+                        chinese: LocalTranslatedText.chineseText(reply.textZH)
+                            ?? cachedTranslation(for: source.post.xReplyTranslationInput),
+                        field: .reply, isActive: allowsTranslation
                     )
                 }
                 .font(.subheadline)
@@ -743,7 +774,7 @@ struct TodayInlineSourceView: View {
             if source.hasMedia {
                 XFeedMediaView(post: source.post, timelineWidth: width, showsQuotedPost: false)
             }
-            if let quote = source.quote {
+            if let quote = quotedPost {
                 XFeedQuotedPostCard(
                     quote: quote,
                     availableWidth: width,

@@ -766,8 +766,9 @@ private struct EditorialRootView: View {
         .task(id: canPrefetchOtherTabs, priority: .utility) {
             guard canPrefetchOtherTabs else { return }
             async let directory: Void = pageStores.feed.prepareXueqiuForOpening()
+            async let xTimeline: Void = pageStores.feed.prepareXForOpening()
             await pageStores.feed.prepareVideoAndFlashPages()
-            await directory
+            _ = await (directory, xTimeline)
         }
         .task(id: canPrefetchOtherTabs, priority: .background) {
             guard canPrefetchOtherTabs, selectedTab != .learning else { return }
