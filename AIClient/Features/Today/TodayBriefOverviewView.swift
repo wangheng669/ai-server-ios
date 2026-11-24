@@ -2,6 +2,14 @@ import OSLog
 import SwiftUI
 import UIKit
 
+private let focusUpdateSession: URLSession = {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+    configuration.timeoutIntervalForRequest = 4
+    configuration.timeoutIntervalForResource = 4
+    return URLSession(configuration: configuration)
+}()
+
 enum TodayBriefStyle {
     static let horizontalInset: CGFloat = 22
     static let maximumCardWidth: CGFloat = 480
@@ -1530,6 +1538,7 @@ struct TodayToolsMenu<Heading: View, Report: View>: View {
     @MainActor
     private func checkForUpdate() async {
         guard !Task.isCancelled else { return }
+        let start = ProcessInfo.processInfo.systemUptime
         updateCheckState = .checking
         do {
             guard let entry = installEntryURL, let installed = installedRelease else {
@@ -1541,7 +1550,7 @@ struct TodayToolsMenu<Heading: View, Report: View>: View {
                 published = try await fetchPublishedVersion(in: channel)
             } catch let failure as UpdateCheckFailure where failure.isTransient {
                 updateLogger.info("Retrying update check after \(String(describing: failure), privacy: .public)")
-                try await Task.sleep(for: .milliseconds(750))
+                try await Task.sleep(for: .milliseconds(250))
                 published = try await fetchPublishedVersion(in: channel)
             }
             try Task.checkCancellation()
@@ -1556,13 +1565,16 @@ struct TodayToolsMenu<Heading: View, Report: View>: View {
                 availableUpdate = nil
                 updateCheckState = .current
             }
+            let elapsed = ProcessInfo.processInfo.systemUptime - start
+            updateLogger.info("Update check completed in \(elapsed, format: .fixed(precision: 3)) seconds")
         } catch is CancellationError {
             guard !Task.isCancelled else { return }
             updateCheckState = .idle
         } catch {
             guard !Task.isCancelled else { return }
             let failure = error as? UpdateCheckFailure ?? .network(.unknown)
-            updateLogger.error("Update check failed: \(String(describing: failure), privacy: .public)")
+            let elapsed = ProcessInfo.processInfo.systemUptime - start
+            updateLogger.error("Update check failed after \(elapsed, format: .fixed(precision: 3)) seconds: \(String(describing: failure), privacy: .public)")
             updateCheckState = .failed(failure)
         }
     }
@@ -1571,12 +1583,12 @@ struct TodayToolsMenu<Heading: View, Report: View>: View {
         let url = channel.appendingPathComponent("latest.json").appending(queryItems: [
             .init(name: "check", value: UUID().uuidString)
         ])
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8)
+        var request = URLRequest(url: url)
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            (data, response) = try await focusUpdateSession.data(for: request)
         } catch let error as URLError {
             if error.code == .cancelled { throw CancellationError() }
             throw UpdateCheckFailure.network(error.code)
