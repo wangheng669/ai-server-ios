@@ -1193,11 +1193,12 @@ struct Post: Codable, Identifiable, Hashable {
         feedContentImages.compactMap { MediaURL.image($0.url) }
     }
     var feedImageURLs: [URL] {
+        let images = feedContentImages
         if source == "truth" {
-            return feedContentImages.compactMap { MediaURL.image(clean($0.preview) ?? $0.url) }
+            return images.compactMap { MediaURL.image(clean($0.preview) ?? $0.url) }
         }
-        let variant: MediaURL.XPhotoSize = feedContentImages.count == 1 ? .single : .tile
-        return feedContentImages.compactMap { MediaURL.feedImage($0.url, variant: variant) }
+        let variant: MediaURL.XPhotoSize = images.count == 1 ? .single : .tile
+        return images.compactMap { MediaURL.feedImage($0.url, variant: variant) }
     }
     private var feedContentImages: [PostImage] {
         (images ?? [])

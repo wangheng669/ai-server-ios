@@ -93,6 +93,7 @@ private enum CityMapNavigationDirection {
 }
 
 struct CityNewsView: View {
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.rootBottomChromeHeight) private var bottomChromeHeight
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var journey: CityRegionJourney
@@ -173,14 +174,20 @@ struct CityNewsView: View {
     }
 
     private var topBar: some View {
-        Text("城市观察")
-            .font(.headline.weight(.bold))
-            .frame(maxWidth: .infinity)
-            .frame(height: 48)
-            .background(CityDesign.canvas)
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(CityDesign.divider).frame(height: 0.5)
-            }
+        HStack {
+            Text("城市观察")
+                .font(.title2.bold())
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 0)
+            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭城市观察")
+        }
+        .padding(.leading, 20)
+        .padding(.trailing, 12)
+        .padding(.vertical, 8)
+        .background(CityDesign.canvas)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(CityDesign.divider).frame(height: 0.5)
+        }
     }
 
     private static func defaultSelection(for journey: CityRegionJourney) -> String? {

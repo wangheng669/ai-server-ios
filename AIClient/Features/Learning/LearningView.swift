@@ -12,39 +12,29 @@ private let learningImageLogger = Logger(
 struct LearningView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.rootTabIsActive) private var rootTabIsActive
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private let peopleStore: PeopleStore
     @State private var store: LearningStore
     @State private var repository = LearningContentRepository()
     @State private var progressStore = LearningProgressStore()
     @State private var selectedRoute: LearningRoute?
+    @State private var resumedLesson: LearningRoute?
     @State private var selectedIdeologyPerson: SpecialPerson?
     @State private var ideologyCampFilter: IdeologyCampFilter = .all
     @State private var selectedConcept: KnowledgeConceptCard?
     @State private var selectedConceptID: String?
     @State private var shuffledConcepts: [KnowledgeConceptCard] = []
-    @State private var showsCity = {
-        #if DEBUG
-        let arguments = ProcessInfo.processInfo.arguments
-        return arguments.contains("--city-preview") ||
-            arguments.contains("--city-province-preview") ||
-            arguments.contains("--city-city-preview") ||
-            arguments.contains("--city-district-preview")
-        #else
-        return false
-        #endif
-    }()
-    @State private var showsPeople = {
-        #if DEBUG
-        let arguments = ProcessInfo.processInfo.arguments
-        return arguments.contains("--people-preview") ||
-            arguments.contains("--person-detail-preview") ||
-            arguments.contains("--article-detail-preview")
-        #else
-        return false
-        #endif
-    }()
     @State private var presentedSection: KnowledgeSection? = {
         #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("--city-preview") || arguments.contains("--city-province-preview") ||
+            arguments.contains("--city-city-preview") || arguments.contains("--city-district-preview") {
+            return .city
+        }
+        if arguments.contains("--people-preview") || arguments.contains("--person-detail-preview") ||
+            arguments.contains("--article-detail-preview") {
+            return .people
+        }
         if ProcessInfo.processInfo.arguments.contains("--learning-books-preview") ||
             ProcessInfo.processInfo.arguments.contains("--learning-book-preview") {
             return .books
@@ -75,60 +65,22 @@ struct LearningView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if store.hasLoadedOverview || store.hasOverviewContent {
-                    knowledgeHome
-                } else {
-                    ContentLoadingPlaceholder(title: "正在准备知识内容", rowCount: 5)
-                        .accessibilityIdentifier("knowledge-home-loading")
-                }
-            }
-            .background(Color(uiColor: .systemBackground).ignoresSafeArea())
-            .toolbar(.hidden, for: .navigationBar)
+        ScrollView {
+            knowledgeHome
         }
-        .appSheet(item: $selectedRoute) { route in
-            NavigationStack {
-                switch route {
-                case let .topic(topic, position):
-                    LearningDetailView(
-                        topic: topic,
-                        repository: repository,
-                        progressStore: progressStore,
-                        position: position
-                    )
-                case let .videoLesson(lesson):
-                    LearningVideoLessonDetailView(seed: lesson)
-                }
-            }
-            .appPresentationDetents([.large])
-            .appPresentationCornerRadius(28)
-            .appPresentationScrollsWithoutExpanding()
+        .refreshable {
+            async let overview: Void = store.loadOverview(force: true)
+            await peopleStore.load(force: true)
+            await overview
         }
-        .appSheet(isPresented: ideologyPersonIsPresented) {
-            PersonDetailSheet(
-                selectedPerson: $selectedIdeologyPerson,
-                people: ideologyPeople,
-                onClose: { selectedIdeologyPerson = nil }
-            )
-            .appPresentationDetents([.large])
-            .appPresentationCornerRadius(28)
-            .appPresentationScrollsWithoutExpanding()
+        .scrollIndicators(.hidden)
+        .background(KnowledgePagePalette.surface.ignoresSafeArea())
+        .accessibilityIdentifier("knowledge-home")
+        .appSheet(item: $presentedSection, onDismiss: resetSectionSelection) { section in
+            knowledgeSection(section)
         }
-        .appSheet(isPresented: $showsCity) {
-            CityNewsView()
-                .environment(\.rootBottomChromeHeight, 0)
-                .appPresentationDetents([.large])
-                .appPresentationCornerRadius(28)
-                .appPresentationScrollsWithoutExpanding()
-        }
-        .appSheet(isPresented: $showsPeople) {
-            PeopleView(store: peopleStore)
-            .environment(\.rootBottomChromeHeight, 0)
-            .environment(\.rootTabIsActive, true)
-            .appPresentationDetents([.large])
-            .appPresentationCornerRadius(28)
-            .appPresentationScrollsWithoutExpanding()
+        .appSheet(item: $resumedLesson) { route in
+            lessonDetail(route)
         }
         .task(id: rootTabIsActive) {
             guard rootTabIsActive else { return }
@@ -148,29 +100,6 @@ struct LearningView: View {
                 }
             }
             #endif
-        }
-        #if DEBUG
-        .onChange(of: store.conceptLibrary?.concepts, initial: true) { _, concepts in
-            guard rootTabIsActive,
-                  ProcessInfo.processInfo.arguments.contains("--learning-concept-detail-preview"),
-                  selectedConcept == nil, let concepts, !concepts.isEmpty else { return }
-            let index = conceptCardPreviewIndex ?? 0
-            selectedConcept = concepts[concepts.indices.contains(index) ? index : 0]
-        }
-        #endif
-        .appSheet(item: $selectedConcept) { concept in
-            if let url = concept.wikipediaURL {
-                WikipediaReaderView(
-                    entity: WikipediaEntity(
-                        id: concept.id,
-                        term: concept.wikipediaTitle,
-                        title: concept.wikipediaTitle,
-                        summary: concept.summary,
-                        url: url
-                    )
-                )
-                .wikipediaReaderPresentation()
-            }
         }
         .task(id: rootTabIsActive, priority: .utility) {
             guard rootTabIsActive else { return }
@@ -197,526 +126,341 @@ struct LearningView: View {
     }
 
     private var knowledgeHome: some View {
-        ZStack {
-            KnowledgePagePalette.canvas.ignoresSafeArea()
-
-            ScrollView {
-                knowledgeEditorialFeed
-                .padding(.bottom, 118)
-            }
-            .refreshable { await store.loadOverview(force: true) }
-            .accessibilityIdentifier("knowledge-home")
-            .scrollIndicators(.hidden)
-            .allowsHitTesting(presentedSection == nil)
-            .accessibilityHidden(presentedSection != nil)
-
-            if let presentedSection {
-                Color.black.opacity(0.24)
-                    .ignoresSafeArea()
-                    .onTapGesture { dismissSection() }
-                    .transition(.opacity)
-
-                knowledgePopup(presentedSection)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .zIndex(1)
-            }
-        }
-        .animation(AppModalMotion.animation, value: presentedSection)
-        .sensoryFeedback(.impact(weight: .light), trigger: presentedSection)
-    }
-
-    private var knowledgeEditorialFeed: some View {
-        LazyVStack(spacing: 14) {
+        VStack(alignment: .leading, spacing: 22) {
+            Text("知识")
+                .font(.largeTitle.bold())
+                .accessibilityAddTraits(.isHeader)
             if let notice = store.savedContentNotice {
-                Text(notice)
-                    .font(.caption)
+                Label(notice, systemImage: "clock.arrow.circlepath")
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityIdentifier("knowledge-saved-content")
             }
-            knowledgeInvestmentFeature
-            knowledgeBooksRow
-            knowledgeConceptRow
-            knowledgePeopleRow
-            knowledgeCityRow
-            knowledgeIdeologyRow
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-    }
-
-    private func knowledgeSectionCount(_ section: KnowledgeSection) -> String {
-        switch section {
-        case .investment:
-            store.videoLibrary.map { "\($0.lessons.count) 节" }
-                ?? (store.videoLibraryErrorMessage == nil ? "载入中" : "载入失败")
-        case .books:
-            store.bookshelf.map { "\($0.books.count) 本" }
-                ?? (store.bookshelfErrorMessage == nil ? "载入中" : "载入失败")
-        case .concepts:
-            store.conceptLibrary.map { "\($0.concepts.count) 张" }
-                ?? (store.conceptLibraryErrorMessage == nil ? "载入中" : "载入失败")
-        case .ideology:
-            peopleStore.hasLoadedDirectory ? "\(ideologyPeople.count) 人"
-                : (peopleStore.errorMessage == nil ? "载入中" : "载入失败")
-        }
-    }
-
-    private var knowledgeInvestmentFeature: some View {
-        let lesson = store.videoLibrary?.lessons.first
-        return VStack(alignment: .leading, spacing: 12) {
-            knowledgeEditorialHeader(.investment)
-            knowledgeInvestmentResume
-
-            Button {
-                presentedSection = .investment
-            } label: {
-                HStack(spacing: 13) {
-                    KnowledgeHomeImage(url: lesson?.coverURL, size: CGSize(width: 112, height: 74)) { image in
-                        if let image {
-                            image
-                                .resizable()
-                                .scaledToFill()
-                                .saturation(0.72)
-                                .contrast(0.94)
-                        } else {
-                            Color(red: 0.035, green: 0.055, blue: 0.09)
-                                .overlay {
-                                    Image(systemName: "chart.line.uptrend.xyaxis")
-                                        .font(.system(size: 25, weight: .light))
-                                        .foregroundStyle(.white.opacity(0.72))
-                                }
-                        }
-                    }
-                    .frame(width: 112, height: 74)
-                    .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text(lesson?.title ?? "从基础开始建立投资框架")
-                            .font(.system(size: 15.5, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .lineLimit(2)
-
-                        if let lesson {
-                            HStack(spacing: 6) {
-                                Text("推荐")
-                                    .font(.system(size: 10.5, weight: .semibold))
-                                    .foregroundStyle(KnowledgePagePalette.accent)
-                                Text("\(lesson.creator) · \(lesson.durationText)")
-                                    .font(.system(size: 11.5, weight: .medium))
-                                    .foregroundStyle(Color.primary.opacity(0.56))
-                                    .lineLimit(1)
-                            }
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            investmentOverview
+            VStack(alignment: .leading, spacing: 10) {
+                knowledgeHeading("阅读")
+                let layout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(spacing: 10))
+                    : AnyLayout(HStackLayout(alignment: .top, spacing: 10))
+                layout {
+                    bookCollection
+                    conceptCollection
                 }
-                .contentShape(Rectangle())
             }
-            .buttonStyle(LearningPressStyle())
-            .accessibilityHint("以弹窗展示投资学习")
-            .accessibilityIdentifier("knowledge-investment-entry")
-
-            knowledgeSectionDivider
+            VStack(alignment: .leading, spacing: 7) {
+                knowledgeHeading("探索")
+                explorationDirectory
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: 600)
+        .padding(.horizontal, 18)
+        .padding(.top, 10)
+        .padding(.bottom, 20)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var investmentOverview: some View {
+        let milestones = LearningMilestone.plan(from: store.catalog?.stockTopics ?? [])
+        let completed = progressStore.completedCount(in: milestones.map(\.topic))
+        let currentIndex = milestones.firstIndex { !progressStore.isCompleted($0.topic.id) }
+
+        return VStack(spacing: 0) {
+            if let index = currentIndex ?? milestones.indices.last {
+                let milestone = milestones[index]
+                let actionTitle = completed == milestones.count ? "复习课程" : "继续学习"
+                Button {
+                    resumedLesson = route(for: milestone, at: index, total: milestones.count)
+                } label: {
+                    VStack(alignment: .leading, spacing: 9) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("股票入门")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(KnowledgePagePalette.accent)
+                            Spacer(minLength: 8)
+                            HStack(spacing: 5) {
+                                Text(actionTitle)
+                                Image(systemName: "arrow.right")
+                                    .accessibilityHidden(true)
+                            }
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(KnowledgePagePalette.accent)
+                        }
+
+                        Text(milestone.title)
+                            .font(.title3.bold())
+                            .foregroundStyle(.primary)
+                            .multilineTextAlignment(.leading)
+
+                        ProgressView(value: Double(completed), total: Double(milestones.count))
+                            .tint(KnowledgePagePalette.accent)
+                            .accessibilityHidden(true)
+
+                        Text("已完成 \(completed) / \(milestones.count) 节")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(15)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(KnowledgePagePalette.accent.opacity(0.065))
+                }
+                .buttonStyle(LearningPressStyle())
+                .accessibilityIdentifier("knowledge-investment-resume")
+            }
+
+            investmentEntry(hasPath: !milestones.isEmpty)
+        }
+        .knowledgeCard(cornerRadius: 18)
+    }
+
+    private func investmentEntry(hasPath: Bool) -> some View {
+        let lesson = store.videoLibrary?.lessons.first
+        let courseStatus: String
+        if !hasPath, store.errorMessage != nil {
+            courseStatus = "学习路径载入失败"
+        } else {
+            courseStatus = knowledgeStatus(
+                count: store.videoLibrary?.lessons.count,
+                unit: "节视频课",
+                error: store.videoLibraryErrorMessage
+            )
+        }
+
+        return Button {
+            presentedSection = .investment
+        } label: {
+            KnowledgeDirectoryRow(title: "投资学习", subtitle: courseStatus) {
+                KnowledgeHomeImage(url: lesson?.coverURL, size: CGSize(width: 112, height: 74)) { image in
+                    if let image {
+                        image.resizable().scaledToFill()
+                    } else {
+                        knowledgeSymbol(.investment)
+                    }
+                }
+                .frame(width: 62, height: 42)
+                .clipShape(.rect(cornerRadius: 8))
+            }
+            .padding(.horizontal, 12)
+        }
+        .buttonStyle(LearningPressStyle())
+        .accessibilityIdentifier("knowledge-investment-entry")
+    }
+
+    private var bookCollection: some View {
+        let book = store.bookshelf?.books.first
+        return KnowledgeCollectionTile(
+            section: .books,
+            status: knowledgeStatus(
+                count: store.bookshelf?.books.count,
+                unit: "本",
+                error: store.bookshelfErrorMessage
+            ),
+            itemTitle: book?.title,
+            open: { presentedSection = .books }
+        ) {
+            KnowledgeHomeImage(url: book?.coverURL, size: CGSize(width: 120, height: 128)) { image in
+                if let image {
+                    image.resizable().scaledToFit()
+                } else {
+                    knowledgeSymbol(.books)
+                }
+            }
+            .frame(width: 48, height: 56)
+            .clipShape(.rect(cornerRadius: 5))
+        }
+    }
+
+    private var conceptCollection: some View {
+        let concept = store.conceptLibrary?.concepts.first
+        return KnowledgeCollectionTile(
+            section: .concepts,
+            status: knowledgeStatus(
+                count: store.conceptLibrary?.concepts.count,
+                unit: "张",
+                error: store.conceptLibraryErrorMessage
+            ),
+            itemTitle: concept?.title,
+            open: { presentedSection = .concepts }
+        ) {
+            KnowledgeHomeImage(url: concept?.coverURL, size: CGSize(width: 68, height: 68)) { image in
+                if let image {
+                    image.resizable().scaledToFill()
+                } else {
+                    knowledgeSymbol(.concepts)
+                }
+            }
+            .frame(width: 62, height: 56)
+            .clipShape(.rect(cornerRadius: 8))
+        }
+    }
+
+    private var explorationDirectory: some View {
+        VStack(spacing: 0) {
+            directoryEntry(.people, subtitle: directoryStatus(for: peopleStore.people.count)) {
+                if let person = peopleStore.people.first {
+                    AvatarView(
+                        url: person.avatarURL(baseURL: peopleStore.baseURL),
+                        name: person.name,
+                        size: 38,
+                        assetName: person.avatarAssetName
+                    )
+                } else {
+                    knowledgeSymbol(.people)
+                }
+            }
+
+            Divider().padding(.leading, 66)
+
+            directoryEntry(.ideology, subtitle: directoryStatus(for: ideologyPeople.count)) {
+                knowledgeSymbol(.ideology)
+            }
+
+            Divider().padding(.leading, 66)
+
+            directoryEntry(.city, subtitle: "广东 · 21 个城市") {
+                Image("ShenzhenSkyline")
+                    .resizable()
+                    .scaledToFill()
+            }
+        }
+    }
+
+    private func directoryEntry<Artwork: View>(
+        _ section: KnowledgeSection,
+        subtitle: String,
+        @ViewBuilder artwork: @escaping () -> Artwork
+    ) -> some View {
+        Button {
+            presentedSection = section
+        } label: {
+            KnowledgeDirectoryRow(title: section.title, subtitle: subtitle) {
+                artwork()
+                    .frame(width: 46, height: 42)
+                    .clipShape(.rect(cornerRadius: 8))
+            }
+            .padding(.horizontal, 8)
+        }
+        .buttonStyle(LearningPressStyle())
+        .accessibilityIdentifier(section.entryIdentifier)
+    }
+
+    private func knowledgeHeading(_ title: String) -> some View {
+        Text(title)
+            .font(.headline)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private func knowledgeSymbol(_ section: KnowledgeSection) -> some View {
+        Image(systemName: section.icon)
+            .font(.system(size: 20, weight: .medium))
+            .foregroundStyle(section.tint)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(section.tint.opacity(0.09))
+    }
+
+    private func directoryStatus(for count: Int) -> String {
+        knowledgeStatus(
+            count: peopleStore.hasLoadedDirectory || !peopleStore.people.isEmpty ? count : nil,
+            unit: "位",
+            error: peopleStore.errorMessage
+        )
+    }
+
+    private func knowledgeStatus(count: Int?, unit: String, error: String?) -> String {
+        if let count {
+            return error == nil ? "\(count) \(unit)" : "\(count) \(unit) · 更新失败"
+        }
+        return error == nil ? "载入中" : "载入失败"
     }
 
     @ViewBuilder
-    private var knowledgeInvestmentResume: some View {
-        if let catalog = store.catalog {
-            let milestones = LearningMilestone.plan(from: catalog.stockTopics)
-            let completed = progressStore.completedCount(in: milestones.map(\.topic))
-            let currentIndex = milestones.firstIndex {
-                !progressStore.isCompleted($0.topic.id)
-            } ?? max(0, milestones.count - 1)
-
-            if milestones.indices.contains(currentIndex) {
-                let milestone = milestones[currentIndex]
-                Button {
-                    selectedRoute = route(for: milestone, at: currentIndex, total: milestones.count)
-                } label: {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(alignment: .bottom, spacing: 12) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("继续学习 · 股票入门")
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(KnowledgePagePalette.accent)
-                                Text(milestone.title)
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(1)
-                            }
-
-                            Spacer(minLength: 0)
-
-                            Text("已完成 \(completed) / \(milestones.count)")
-                                .font(.system(size: 11.5, weight: .medium, design: .rounded))
-                                .foregroundStyle(Color.primary.opacity(0.58))
-                                .monospacedDigit()
-                        }
-
-                        ProgressView(
-                            value: Double(completed),
-                            total: Double(max(1, milestones.count))
+    private func knowledgeSection(_ section: KnowledgeSection) -> some View {
+        switch section {
+        case .investment:
+            KnowledgeSectionPanel(title: section.title) {
+                investmentContent
+            }
+            .appSheet(item: $selectedRoute) { route in
+                lessonDetail(route)
+            }
+        case .books:
+            KnowledgeSectionPanel(title: section.title) {
+                booksContent
+            }
+        case .concepts:
+            KnowledgeSectionPanel(title: section.title) {
+                conceptsContent
+            }
+            .appSheet(item: $selectedConcept) { concept in
+                if let url = concept.wikipediaURL {
+                    WikipediaReaderView(
+                        entity: WikipediaEntity(
+                            id: concept.id,
+                            term: concept.wikipediaTitle,
+                            title: concept.wikipediaTitle,
+                            summary: concept.summary,
+                            url: url
                         )
-                        .tint(KnowledgePagePalette.accent)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 11)
-                    .background(KnowledgePagePalette.accent.opacity(0.065))
-                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-                    .contentShape(Rectangle())
+                    )
+                    .wikipediaReaderPresentation()
                 }
-                .buttonStyle(LearningPressStyle())
-                .accessibilityHint("继续当前投资课程")
             }
-        } else {
-            HStack(spacing: 10) {
-                Image(systemName: "book.closed")
-                    .foregroundStyle(.tertiary)
-                Text(store.errorMessage == nil ? "正在准备学习内容" : "投资知识载入失败")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Color.primary.opacity(0.56))
+            #if DEBUG
+            .onChange(of: store.conceptLibrary?.concepts, initial: true) { _, concepts in
+                guard ProcessInfo.processInfo.arguments.contains("--learning-concept-detail-preview"),
+                      selectedConcept == nil, let concepts, !concepts.isEmpty else { return }
+                let index = conceptCardPreviewIndex ?? 0
+                selectedConcept = concepts[concepts.indices.contains(index) ? index : 0]
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 16)
-            .background(Color.primary.opacity(0.035))
-            .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            #endif
+        case .ideology:
+            KnowledgeSectionPanel(title: section.title) {
+                ideologyCampPicker
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 10)
+                ideologyContent
+            }
+            .appSheet(isPresented: ideologyPersonIsPresented) {
+                PersonDetailSheet(
+                    selectedPerson: $selectedIdeologyPerson,
+                    people: ideologyPeople,
+                    onClose: { selectedIdeologyPerson = nil }
+                )
+                .appPresentationDetents([.large])
+                .appPresentationCornerRadius(28)
+                .appPresentationScrollsWithoutExpanding()
+            }
+        case .people:
+            PeopleView(store: peopleStore)
+                .readingSheetPresentation()
+        case .city:
+            CityNewsView()
+                .readingSheetPresentation()
         }
     }
 
-    private var knowledgeBooksRow: some View {
-        let books = Array((store.bookshelf?.books ?? []).prefix(3))
-        return Button {
-            presentedSection = .books
-        } label: {
-            VStack(alignment: .leading, spacing: 12) {
-                knowledgeEditorialHeader(.books)
-
-                HStack(alignment: .top, spacing: 10) {
-                    ForEach(books) { book in
-                        VStack(alignment: .leading, spacing: 6) {
-                            KnowledgeHomeImage(url: book.coverURL, size: CGSize(width: 120, height: 128)) { image in
-                                if let image {
-                                    image.resizable().scaledToFit()
-                                } else {
-                                    Color(white: 0.93)
-                                        .overlay {
-                                            Text(String(book.title.prefix(2)))
-                                                .font(.system(size: 11, weight: .bold, design: .serif))
-                                                .foregroundStyle(Color.primary.opacity(0.55))
-                                        }
-                                }
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 128)
-                            .background(Color.primary.opacity(0.025))
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-                            Text(book.title)
-                                .font(.system(size: 11.5, weight: .medium))
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                                .frame(height: 17, alignment: .topLeading)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-
-                knowledgeSectionDivider
+    private func lessonDetail(_ route: LearningRoute) -> some View {
+        NavigationStack {
+            switch route {
+            case let .topic(topic, position):
+                LearningDetailView(
+                    topic: topic,
+                    repository: repository,
+                    progressStore: progressStore,
+                    position: position
+                )
+            case let .videoLesson(lesson):
+                LearningVideoLessonDetailView(seed: lesson)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .buttonStyle(LearningPressStyle())
-        .accessibilityHint("以弹窗展示书籍")
-        .accessibilityIdentifier("knowledge-books-entry")
+        .appPresentationDetents([.large])
+        .appPresentationCornerRadius(28)
+        .appPresentationScrollsWithoutExpanding()
     }
 
-    private var knowledgeConceptRow: some View {
-        let concept = shuffledConcepts.isEmpty
-            ? store.conceptLibrary?.concepts.first
-            : shuffledConcepts.first
-        return Button {
-            presentedSection = .concepts
-        } label: {
-            VStack(alignment: .leading, spacing: 12) {
-                knowledgeEditorialHeader(.concepts)
-
-                HStack(alignment: .top, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 7) {
-                        if let concept {
-                            Text(concept.title)
-                                .font(.system(size: 18, weight: .semibold, design: .serif))
-                                .foregroundStyle(.primary)
-                            Text(concept.summary)
-                                .font(.system(size: 13))
-                                .foregroundStyle(Color.primary.opacity(0.7))
-                                .lineLimit(2)
-                                .lineSpacing(2)
-                        }
-                    }
-
-                    Spacer(minLength: 0)
-
-                    KnowledgeHomeImage(url: concept?.coverURL, size: CGSize(width: 68, height: 68)) { image in
-                        if let image {
-                            image.resizable().scaledToFill()
-                        } else {
-                            Color.primary.opacity(0.045)
-                                .overlay {
-                                    Image(systemName: "rectangle.stack.fill")
-                                        .font(.system(size: 22, weight: .medium))
-                                        .foregroundStyle(Color.primary.opacity(0.42))
-                                }
-                        }
-                    }
-                    .frame(width: 68, height: 68)
-                    .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-
-                knowledgeSectionDivider
-            }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
-        .buttonStyle(LearningPressStyle())
-        .accessibilityHint("以弹窗展示概念卡片")
-        .accessibilityIdentifier("knowledge-concepts-entry")
-    }
-
-    private var knowledgeIdeologyRow: some View {
-        let people = Array(ideologyPeople.prefix(4))
-        let remainingCount = max(0, ideologyPeople.count - people.count)
-        return Button {
-            presentedSection = .ideology
-        } label: {
-            VStack(alignment: .leading, spacing: 13) {
-                knowledgeEditorialHeader(.ideology)
-
-                HStack(spacing: 0) {
-                    ForEach(people) { person in
-                        VStack(spacing: 5) {
-                            AvatarView(
-                                url: person.avatarURL(baseURL: peopleStore.baseURL),
-                                name: person.name,
-                                size: 44,
-                                assetName: person.avatarAssetName
-                            )
-                            Text(person.name)
-                                .font(.system(size: 10.5, weight: .medium))
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-
-                    if remainingCount > 0 {
-                        VStack(spacing: 5) {
-                            Text("+\(remainingCount)")
-                                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                                .foregroundStyle(Color.primary.opacity(0.68))
-                                .monospacedDigit()
-                                .frame(width: 44, height: 44)
-                                .background(Color.primary.opacity(0.055), in: Circle())
-                            Text("更多")
-                                .font(.system(size: 10.5, weight: .medium))
-                                .foregroundStyle(Color.primary.opacity(0.56))
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
-        .buttonStyle(LearningPressStyle())
-        .accessibilityHint("以弹窗展示思想图谱")
-        .accessibilityIdentifier("knowledge-ideology-entry")
-    }
-
-    private var knowledgePeopleRow: some View {
-        let people = Array(peopleStore.people.prefix(4))
-        return Button {
-            showsPeople = true
-        } label: {
-            VStack(alignment: .leading, spacing: 13) {
-                HStack(spacing: 7) {
-                    Text("人物")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.primary)
-                    if !peopleStore.people.isEmpty {
-                        Text("\(peopleStore.people.count) 位")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Color.primary.opacity(0.43))
-                    }
-                    Spacer(minLength: 0)
-                }
-
-                HStack(spacing: 12) {
-                    HStack(spacing: -9) {
-                        if people.isEmpty {
-                            Image(systemName: "person.2.fill")
-                                .font(.system(size: 18, weight: .medium))
-                                .foregroundStyle(Color.primary.opacity(0.46))
-                                .frame(width: 48, height: 48)
-                                .background(Color.primary.opacity(0.055), in: Circle())
-                        } else {
-                            ForEach(people) { person in
-                                AvatarView(
-                                    url: person.avatarURL(baseURL: peopleStore.baseURL),
-                                    name: person.name,
-                                    size: 48,
-                                    assetName: person.avatarAssetName
-                                )
-                                .overlay(Circle().stroke(Color(uiColor: .systemBackground), lineWidth: 2))
-                            }
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("进入人物关系网络")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.primary)
-                        Text("查看人物档案、动态与关系")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Color.primary.opacity(0.62))
-                            .lineLimit(1)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color.primary.opacity(0.34))
-                }
-
-                knowledgeSectionDivider
-            }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
-        .buttonStyle(LearningPressStyle())
-        .accessibilityIdentifier("knowledge-people-entry")
-        .accessibilityHint("以弹窗展示人物页面")
-    }
-
-    private var knowledgeCityRow: some View {
-        Button {
-            showsCity = true
-        } label: {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 7) {
-                    Text("城市观察")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.primary)
-                    Text("广东 · 21 个城市")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Color.primary.opacity(0.43))
-                    Spacer(minLength: 0)
-                }
-
-                HStack(spacing: 13) {
-                    Image("ShenzhenSkyline")
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 76, height: 58)
-                        .clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("从广东进入城市知识地图")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.primary)
-                        Text("查看区域概况、城市名片与发展动态")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Color.primary.opacity(0.62))
-                            .lineLimit(2)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color.primary.opacity(0.34))
-                }
-
-                knowledgeSectionDivider
-            }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
-        .buttonStyle(LearningPressStyle())
-        .accessibilityIdentifier("knowledge-city-entry")
-        .accessibilityHint("以弹窗展示城市观察")
-    }
-
-    private func knowledgeEditorialHeader(_ section: KnowledgeSection) -> some View {
-        HStack(spacing: 7) {
-            Text(section.title)
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.primary)
-            Text(knowledgeSectionCount(section))
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Color.primary.opacity(0.43))
-            Spacer(minLength: 0)
-        }
-    }
-
-    private var knowledgeSectionDivider: some View {
-        Rectangle()
-            .fill(KnowledgePagePalette.stroke)
-            .frame(height: 0.7)
-            .padding(.top, 3)
-    }
-
-    private func knowledgePopup(_ section: KnowledgeSection) -> some View {
-        GeometryReader { proxy in
-            VStack(spacing: 0) {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        switch section {
-                        case .investment:
-                            investmentContent
-                        case .books:
-                            booksContent
-                        case .concepts:
-                            conceptsContent
-                        case .ideology:
-                            ideologyCampPicker
-                                .padding(.horizontal, 20)
-                                .padding(.top, 14)
-                                .padding(.bottom, 10)
-                            ideologyContent
-                        }
-                    }
-                    .padding(.top, section == .concepts ? 0 : 16)
-                    .padding(.bottom, 86)
-                }
-                .scrollIndicators(.hidden)
-            }
-            .frame(
-                width: max(0, proxy.size.width - 24),
-                height: max(0, proxy.size.height - 30)
-            )
-            .background(KnowledgePagePalette.canvas)
-            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .stroke(Color.white.opacity(0.42), lineWidth: 0.8)
-            }
-            .overlay(alignment: .bottomTrailing) {
-                DetailSheetControls(closeLabel: "关闭\(section.title)", onClose: dismissSection)
-                    .padding(12)
-            }
-            .shadow(color: .black.opacity(0.2), radius: 26, y: 12)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .padding(.vertical, 4)
-    }
-
-    private func dismissSection() {
-        withAnimation(AppModalMotion.animation) {
-            presentedSection = nil
-        }
+    private func resetSectionSelection() {
+        selectedRoute = nil
+        selectedConcept = nil
+        selectedIdeologyPerson = nil
     }
 
     @ViewBuilder
@@ -878,18 +622,13 @@ struct LearningView: View {
     @ViewBuilder
     private var booksContent: some View {
         let books = store.bookshelf?.books ?? []
-        HStack(alignment: .firstTextBaseline) {
-            Text("我的书架")
-                .font(.system(size: 24, weight: .bold, design: .serif))
-            Spacer()
-            if !books.isEmpty {
-                Text("\(books.count) 本 · \(store.bookshelf?.source ?? "微信读书")")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
+        if let bookshelf = store.bookshelf, !books.isEmpty {
+            Text("\(books.count) 本 · \(bookshelf.source)")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 12)
         }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 14)
 
         if store.isBookshelfLoading && store.bookshelf == nil {
             ContentLoadingPlaceholder(title: "正在载入书架", layout: .cards)
@@ -1015,9 +754,11 @@ struct LearningView: View {
                 ) || ProcessInfo.processInfo.arguments.contains(
                     "--learning-concept-detail-preview"
                 )
-                let shuffled = isConceptPreview ? loadedConcepts : loadedConcepts.shuffled()
+                let shuffled = isConceptPreview
+                    ? loadedConcepts
+                    : Array(loadedConcepts.prefix(1)) + loadedConcepts.dropFirst().shuffled()
                 #else
-                let shuffled = loadedConcepts.shuffled()
+                let shuffled = Array(loadedConcepts.prefix(1)) + loadedConcepts.dropFirst().shuffled()
                 #endif
                 shuffledConcepts = shuffled
                 let IDs = shuffled.map(\.id)
@@ -1235,41 +976,171 @@ struct LearningView: View {
     }
 }
 
-private enum KnowledgeSection: String, CaseIterable, Identifiable {
+private enum KnowledgeSection: String, Identifiable {
     case investment
     case books
     case concepts
+    case people
     case ideology
+    case city
 
     var id: Self { self }
+    var entryIdentifier: String { "knowledge-\(rawValue)-entry" }
 
     var title: String {
         switch self {
         case .investment: "投资学习"
         case .books: "书籍"
         case .concepts: "概念卡片"
+        case .people: "人物"
         case .ideology: "思想图谱"
-        }
-    }
-
-    var subtitle: String {
-        switch self {
-        case .investment: "视频课程、入门路径与收藏内容"
-        case .books: "接着读，也看见自己的阅读进度"
-        case .concepts: "用人物与事件连接知识背景"
-        case .ideology: "从不同立场认识重要人物"
+        case .city: "城市观察"
         }
     }
 
     var icon: String {
         switch self {
         case .investment: "chart.line.uptrend.xyaxis"
-        case .books: "books.vertical.fill"
-        case .concepts: "rectangle.stack.fill"
-        case .ideology: "person.3.fill"
+        case .books: "books.vertical"
+        case .concepts: "rectangle.on.rectangle"
+        case .people: "person.2"
+        case .ideology: "point.3.connected.trianglepath.dotted"
+        case .city: "building.2"
         }
     }
 
+    var tint: Color {
+        switch self {
+        case .investment: KnowledgePagePalette.accent
+        case .books, .people: Color(red: 0.23, green: 0.40, blue: 0.32)
+        case .concepts: Color(red: 0.59, green: 0.33, blue: 0.16)
+        case .ideology, .city: Color(red: 0.30, green: 0.33, blue: 0.54)
+        }
+    }
+}
+
+private struct KnowledgeCollectionTile<Artwork: View>: View {
+    let section: KnowledgeSection
+    let status: String
+    let itemTitle: String?
+    let open: () -> Void
+    @ViewBuilder let artwork: () -> Artwork
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        Button(action: open) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 4) {
+                    Text(section.title)
+                        .font(.subheadline.weight(.semibold))
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 3)
+                        .accessibilityHidden(true)
+                }
+
+                HStack(alignment: .center, spacing: 7) {
+                    artwork()
+                        .accessibilityHidden(true)
+                    if let itemTitle {
+                        Text(itemTitle)
+                            .font(.footnote.weight(.medium))
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 3)
+                    }
+                }
+
+                Text(status)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .multilineTextAlignment(.leading)
+            .padding(11)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .knowledgeCard(cornerRadius: 14)
+        }
+        .buttonStyle(LearningPressStyle())
+        .accessibilityIdentifier(section.entryIdentifier)
+    }
+}
+
+private struct KnowledgeDirectoryRow<Artwork: View>: View {
+    let title: String
+    let subtitle: String
+    @ViewBuilder let artwork: () -> Artwork
+
+    var body: some View {
+        HStack(spacing: 12) {
+            artwork()
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(subtitle)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .multilineTextAlignment(.leading)
+
+            Spacer(minLength: 0)
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+        }
+        .padding(.vertical, 8)
+        .frame(minHeight: 52)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct KnowledgeSectionPanel<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: () -> Content
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(.title2.bold())
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 0)
+                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭\(title)")
+                    .accessibilityIdentifier("detail-sheet-close")
+            }
+            .padding(.leading, 20)
+            .padding(.trailing, 12)
+            .padding(.vertical, 8)
+            .background(KnowledgePagePalette.surface)
+
+            Divider()
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0, content: content)
+                    .padding(.top, 14)
+                    .padding(.bottom, 20)
+            }
+            .scrollIndicators(.hidden)
+        }
+        .background(KnowledgePagePalette.surface.ignoresSafeArea())
+        .readingSheetPresentation()
+    }
+}
+
+private extension View {
+    func knowledgeCard(cornerRadius: CGFloat) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius)
+        return background(KnowledgePagePalette.surface, in: shape)
+            .clipShape(shape)
+            .overlay {
+                shape.strokeBorder(KnowledgePagePalette.stroke, lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
+    }
 }
 
 private enum LearningRoute: Hashable, Identifiable {
