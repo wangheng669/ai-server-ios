@@ -100,13 +100,20 @@ struct ResearchHomeView: View {
                 } else {
                     if let message = store.errorMessage {
                         Button { Task { await store.refresh() } } label: {
-                            Label("\(message) · 点击重试", systemImage: "arrow.clockwise")
+                            Label(store.isRetrying ? "正在重试行情" : "\(message) · 点击重试",
+                                  systemImage: "arrow.clockwise")
                                 .font(.footnote)
                                 .foregroundStyle(ResearchStyle.accent)
                                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .disabled(store.isRetrying)
+                    } else if let notice = store.quoteIssueMessage {
+                        Text(notice)
+                            .font(.footnote)
+                            .foregroundStyle(ResearchStyle.muted)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     globalMarkets
                 }
@@ -603,41 +610,47 @@ private struct ResearchStockQuotes: View {
 
     private func stockRow(_ quote: MarketQuote) -> some View {
         let active = quote.stale != true && !store.isShowingCachedSnapshot
+        let lastTrade = store.lastSessionTrade(for: quote)
         return Button { onOpen(quote.symbol) } label: {
-            HStack(spacing: 6) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(quote.presentationName)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(quote.presentationName)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                        Text(stockSubtitle(quote, active: active, hasLastTrade: lastTrade != nil))
+                            .font(.caption2)
+                            .foregroundStyle(ResearchStyle.muted)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if showsExtendedHours {
+                        let sessions = StockSessionQuotes(quote: quote, chart: store.dayChartForSessionQuotes(symbol: quote.symbol),
+                                                          extendedSession: extendedSession, isCurrent: active)
+                        ForEach(sessions.columns) { column in
+                            StockSessionPriceCell(column: column, symbol: quote.symbol, muted: ResearchStyle.muted)
+                        }
+                    } else {
+                        Text(quote.stale == true ? "—" : quote.marketDisplayPrice.formatted(
+                            .number.precision(.fractionLength(marketPriceDigits(quote.marketDisplayPrice, symbol: quote.symbol)))
+                        ))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                    Text(stockSubtitle(quote, active: active))
-                        .font(.caption2)
-                        .foregroundStyle(ResearchStyle.muted)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                if showsExtendedHours {
-                    let sessions = StockSessionQuotes(quote: quote, chart: store.dayChartForSessionQuotes(symbol: quote.symbol),
-                                                      extendedSession: extendedSession, isCurrent: active)
-                    ForEach(sessions.columns) { column in
-                        StockSessionPriceCell(column: column, symbol: quote.symbol, muted: ResearchStyle.muted)
-                    }
-                } else {
-                    Text(quote.marketDisplayPrice.formatted(.number.precision(.fractionLength(
-                        marketPriceDigits(quote.marketDisplayPrice, symbol: quote.symbol)
-                    ))))
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1).minimumScaleFactor(0.75)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    Text(quote.marketDisplayFormattedPercent)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(ResearchStyle.tint(quote))
                         .lineLimit(1).minimumScaleFactor(0.75)
                         .frame(maxWidth: .infinity, alignment: .trailing)
+                        Text(quote.marketDisplayFormattedPercent)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(ResearchStyle.tint(quote))
+                            .lineLimit(1).minimumScaleFactor(0.75)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                }
+                if let lastTrade {
+                    MarketLastSessionTradeNote(trade: lastTrade, symbol: quote.symbol)
                 }
             }
             .monospacedDigit()
@@ -650,7 +663,8 @@ private struct ResearchStockQuotes: View {
         .accessibilityIdentifier("research-stock-\(quote.symbol)")
     }
 
-    private func stockSubtitle(_ quote: MarketQuote, active: Bool) -> String {
+    private func stockSubtitle(_ quote: MarketQuote, active: Bool, hasLastTrade: Bool) -> String {
+        if hasLastTrade { return quote.displayCode }
         if !active { return "\(quote.displayCode) · 待更新" }
         if !showsExtendedHours, quote.tradingSession == .closed, let date = quote.quality?.tradingDate {
             return "\(quote.displayCode) · \(date.suffix(5)) 收盘"

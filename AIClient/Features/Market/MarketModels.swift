@@ -215,6 +215,13 @@ struct MarketSymbolHealth: Codable, Hashable {
     let source: String?
     let delaySeconds: Int?
     let reason: String?
+    let lastSessionTrade: MarketLastSessionTrade?
+}
+
+struct MarketLastSessionTrade: Codable, Hashable {
+    let price: Double
+    let timestamp: Int64
+    let source: String
 }
 
 struct MarketRegionDefinition: Codable, Hashable {
@@ -673,8 +680,15 @@ func marketRealtimeUpdateIsCurrent(
     current: MarketQuote?,
     cached: MarketQuoteUpdate? = nil
 ) -> Bool {
-    guard let receivedAt = update.receivedAt else { return false }
-    return receivedAt >= max(current?.receivedAt ?? 0, cached?.receivedAt ?? 0)
+    guard let receivedAt = update.receivedAt,
+          receivedAt >= max(current?.receivedAt ?? 0, cached?.receivedAt ?? 0) else { return false }
+    guard let current, current.stale == true else { return true }
+
+    // A dashboard refresh can mark the most recently streamed trade stale.
+    // Replaying that receipt would restore a price that aged past the limit.
+    guard receivedAt > (current.receivedAt ?? 0) else { return false }
+    guard let lastTrade = current.quality?.asOfTimestamp else { return true }
+    return (update.quality?.asOfTimestamp ?? update.timestamp ?? 0) > lastTrade
 }
 
 struct MarketAShareOverview: Codable {

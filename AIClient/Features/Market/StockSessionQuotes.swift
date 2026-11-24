@@ -163,3 +163,24 @@ extension MarketStore {
         return snapshot.chart
     }
 }
+
+struct MarketLastSessionTradeNote: View {
+    let trade: MarketLastSessionTrade
+    let symbol: String
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 60)) { timeline in
+            let date = Date(timeIntervalSince1970: Double(trade.timestamp) / 1_000)
+            let minutes = max(0, Int(timeline.date.timeIntervalSince(date) / 60))
+            let price = trade.price.formatted(.number.precision(.fractionLength(
+                marketPriceDigits(trade.price, symbol: symbol)
+            )))
+            Text("最近成交 \(price) · \(date.formatted(date: .omitted, time: .shortened)) · \(minutes) 分钟前 · \(trade.source)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityIdentifier("market-last-session-trade-\(symbol)")
+    }
+}

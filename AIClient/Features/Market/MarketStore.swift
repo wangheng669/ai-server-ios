@@ -95,7 +95,7 @@ final class MarketStore {
             return nil
         }
         if dashboard == nil { isLoading = true }
-        else if force { isRetrying = true }
+        if force { isRetrying = true }
         // Prefetch and the visible tab share one request across navigation.
         let task = Task { await fetchDashboard(force: force) }
         dashboardLoadTask = task
@@ -119,7 +119,7 @@ final class MarketStore {
             lastSnapshotRefreshAt = Date()
             isShowingCachedSnapshot = false
             cacheSavedAt = nil
-            errorMessage = marketHealthMessage(for: value)
+            errorMessage = nil
             await MarketSnapshotCache.shared.save(value, at: Date())
             if realtimeStatus != .stopped { scheduleMissingTrendBackfill() }
         } catch is CancellationError {
@@ -354,9 +354,21 @@ final class MarketStore {
             .max()
     }
 
-    var healthIssues: [MarketSymbolHealth] {
-        guard let dashboard else { return [] }
-        return dashboard.symbolHealth.filter { $0.status == .missing || $0.status == .stale }
+    var quoteIssueMessage: String? {
+        guard let dashboard else { return nil }
+        let issues = dashboard.symbolHealth.filter { health in
+            health.status == .missing ||
+                (health.status == .stale && health.lastSessionTrade == nil &&
+                 dashboard.quote(symbol: health.symbol)?.stale != false)
+        }
+        return marketHealthSummary(issues)
+    }
+
+    func lastSessionTrade(for quote: MarketQuote) -> MarketLastSessionTrade? {
+        guard quote.stale == true, !isShowingCachedSnapshot,
+              let trade = dashboard?.symbolHealth.first(where: { $0.symbol == quote.symbol })?.lastSessionTrade,
+              trade.timestamp == quote.quality?.asOfTimestamp else { return nil }
+        return trade
     }
 
     func quote(symbol: String) -> MarketQuote? {
@@ -578,18 +590,6 @@ func marketChartCanUseCache(_ chart: MarketChart, loadedAt: Date, now: Date = Da
     default: return false
     }
     return now.timeIntervalSince(loadedAt) < maximumAge
-}
-
-private func marketHealthMessage(for dashboard: MarketDashboard) -> String? {
-    let missing = dashboard.symbolHealth.filter { $0.status == .missing }
-    let stale = dashboard.symbolHealth.filter { $0.status == .stale }
-    if !missing.isEmpty {
-        return "\(missing.count) 项行情暂未返回"
-    }
-    if !stale.isEmpty {
-        return "\(stale.count) 项行情更新延迟"
-    }
-    return nil
 }
 
 func marketHealthSummary(_ issues: [MarketSymbolHealth]) -> String? {
