@@ -578,12 +578,22 @@ private struct MarketQuotesPage: View {
     }
 
     private func quoteRow(_ quote: MarketQuote) -> some View {
-        Button { onSelectQuote(quote.symbol) } label: {
-            MarketOverviewQuoteRow(
-                quote: quote,
-                trend: store.listTrendValues(for: quote),
-                logoPath: displayedLogoPaths[quote.symbol]
-            )
+        let lastTrade = store.lastSessionTrade(for: quote)
+        return Button { onSelectQuote(quote.symbol) } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                MarketOverviewQuoteRow(
+                    quote: quote,
+                    trend: store.listTrendValues(for: quote),
+                    logoPath: displayedLogoPaths[quote.symbol],
+                    hasLastTrade: lastTrade != nil
+                )
+                if let trade = lastTrade {
+                    MarketLastSessionTradeNote(trade: trade, symbol: quote.symbol)
+                        .padding(.leading, 66)
+                        .padding(.trailing, 18)
+                        .padding(.bottom, 8)
+                }
+            }
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("market-quote-\(quote.symbol)")
@@ -599,9 +609,12 @@ private struct MarketQuotesPage: View {
                 Image(systemName: "chart.line.uptrend.xyaxis")
                     .font(.title2)
                 Text(store.errorMessage == nil ? "暂无\(region.rawValue)市场行情" : "行情暂时无法加载")
-                Button("重新加载") { Task { await store.refresh() } }
-                    .buttonStyle(.bordered)
-                    .tint(InvestmentDesign.accent)
+                if store.errorMessage != nil {
+                    Button("重新加载") { Task { await store.refresh() } }
+                        .buttonStyle(.bordered)
+                        .tint(InvestmentDesign.accent)
+                        .disabled(store.isRetrying)
+                }
             }
         }
         .font(.subheadline)
@@ -662,12 +675,18 @@ private struct MarketOverviewQuoteRow: View {
     let quote: MarketQuote
     let trend: [Double]
     let logoPath: String?
+    let hasLastTrade: Bool
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var usesExpandedLayout: Bool { dynamicTypeSize >= .xxLarge }
 
     private var formattedPrice: String {
-        number(quote.marketDisplayPrice, digits: marketPriceDigits(quote.marketDisplayPrice, symbol: quote.symbol))
+        guard quote.stale != true else { return "—" }
+        return number(quote.marketDisplayPrice, digits: marketPriceDigits(quote.marketDisplayPrice, symbol: quote.symbol))
+    }
+
+    private var identitySubtitle: String {
+        hasLastTrade ? quote.displayCode : "\(quote.displayCode) · \(quote.freshnessLabel)"
     }
 
     var body: some View {
@@ -704,7 +723,7 @@ private struct MarketOverviewQuoteRow: View {
         .foregroundStyle(.primary)
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(quote.presentationName)，\(quote.displayCode)，\(quote.freshnessLabel)，价格 \(formattedPrice)，涨跌幅 \(quote.marketDisplayFormattedPercent)")
+        .accessibilityLabel("\(quote.presentationName)，\(identitySubtitle)，价格 \(formattedPrice)，涨跌幅 \(quote.marketDisplayFormattedPercent)")
     }
 
     private var logo: some View {
@@ -718,7 +737,7 @@ private struct MarketOverviewQuoteRow: View {
                 .font(.subheadline.weight(.semibold))
                 .lineLimit(usesExpandedLayout ? nil : 2)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("\(quote.displayCode) · \(quote.freshnessLabel)")
+            Text(identitySubtitle)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
