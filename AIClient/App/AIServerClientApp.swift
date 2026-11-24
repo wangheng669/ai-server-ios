@@ -85,7 +85,10 @@ final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate, UNUserNo
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        [.banner, .list, .sound]
+        await MainActor.run {
+            PersonPushNavigationStore.shared.prepare(notification.request.content)
+        }
+        return [.banner, .list, .sound]
     }
 
     func userNotificationCenter(
@@ -389,20 +392,49 @@ final class PersonPushNavigationStore: ObservableObject {
     static let shared = PersonPushNavigationStore()
 
     @Published private(set) var request: PushNotificationDestination?
+    private var prepared: (target: PushNotificationDestination.Target, server: URL, expires: Date, load: Task<PushNotificationContent, Error>)?
+
+    private func target(for content: UNNotificationContent) -> PushNotificationDestination.Target? {
+        let kind = content.userInfo["kind"] as? String
+        if kind == "post" {
+            guard let value = content.userInfo["content_id"] as? String, let id = Int(value), id > 0 else { return nil }
+            return .post(id)
+        }
+        guard let value = content.userInfo["notification_id"] as? String, let id = UUID(uuidString: value) else { return nil }
+        return .detail(id)
+    }
+
+    func prepare(_ content: UNNotificationContent) {
+        guard let target = target(for: content) else { return }
+        let server = ServerConfiguration.currentURL
+        if let prepared, prepared.target == target, prepared.server == server, prepared.expires > .now { return }
+        prepared?.load.cancel()
+        let api = APIClient(baseURL: server)
+        prepared = (target, server, .now.addingTimeInterval(30), Task(priority: .utility) { try await target.fetch(using: api) })
+    }
 
     func handle(_ content: UNNotificationContent) {
-        let kind = content.userInfo["kind"] as? String
-        let target: PushNotificationDestination.Target
-        if kind == "post" {
-            guard let value = content.userInfo["content_id"] as? String, let id = Int(value), id > 0 else { return }
-            target = .post(id)
-        } else {
-            guard let value = content.userInfo["notification_id"] as? String, let id = UUID(uuidString: value) else { return }
-            target = .detail(id)
-        }
+        guard let target = target(for: content) else { return }
         request?.initialLoad?.cancel()
-        let api = APIClient(baseURL: ServerConfiguration.currentURL)
-        let initialLoad = Task(priority: .userInitiated) { try await target.fetch(using: api) }
+        let server = ServerConfiguration.currentURL
+        let api = APIClient(baseURL: server)
+        let preparedLoad = prepared
+        prepared = nil
+        let initialLoad = Task(priority: .userInitiated) {
+            if let preparedLoad, preparedLoad.target == target, preparedLoad.server == server, preparedLoad.expires > .now {
+                let result = try? await withTaskCancellationHandler {
+                    try await preparedLoad.load.value
+                } onCancel: {
+                    preparedLoad.load.cancel()
+                }
+                try Task.checkCancellation()
+                if let result { return result }
+            } else {
+                preparedLoad?.load.cancel()
+            }
+            return try await target.fetch(using: api)
+        }
+        let kind = content.userInfo["kind"] as? String
         request = PushNotificationDestination(
             target: target,
             title: content.title,
@@ -535,6 +567,10 @@ private enum EditorialPreview {
 @MainActor
 private final class EditorialPageStores {
     lazy var today = TodayWorldStore()
+    lazy var market = MarketStore()
+    lazy var investorMood = InvestorMoodStore()
+    lazy var people = PeopleStore()
+    lazy var learning = LearningStore()
     private(set) var loadedFeed: NewsFeedViewModel?
     var feed: NewsFeedViewModel {
         if let loadedFeed { return loadedFeed }
@@ -550,10 +586,6 @@ private struct EditorialRootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @StateObject private var deploymentStore = DeploymentStatusStore()
     @StateObject private var personPushNavigation = PersonPushNavigationStore.shared
-    @State private var peopleStore = PeopleStore()
-    @State private var marketStore = MarketStore()
-    @State private var investorMoodStore = InvestorMoodStore()
-    @State private var learningStore = LearningStore()
     @State private var pageStores = EditorialPageStores()
     @State private var selectedTab = EditorialPreview.initialTab
     @State private var notificationPresentationAnchor: UIView?
@@ -566,9 +598,14 @@ private struct EditorialRootView: View {
     @State private var visitedTabs: Set<EditorialTab> = []
     @State private var rootBottomChromeHeight: CGFloat = 0
     @State private var dismissedDeploymentIdentity: String?
+    @State private var backgroundPrefetchReady = false
 
     private var canPrefetchBackground: Bool {
         scenePhase == .active && personPushNavigation.request == nil && presentedNotificationDetails == nil
+    }
+
+    private var canPrefetchOtherTabs: Bool {
+        canPrefetchBackground && backgroundPrefetchReady
     }
 
     private var deploymentStatus: DeploymentStatusSnapshot? {
@@ -594,15 +631,15 @@ private struct EditorialRootView: View {
             }
             tabContent(.investment) {
                 MarketView(
-                    store: marketStore,
-                    investorMoodStore: investorMoodStore,
+                    store: pageStores.market,
+                    investorMoodStore: pageStores.investorMood,
                     researchStore: pageStores.research
                 )
             }
             tabContent(.learning) {
                 LearningView(
-                    peopleStore: peopleStore,
-                    store: learningStore
+                    peopleStore: pageStores.people,
+                    store: pageStores.learning
                 )
             }
         }
@@ -708,30 +745,39 @@ private struct EditorialRootView: View {
             }
         }
         .task(id: canPrefetchBackground, priority: .utility) {
-            guard canPrefetchBackground, selectedTab != .world else { return }
+            backgroundPrefetchReady = false
+            guard canPrefetchBackground else { return }
+            do {
+                try await Task.sleep(for: .seconds(1))
+                backgroundPrefetchReady = true
+            } catch {}
+        }
+        .task(id: canPrefetchOtherTabs, priority: .utility) {
+            guard canPrefetchOtherTabs, selectedTab != .world else { return }
             await pageStores.today.load()
         }
-        .task(id: canPrefetchBackground, priority: .utility) {
-            guard canPrefetchBackground, selectedTab == .world else { return }
+        .task(id: canPrefetchOtherTabs, priority: .utility) {
+            guard canPrefetchOtherTabs, selectedTab == .world else { return }
             async let signal: Void = GoogleSignalService().prepareFirstPage()
             async let adjacentFeeds: Void = pageStores.feed.prepareAdjacentSources()
             await pageStores.feed.loadInitial()
             _ = await (signal, adjacentFeeds)
         }
-        .task(id: canPrefetchBackground, priority: .utility) {
-            guard canPrefetchBackground else { return }
+        .task(id: canPrefetchOtherTabs, priority: .utility) {
+            guard canPrefetchOtherTabs else { return }
             async let directory: Void = pageStores.feed.prepareXueqiuForOpening()
             await pageStores.feed.prepareVideoAndFlashPages()
             await directory
         }
-        .task(id: canPrefetchBackground, priority: .background) {
-            guard canPrefetchBackground, selectedTab != .learning else { return }
-            async let overview: Void = learningStore.loadOverview()
-            await peopleStore.load()
+        .task(id: canPrefetchOtherTabs, priority: .background) {
+            guard canPrefetchOtherTabs, selectedTab != .learning else { return }
+            async let overview: Void = pageStores.learning.loadOverview()
+            await pageStores.people.load()
             await overview
         }
-        .task(id: canPrefetchBackground, priority: .utility) {
-            guard canPrefetchBackground, selectedTab != .investment else { return }
+        .task(id: canPrefetchOtherTabs, priority: .utility) {
+            guard canPrefetchOtherTabs, selectedTab != .investment else { return }
+            let marketStore = pageStores.market
             await marketStore.preloadDashboard()
             guard !Task.isCancelled, selectedTab != .investment else { return }
             let stocks = ResearchHomeContent.stocks(in: marketStore.dashboard, region: .unitedStates)

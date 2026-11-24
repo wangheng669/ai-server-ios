@@ -31,6 +31,7 @@ struct PostDetailView: View {
     @State private var isVideoReady = false
     @State private var bilibiliPlaybackStartedAt: Date?
     @State private var bilibiliEmbedPhase = BilibiliEmbedPhase.poster
+    @State private var wantsBilibiliPlayer = false
     @State private var bilibiliPlaybackRetryTask: Task<Void, Never>?
     @State private var bilibiliPlaybackRetryCount = 0
     @State private var bilibiliSubtitleCues: [VideoSubtitleCue] = []
@@ -55,7 +56,6 @@ struct PostDetailView: View {
     @State private var rssOriginalArticleHTML: String?
     @State private var storedRSSArticleBlocks: [RSSArticleBlock]?
     @State private var qbitAIArticleBlocks: [RSSArticleBlock]?
-    @State private var isLoadingQbitAIArticle: Bool
     @State private var wikipediaEntitiesByParagraph: [Int: [WikipediaEntity]] = [:]
     @State private var selectedWikipediaEntity: WikipediaSelection?
     @State private var presentedWikipediaEntity: WikipediaEntity?
@@ -100,7 +100,6 @@ struct PostDetailView: View {
         _post = State(initialValue: post)
         _newYorkTimesArticle = State(initialValue: storedArticle)
         _isLoadingNewYorkTimesBody = State(initialValue: post.isNewYorkTimes && storedArticle == nil)
-        _isLoadingQbitAIArticle = State(initialValue: post.isQbitAIArticle)
         _isRSSBookmarked = State(initialValue: RSSBookmarkStore.contains(post.id))
         _isLoadingXFullText = State(initialValue:
             post.sourceName == "X"
@@ -200,11 +199,16 @@ struct PostDetailView: View {
         }
         .task(id: readerInput, priority: .userInitiated) {
             guard let readerInput else { return }
+            let leadImage = readerInput.originalHTML == nil ? readerInput.post.rssReaderLeadImage : nil
+            let articleImage = leadImage.map(MediaURL.articleImage)
+            let size = isWeChatArticle ? WeChatArticleImage.decodingSize : RSSArticleImage.decodingSize
+            async let preparedImage = ImageLoader.load(articleImage, targetSize: size)
             let blocks = await Task.detached(priority: .userInitiated) {
                 readerInput.post.rssArticleBlocks(overridingContent: readerInput.originalHTML)
             }.value
             guard !Task.isCancelled else { return }
             storedRSSArticleBlocks = blocks
+            _ = await preparedImage
         }
         .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime)) { notification in
             guard let failedItem = notification.object as? AVPlayerItem, failedItem === player?.currentItem else { return }
@@ -480,7 +484,7 @@ struct PostDetailView: View {
                     .padding(.top, 12)
                     .padding(.bottom, 28)
 
-                    if !isLoadingQbitAIArticle, let blocks = qbitAIArticleBlocks ?? storedRSSArticleBlocks {
+                    if let blocks = qbitAIArticleBlocks ?? storedRSSArticleBlocks {
                         ForEach(blocks.indices, id: \.self) { index in
                             rssArticleBlock(blocks[index], isWeChat: true)
                                 .padding(.top, index == 0 ? 0 : 20)
@@ -1647,26 +1651,27 @@ struct PostDetailView: View {
 
     @ViewBuilder private var bilibiliMedia: some View {
         if bilibiliBVID != nil || post.previewURL != nil {
+            let showsPlayer = wantsBilibiliPlayer && bilibiliEmbedPhase == .ready
             ZStack {
                 if let bvid = bilibiliBVID, bilibiliEmbedPhase == .loading || bilibiliEmbedPhase == .ready {
-                    BilibiliEmbeddedPlayer(bvid: bvid) { ready in
+                    BilibiliEmbeddedPlayer(bvid: bvid, allowsPlayback: wantsBilibiliPlayer) { ready in
                         guard bilibiliEmbedPhase == .loading else { return }
                         bilibiliEmbedPhase = ready ? .ready : .failed
                     }
-                    .allowsHitTesting(bilibiliEmbedPhase == .ready)
-                    .accessibilityHidden(bilibiliEmbedPhase != .ready)
+                    .allowsHitTesting(showsPlayer)
+                    .accessibilityHidden(!showsPlayer)
                 }
 
-                if bilibiliEmbedPhase != .ready {
+                if !showsPlayer {
                     Color(uiColor: .secondarySystemBackground)
                     if let image = post.previewURL {
                         RemoteImage(url: image, height: 230, cornerRadius: 0)
                     }
-                    if bilibiliEmbedPhase == .loading {
+                    if wantsBilibiliPlayer, bilibiliEmbedPhase == .loading {
                         Label("正在加载播放器", systemImage: "hourglass")
                             .padding(10)
                             .background(.regularMaterial, in: Capsule())
-                    } else if bilibiliEmbedPhase == .failed {
+                    } else if wantsBilibiliPlayer, bilibiliEmbedPhase == .failed {
                         HStack {
                             Button("重试") { bilibiliEmbedPhase = .loading }
                             if post.linkURL != nil {
@@ -1676,8 +1681,14 @@ struct PostDetailView: View {
                         .buttonStyle(.borderedProminent)
                     } else if bilibiliBVID != nil || post.linkURL != nil {
                         Button {
-                            if bilibiliBVID != nil { bilibiliEmbedPhase = .loading }
-                            else { openOriginal() }
+                            if bilibiliBVID != nil {
+                                wantsBilibiliPlayer = true
+                                if bilibiliEmbedPhase == .poster || bilibiliEmbedPhase == .failed {
+                                    bilibiliEmbedPhase = .loading
+                                }
+                            } else {
+                                openOriginal()
+                            }
                         } label: {
                             Image(systemName: "play.fill")
                                 .font(.system(size: 27, weight: .semibold))
@@ -1692,6 +1703,11 @@ struct PostDetailView: View {
             }
             .frame(height: 230)
             .background(Color(uiColor: .secondarySystemBackground))
+            .task {
+                await Task.yield()
+                guard !Task.isCancelled, bilibiliBVID != nil, bilibiliEmbedPhase == .poster else { return }
+                bilibiliEmbedPhase = .loading
+            }
             .task(id: bilibiliEmbedPhase) {
                 guard bilibiliEmbedPhase == .loading else { return }
                 do {
@@ -1859,22 +1875,21 @@ struct PostDetailView: View {
                     xNavigationBar
                     VStack(alignment: .leading, spacing: 0) {
                         xAuthorHeader
-                        Group {
+                        VStack(alignment: .leading, spacing: 16) {
+                            ForEach(Array(xDisplayedDetailParagraphs.enumerated()), id: \.offset) { _, paragraph in
+                                Text(xStyledParagraph(paragraph))
+                                    .font(.system(size: 17, weight: .regular))
+                                    .lineSpacing(3)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
                             if isLoadingXFullText {
-                                xFullTextLoadingPlaceholder
-                            } else {
-                                VStack(alignment: .leading, spacing: 16) {
-                                    ForEach(Array(xDisplayedDetailParagraphs.enumerated()), id: \.offset) { _, paragraph in
-                                        Text(xStyledParagraph(paragraph))
-                                            .font(.system(size: 17, weight: .regular))
-                                            .lineSpacing(3)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                }
-                                .textSelection(.enabled)
+                                ProgressView("正在加载完整帖子")
+                                    .font(.footnote)
+                                    .controlSize(.small)
                             }
                         }
+                        .textSelection(.enabled)
                         .padding(.top, 20)
 
                         if !isLoadingXFullText, !showsOriginal, post.needsXTranslation, let tweetID = post.xTweetID {
@@ -2044,18 +2059,6 @@ struct PostDetailView: View {
 
     private var xDisplayedDetailParagraphs: [String] {
         XPostTextFormatter.paragraphs(xDisplayedDetailText)
-    }
-
-    private var xFullTextLoadingPlaceholder: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            ForEach([1.0, 0.94, 0.98, 0.88, 0.72], id: \.self) { width in
-                Capsule()
-                    .fill(Color.secondary.opacity(0.16))
-                    .frame(width: (UIScreen.main.bounds.width - 16) * width, height: 14)
-            }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("正在加载完整帖子")
     }
 
     private var xAuthorHeader: some View {
@@ -2367,7 +2370,7 @@ struct PostDetailView: View {
         }
         if post.isQbitAIArticle {
             await loadQbitAIArticle(using: client)
-        } else if isGenericRSSDetail {
+        } else if isGenericRSSDetail, !post.hasStoredRSSReaderBody {
             await loadRSSOriginalArticle(using: client)
         }
         let replyContextTask: Task<Void, Never>? = if post.sourceName == "X" {
@@ -2487,7 +2490,6 @@ struct PostDetailView: View {
     }
 
     private func loadQbitAIArticle(using client: APIClient) async {
-        defer { isLoadingQbitAIArticle = false }
         guard let link = post.linkURL,
               let payload = try? await client.fetchArticlePreview(url: link, preferRemote: true).data,
               !Task.isCancelled else { return }
@@ -2521,7 +2523,7 @@ struct PostDetailView: View {
         if !shouldRefreshNewYorkTimesArticle {
             isLoadingNewYorkTimesBody = false
         } else {
-            if let detail = try? await client.fetchPost(id: post.id) { post = detail }
+            if loadsStoredDetail, let detail = try? await client.fetchPost(id: post.id) { post = detail }
             guard !Task.isCancelled else { return }
 
             if newYorkTimesArticle == nil {
@@ -2695,6 +2697,7 @@ struct PostDetailView: View {
 
 private struct BilibiliEmbeddedPlayer: UIViewRepresentable {
     let bvid: String
+    let allowsPlayback: Bool
     let onReady: (Bool) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(onReady: onReady) }
@@ -2717,21 +2720,32 @@ private struct BilibiliEmbeddedPlayer: UIViewRepresentable {
         webView.backgroundColor = .black
         webView.scrollView.backgroundColor = .black
         webView.allowsBackForwardNavigationGestures = false
+        updatePlayback(in: webView, coordinator: context.coordinator)
         loadPlayer(in: webView, coordinator: context.coordinator)
         return webView
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
+        updatePlayback(in: webView, coordinator: context.coordinator)
         guard context.coordinator.loadedBVID != bvid else { return }
         loadPlayer(in: webView, coordinator: context.coordinator)
     }
 
     static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        coordinator.stopCheckingReadiness()
         webView.stopLoading()
         webView.loadHTMLString("", baseURL: nil)
     }
 
+    private func updatePlayback(in webView: WKWebView, coordinator: Coordinator) {
+        let suspended = !allowsPlayback
+        guard coordinator.mediaSuspended != suspended else { return }
+        coordinator.mediaSuspended = suspended
+        webView.setAllMediaPlaybackSuspended(suspended, completionHandler: nil)
+    }
+
     private func loadPlayer(in webView: WKWebView, coordinator: Coordinator) {
+        coordinator.stopCheckingReadiness()
         coordinator.loadedBVID = bvid
         var components = URLComponents(string: "https://player.bilibili.com/player.html")
         components?.queryItems = [
@@ -2749,21 +2763,60 @@ private struct BilibiliEmbeddedPlayer: UIViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         var loadedBVID: String?
+        var mediaSuspended = false
         private let onReady: (Bool) -> Void
+        private var readinessTask: Task<Void, Never>?
 
         init(onReady: @escaping (Bool) -> Void) {
             self.onReady = onReady
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            onReady(true)
+            stopCheckingReadiness()
+            readinessTask = Task { @MainActor [weak self, weak webView] in
+                let configuration = WKSnapshotConfiguration()
+                configuration.snapshotWidth = 36
+                // The document can finish before the embedded controls and cover have painted.
+                let deadline = ContinuousClock.now + .seconds(4)
+                while !Task.isCancelled, let webView {
+                    let frame = try? await webView.takeSnapshot(configuration: configuration)
+                    guard !Task.isCancelled else { return }
+                    if frame.map(Self.hasVisibleContent) == true || ContinuousClock.now >= deadline {
+                        self?.onReady(true)
+                        return
+                    }
+                    try? await Task.sleep(for: .milliseconds(300))
+                }
+            }
+        }
+
+        private static func hasVisibleContent(_ frame: UIImage) -> Bool {
+            guard let image = frame.cgImage else { return false }
+            let width = 8
+            var samples = [UInt8](repeating: 0, count: width * width)
+            return samples.withUnsafeMutableBytes { bytes in
+                guard let context = CGContext(
+                    data: bytes.baseAddress,
+                    width: width, height: width, bitsPerComponent: 8, bytesPerRow: width,
+                    space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue
+                ) else { return false }
+                context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: width))
+                return bytes.filter { $0 > 32 }.count >= 4
+            }
+        }
+
+        func stopCheckingReadiness() {
+            readinessTask?.cancel()
+            readinessTask = nil
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            stopCheckingReadiness()
             onReady(false)
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            stopCheckingReadiness()
             onReady(false)
         }
 
@@ -3516,17 +3569,17 @@ private struct RSSArticleImage: View {
     let url: URL
     @State private var aspectRatio: CGFloat = 4 / 3
 
-    private var availableWidth: CGFloat {
-        max(UIScreen.main.bounds.width - 40, 240)
+    static var decodingSize: CGSize {
+        CGSize(width: max(UIScreen.main.bounds.width - 40, 240), height: 520)
     }
 
     private var displayHeight: CGFloat {
-        min(max(availableWidth / max(aspectRatio, 0.35), 150), 520)
+        min(max(Self.decodingSize.width / max(aspectRatio, 0.35), 150), 520)
     }
 
     var body: some View {
         RemoteImage(
-            url: url,
+            url: MediaURL.articleImage(url),
             height: displayHeight,
             cornerRadius: 12,
             contentMode: .fit,
@@ -3534,7 +3587,7 @@ private struct RSSArticleImage: View {
                 guard image.size.width > 0, image.size.height > 0 else { return }
                 aspectRatio = image.size.width / image.size.height
             },
-            decodingSize: CGSize(width: availableWidth, height: 520)
+            decodingSize: Self.decodingSize
         )
         .frame(maxWidth: .infinity)
         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
@@ -3548,12 +3601,12 @@ private struct WeChatArticleImage: View {
     @State private var aspectRatio: CGFloat = 1.5
     @State private var isCompactAsset = false
 
-    private var availableWidth: CGFloat {
-        max(UIScreen.main.bounds.width - 36, 240)
+    static var decodingSize: CGSize {
+        CGSize(width: max(UIScreen.main.bounds.width - 36, 240), height: 760)
     }
 
     private var displayWidth: CGFloat {
-        isCompactAsset ? min(140, availableWidth) : availableWidth
+        isCompactAsset ? min(140, Self.decodingSize.width) : Self.decodingSize.width
     }
 
     private var displayHeight: CGFloat {
@@ -3562,7 +3615,7 @@ private struct WeChatArticleImage: View {
 
     var body: some View {
         RemoteImage(
-            url: url,
+            url: MediaURL.articleImage(url),
             height: displayHeight,
             contentMode: .fit,
             onImageLoaded: { image in
@@ -3573,7 +3626,7 @@ private struct WeChatArticleImage: View {
                 let ratio = pixelWidth / max(pixelHeight, 1)
                 isCompactAsset = max(pixelWidth, pixelHeight) <= 480 && (0.55...1.8).contains(ratio)
             },
-            decodingSize: CGSize(width: availableWidth, height: 760)
+            decodingSize: Self.decodingSize
         )
         .frame(width: displayWidth, height: displayHeight, alignment: .leading)
         .animation(.easeOut(duration: 0.16), value: isCompactAsset)
