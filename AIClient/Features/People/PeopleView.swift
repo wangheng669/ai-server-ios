@@ -4,6 +4,7 @@ import UIKit
 struct PeopleView: View {
     private let store: PeopleStore
     @State private var selectedPerson: SpecialPerson?
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.rootTabIsActive) private var rootTabIsActive
 
     init(store: PeopleStore) {
@@ -36,6 +37,19 @@ struct PeopleView: View {
                 }
             }
             .background(Color(uiColor: .systemBackground).ignoresSafeArea())
+            .safeAreaInset(edge: .top, spacing: 0) {
+                HStack {
+                    Text("人物")
+                        .font(.title2.bold())
+                        .accessibilityAddTraits(.isHeader)
+                    Spacer(minLength: 0)
+                    DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭人物")
+                }
+                .padding(.leading, 20)
+                .padding(.trailing, 12)
+                .padding(.vertical, 8)
+                .background(Color(uiColor: .systemBackground))
+            }
             .navigationBarHidden(true)
         }
         .appSheet(isPresented: detailIsPresented) {
