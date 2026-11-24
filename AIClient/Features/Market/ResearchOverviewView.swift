@@ -321,6 +321,13 @@ struct ResearchHomeView: View {
                 } detail: {
                     Text(sentiment?.ratingZh ?? "暂无数据")
                         .foregroundStyle(ResearchStyle.muted)
+                    if let date = marketISODate(sentiment?.updatedAt) {
+                        Text(marketShortTimestamp(Int64(date.timeIntervalSince1970 * 1000)))
+                            .foregroundStyle(ResearchStyle.muted)
+                    }
+                    if sentiment?.stale == true {
+                        Text("待更新").foregroundStyle(ResearchStyle.muted)
+                    }
                 }
             }
             .buttonStyle(.plain)
@@ -344,7 +351,11 @@ struct ResearchHomeView: View {
             } detail: {
                 Text(change.map { String(format: yield ? "%+.0f bp" : "%+.2f 点", $0 * (yield ? 100 : 1)) } ?? "—")
                     .foregroundStyle(ResearchStyle.tint(quote))
-                if let subtitle = quoteSubtitle(quote) {
+                if symbol == "^VIX", let quote, quote.stale != true, quote.tradingSession == .premarket,
+                   let timestamp = quote.quality?.asOfTimestamp {
+                    Text("盘前快照 \(marketShortTimestamp(timestamp))")
+                        .foregroundStyle(ResearchStyle.muted)
+                } else if let subtitle = quoteSubtitle(quote) {
                     Text(subtitle).foregroundStyle(ResearchStyle.muted)
                 }
             }
