@@ -124,10 +124,14 @@ struct YouTubeVideoDetailView: View {
             }
         }
         .background(Color(uiColor: .systemBackground))
-        .overlay(alignment: .bottomTrailing) {
+        .safeAreaInset(edge: .top, spacing: 0) {
             if presentedAsSheet {
-                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭视频详情")
-                    .padding(16)
+                HStack {
+                    Spacer()
+                    DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭视频详情")
+                }
+                .padding(.horizontal, 12)
+                .background(.background)
             }
         }
         .navigationTitle(presentedAsSheet ? "" : "视频详情")
@@ -158,7 +162,10 @@ struct YouTubeVideoDetailView: View {
 
     private var metadata: some View {
         VStack(alignment: .leading, spacing: 8) {
-            LocalTranslatedText(original: video.title, detail: true, enabled: translatesRSSLocally, field: .title)
+            LocalTranslatedText(
+                original: video.title, detail: true, enabled: translatesRSSLocally,
+                field: .title, preservesOriginal: true
+            )
                 .font(.system(size: 20, weight: .bold))
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)

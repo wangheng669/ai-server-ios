@@ -262,6 +262,7 @@ final class FeedTranslationCache {
 struct TruthLocalTranslationView: View {
     let post: Post
     var openOriginal: (() -> Void)?
+    var showsOriginalText = false
 
     var body: some View {
         if post.isTruthMediaPlaceholder {
@@ -273,7 +274,8 @@ struct TruthLocalTranslationView: View {
         } else {
             LocalTranslatedText(
                 original: post.originalDisplayContent, detail: true,
-                translationOnly: true, field: .body, openOriginal: openOriginal
+                translationOnly: !showsOriginalText, field: .body, openOriginal: openOriginal,
+                preservesOriginal: showsOriginalText
             )
         }
     }
@@ -335,6 +337,7 @@ struct LocalTranslatedText: View {
     var translationOnly = false
     var field: FeedTranslationField? = nil
     var openOriginal: (() -> Void)?
+    var preservesOriginal = false
 
     private static let recognizedLanguages: NSCache<NSString, NSString> = {
         let cache = NSCache<NSString, NSString>()
@@ -410,8 +413,11 @@ struct LocalTranslatedText: View {
         } else if enabled, let language = Self.sourceLanguage(original) {
             if #available(iOS 18.0, *) {
                 FeedDeviceTranslatedText(original: original, detail: detail, sourceIdentifier: language,
-                                         translationOnly: translationOnly, field: field, openOriginal: openOriginal)
+                                         translationOnly: translationOnly, field: field, openOriginal: openOriginal,
+                                         preservesOriginal: preservesOriginal)
                     .id(language + ":" + original)
+            } else if preservesOriginal {
+                Text(original).textSelection(.enabled)
             } else if let field {
                 FeedTranslationText(text: Text("\(field.rawValue)译文暂不可用"), openOriginal: openOriginal)
                     .foregroundStyle(.secondary)
@@ -531,6 +537,7 @@ private struct FeedDeviceTranslatedText: View {
     let rendersText: Bool
     let openOriginal: (() -> Void)?
     let onTranslation: ((String) -> Void)?
+    let preservesOriginal: Bool
     private let key: String
     @State private var display: FeedTranslationCache.DisplayState
     @Environment(\.scenePhase) private var scenePhase
@@ -545,7 +552,7 @@ private struct FeedDeviceTranslatedText: View {
     init(
         original: String, detail: Bool, sourceIdentifier: String, translationOnly: Bool,
         field: FeedTranslationField?, rendersText: Bool = true, openOriginal: (() -> Void)? = nil,
-        onTranslation: ((String) -> Void)? = nil
+        preservesOriginal: Bool = false, onTranslation: ((String) -> Void)? = nil
     ) {
         self.original = original
         self.detail = detail
@@ -555,6 +562,7 @@ private struct FeedDeviceTranslatedText: View {
         self.rendersText = rendersText
         self.openOriginal = openOriginal
         self.onTranslation = onTranslation
+        self.preservesOriginal = preservesOriginal
         key = FeedTranslationCache.key(original, language: sourceIdentifier)
         _display = State(initialValue: FeedTranslationCache.shared.displayState(for: key))
     }
@@ -564,6 +572,8 @@ private struct FeedDeviceTranslatedText: View {
             if rendersText {
                 if let translated = display.text {
                     FeedTranslationText(text: Text(translated), openOriginal: openOriginal)
+                } else if preservesOriginal {
+                    Text(original).textSelection(.enabled)
                 } else if let field {
                     FeedTranslationText(text: Text(status(for: field)), openOriginal: openOriginal)
                         .foregroundStyle(.secondary)
@@ -589,7 +599,7 @@ private struct FeedDeviceTranslatedText: View {
                     }
                     .font(.callout)
                 }
-                if !translationOnly, field != nil || display.text != nil {
+                if !translationOnly, display.text != nil || (field != nil && !preservesOriginal) {
                     DisclosureGroup("查看原文") { Text(original).textSelection(.enabled) }
                         .font(.callout)
                 }

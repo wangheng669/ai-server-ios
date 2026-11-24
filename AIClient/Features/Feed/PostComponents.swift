@@ -979,12 +979,13 @@ struct RemoteImage: View {
     var contentMode: ContentMode = .fill
     var onImageLoaded: ((UIImage) -> Void)? = nil
     var usesTimelinePlaceholder = false
+    var decodingSize: CGSize? = nil
     @State private var result: (request: ImageLoader.Request, image: UIImage?)?
     @Environment(\.preparedReadingMedia) private var preparedReadingMedia
 
     var body: some View {
         let screen = UIScreen.main
-        let size = CGSize(width: targetWidth ?? screen.bounds.width, height: height ?? screen.bounds.height)
+        let size = decodingSize ?? CGSize(width: targetWidth ?? screen.bounds.width, height: height ?? screen.bounds.height)
         let request = ImageLoader.request(
             for: url, targetSize: size, scale: screen.scale, isTimelinePreview: usesTimelinePlaceholder
         )

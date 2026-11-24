@@ -1816,6 +1816,7 @@ struct FeedPostSheetContent: View {
     let post: Post
     let model: NewsFeedViewModel?
     var loadsStoredDetail = true
+    var autoplaysYouTube = true
 
     var body: some View {
         NavigationStack {
@@ -1828,7 +1829,8 @@ struct FeedPostSheetContent: View {
                     post: post,
                     preloadedNewYorkTimesArticle: model?.preloadedNewYorkTimesArticle(for: post.id),
                     rssAvatarURL: rssDirectoryAvatarURL(for: post, feeds: model?.rssFeeds ?? []),
-                    loadsStoredDetail: loadsStoredDetail
+                    loadsStoredDetail: loadsStoredDetail,
+                    autoplaysYouTube: autoplaysYouTube
                 )
             }
         }

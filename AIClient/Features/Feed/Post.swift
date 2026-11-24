@@ -507,13 +507,14 @@ struct ZhihuHotTopic: Decodable {
     let title, url: String
     let heat, summary, thumbnailURL: String?
     let answerCount, followerCount, postID: Int?
-    let answerExcerpt, answerContent: String?
+    let answerExcerpt, answerContent, answerContentHTML, answerUpdatedAt: String?
     let answerAuthor: ZhihuAnswerAuthor?
     let answerVoteupCount, answerCommentCount: Int?
     enum CodingKeys: String, CodingKey {
         case rank, title, url, heat, summary
         case thumbnailURL = "thumbnail_url", answerCount = "answer_count", followerCount = "follower_count", postID = "post_id"
         case answerExcerpt = "zhihu_answer_excerpt", answerContent = "zhihu_answer_content", answerAuthor = "zhihu_answer_author"
+        case answerContentHTML = "zhihu_answer_content_html", answerUpdatedAt = "zhihu_answer_updated_at"
         case answerVoteupCount = "zhihu_answer_voteup_count", answerCommentCount = "zhihu_answer_comment_count"
     }
 }
@@ -1411,8 +1412,9 @@ struct Post: Codable, Identifiable, Hashable {
     }
 
     private func rssImageSource(in tag: String) -> String? {
-        htmlAttribute("src", in: tag)
+        htmlAttribute("data-actualsrc", in: tag)
             ?? htmlAttribute("data-src", in: tag)
+            ?? htmlAttribute("src", in: tag)
             ?? htmlAttribute("data-original", in: tag)
     }
     var weiboFollowingImageURLs: [URL] {
@@ -1673,8 +1675,10 @@ struct Post: Codable, Identifiable, Hashable {
     var zhihuReadingMinutes: Int {
         max(1, Int(ceil(Double(zhihuAnswerBody.count) / 350.0)))
     }
+    var zhihuAnswerHTML: String? { clean(meta?.zhihuAnswerContentHTML) }
     var zhihuArticleParagraphs: [String] {
         let normalized = zhihuAnswerBody
+            .replacingOccurrences(of: "[图片]", with: "")
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
         let explicit = normalized
@@ -1945,7 +1949,8 @@ struct Post: Codable, Identifiable, Hashable {
             inReplyToScreenName: nil, inReplyToStatusID: nil, replyContext: nil, quotedTweet: nil, photoCredit: nil,
             zhihuRank: topic.rank, zhihuHeat: topic.heat, zhihuAnswers: topic.answerCount, zhihuFollowerCount: topic.followerCount,
             zhihuQuestionID: URL(string: topic.url)?.lastPathComponent, zhihuURL: topic.url, zhihuAnswerExcerpt: topic.answerExcerpt,
-            zhihuAnswerContent: topic.answerContent, zhihuAnswerAuthor: topic.answerAuthor,
+            zhihuAnswerContent: topic.answerContent, zhihuAnswerContentHTML: topic.answerContentHTML,
+            zhihuAnswerUpdatedAt: topic.answerUpdatedAt, zhihuAnswerAuthor: topic.answerAuthor,
             zhihuAnswerVoteupCount: topic.answerVoteupCount, zhihuAnswerCommentCount: topic.answerCommentCount,
             rssFeedName: nil, rssFeedIcon: nil, rssArticleLink: nil,
             flashCategory: nil, flashSimilarityGroupId: nil, flashSimilarityScore: nil, flashSimilarCount: nil, flashPlatformCount: nil, flashPlatforms: nil
@@ -2029,6 +2034,8 @@ struct PostMeta: Codable, Hashable {
     let zhihuURL: String?
     let zhihuAnswerExcerpt: String?
     let zhihuAnswerContent: String?
+    var zhihuAnswerContentHTML: String? = nil
+    var zhihuAnswerUpdatedAt: String? = nil
     let zhihuAnswerAuthor: ZhihuAnswerAuthor?
     let zhihuAnswerVoteupCount: Int?
     let zhihuAnswerCommentCount: Int?
@@ -2058,6 +2065,8 @@ struct PostMeta: Codable, Hashable {
         case zhihuURL = "zhihu_url"
         case zhihuAnswerExcerpt = "zhihu_answer_excerpt"
         case zhihuAnswerContent = "zhihu_answer_content"
+        case zhihuAnswerContentHTML = "zhihu_answer_content_html"
+        case zhihuAnswerUpdatedAt = "zhihu_answer_updated_at"
         case zhihuAnswerAuthor = "zhihu_answer_author"
         case zhihuAnswerVoteupCount = "zhihu_answer_voteup_count"
         case zhihuAnswerCommentCount = "zhihu_answer_comment_count"
@@ -2125,7 +2134,8 @@ struct PostMeta: Codable, Hashable {
             zhihuRank: zhihuRank, zhihuHeat: zhihuHeat, zhihuAnswers: zhihuAnswers,
             zhihuFollowerCount: zhihuFollowerCount, zhihuQuestionID: zhihuQuestionID,
             zhihuURL: zhihuURL, zhihuAnswerExcerpt: zhihuAnswerExcerpt,
-            zhihuAnswerContent: zhihuAnswerContent, zhihuAnswerAuthor: zhihuAnswerAuthor,
+            zhihuAnswerContent: zhihuAnswerContent, zhihuAnswerContentHTML: zhihuAnswerContentHTML,
+            zhihuAnswerUpdatedAt: zhihuAnswerUpdatedAt, zhihuAnswerAuthor: zhihuAnswerAuthor,
             zhihuAnswerVoteupCount: zhihuAnswerVoteupCount,
             zhihuAnswerCommentCount: zhihuAnswerCommentCount,
             rssFeedName: rssFeedName, rssFeedIcon: rssFeedIcon,
@@ -2452,21 +2462,13 @@ enum MediaURL {
     private static func resolvedImage(_ decoded: String) -> URL? {
         if let proxyURL = URL(string: decoded),
            proxyURL.host?.lowercased() == "wechat2rss.xlab.app",
-           proxyURL.path.hasSuffix("/img-proxy"),
+           proxyURL.path.split(separator: "/").last == "img-proxy",
            let original = URLComponents(url: proxyURL, resolvingAgainstBaseURL: false)?
             .queryItems?.first(where: { $0.name == "u" })?.value,
-           let originalURL = URL(string: original),
-           originalURL.host?.lowercased().hasSuffix("qpic.cn") == true {
-            var parts = URLComponents(
-                url: ServerConfiguration.currentURL.appending(path: "api/ios/v1/image-proxy"),
-                resolvingAgainstBaseURL: false
-            )
-            parts?.queryItems = [
-                .init(name: "url", value: originalURL.absoluteString),
-                .init(name: "soft", value: "1"),
-                .init(name: "context", value: "ios-feed")
-            ]
-            return parts?.url
+           let originalURL = URL(string: original), originalURL.scheme?.lowercased() == "https",
+           let host = originalURL.host?.lowercased(),
+           host == "qpic.cn" || host.hasSuffix(".qpic.cn") || host == "res.wx.qq.com" {
+            return resolved(originalURL.absoluteString, proxy: "image-proxy")
         }
         return resolved(decoded, proxy: "image-proxy")
     }
