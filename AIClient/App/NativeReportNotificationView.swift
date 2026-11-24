@@ -105,10 +105,10 @@ struct NativeReportNotificationView: View {
             Text(report.title).font(.system(.title, design: .rounded).bold())
                 .fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader)
             if let subtitle = nonempty(report.subtitle) {
-                Text(subtitle).font(.subheadline).foregroundStyle(.secondary).textSelection(.enabled)
+                Text(displayTimestamps(subtitle)).font(.subheadline).foregroundStyle(.secondary).textSelection(.enabled)
             }
             if let date = nonempty(report.generatedAt) {
-                Label(date, systemImage: "clock").font(.caption).foregroundStyle(.secondary)
+                Label(displayTimestamps(date), systemImage: "clock").font(.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -133,7 +133,7 @@ struct NativeReportNotificationView: View {
                     Text(title).font(.headline).accessibilityAddTraits(.isHeader)
                 }
                 if sectionMatches, let text = nonempty(section.text) {
-                    Text(text).font(.body).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    Text(displayTimestamps(text)).font(.body).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 }
                 if sectionMatches, let metrics = section.metrics, !metrics.isEmpty {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: typeSize.isAccessibilitySize ? 240 : 130), alignment: .leading)], alignment: .leading, spacing: 14) {
@@ -172,17 +172,17 @@ struct NativeReportNotificationView: View {
                         .accessibilityHidden(true)
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(row.title).font(.body.weight(.semibold)).textSelection(.enabled)
-                    if let subtitle = nonempty(row.subtitle) {
-                        Text(subtitle).font(.subheadline).foregroundStyle(.secondary).textSelection(.enabled)
+                    Text(displayTimestamps(row.title)).font(.body.weight(.semibold)).textSelection(.enabled)
+                    if let subtitle = nonempty(row.subtitle), subtitle != row.title {
+                        Text(displayTimestamps(subtitle)).font(.subheadline).foregroundStyle(.secondary).textSelection(.enabled)
                     }
                     if let value = nonempty(row.value) {
-                        Text(value).font(.system(.headline, design: .rounded)).foregroundStyle(style.color).monospacedDigit().textSelection(.enabled)
+                        Text(displayTimestamps(value)).font(.system(.headline, design: .rounded)).foregroundStyle(style.color).monospacedDigit().textSelection(.enabled)
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
-            if let detail = nonempty(row.detail) {
-                Text(detail).font(.body).foregroundStyle(.secondary).textSelection(.enabled)
+            if let detail = rowDetail(row) {
+                Text(displayTimestamps(detail)).font(.body).foregroundStyle(.secondary).textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let url = webURL(row.url) {
@@ -208,10 +208,53 @@ struct NativeReportNotificationView: View {
     }
 
     private func matchingRows(_ section: NativeNotificationReport.Section) -> [NativeNotificationReport.Row] {
-        let all = section.rows ?? []
+        var seen = Set<[String?]>()
+        let all = (section.rows ?? []).filter {
+            seen.insert([$0.title, $0.subtitle, $0.value, $0.detail, $0.url, $0.imageURL]).inserted
+        }
         if query.isEmpty || matches(section.title) || matches(section.text) { return all }
         return all.filter { matches($0.title) || matches($0.subtitle) || matches($0.detail) || matches($0.value) }
     }
+    private func rowDetail(_ row: NativeNotificationReport.Row) -> String? {
+        guard let detail = nonempty(row.detail) else { return nil }
+        guard report.kind == "arxiv" else { return detail }
+
+        var seen = Set([row.title, row.subtitle].compactMap { nonempty($0) }.map(canonicalLine))
+        let paragraphs = detail.components(separatedBy: "\n\n").filter { paragraph in
+            var lines = paragraph.split(whereSeparator: \.isNewline)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if let first = lines.first, ["摘要", "原文"].contains(first) { lines.removeFirst() }
+            let value = canonicalLine(lines.joined(separator: " "))
+            return !value.isEmpty && seen.insert(value).inserted
+        }
+        return nonempty(paragraphs.joined(separator: "\n\n"))
+    }
+
+    private func canonicalLine(_ text: String) -> String {
+        text.split(whereSeparator: \.isWhitespace).joined(separator: " ").lowercased()
+    }
+
+    private static let timestampPattern = try! NSRegularExpression(
+        pattern: #"\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})"#
+    )
+
+    private func displayTimestamps(_ text: String) -> String {
+        let matches = Self.timestampPattern.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        var formatted = text
+        for match in matches.reversed() {
+            guard let range = Range(match.range, in: formatted) else { continue }
+            let value = String(formatted[range])
+            let parser = Date.ISO8601FormatStyle(includingFractionalSeconds: value.contains("."))
+            guard let date = try? parser.parse(value) else { continue }
+            let label = date.formatted(
+                .dateTime.year().month(.twoDigits).day(.twoDigits).hour().minute().locale(Locale(identifier: "zh_CN"))
+            )
+            formatted.replaceSubrange(range, with: label)
+        }
+        return formatted
+    }
+
     private var hasMatches: Bool {
         (report.sections ?? []).contains { matches($0.title) || matches($0.text) || !matchingRows($0).isEmpty }
     }

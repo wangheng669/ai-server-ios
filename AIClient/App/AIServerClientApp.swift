@@ -109,6 +109,11 @@ final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate, UNUserNo
     }
 }
 
+enum PushNotificationContent {
+    case post(Post)
+    case detail(PushNotificationDetails)
+}
+
 struct PushNotificationDestination: Identifiable, Equatable {
     enum Target: Equatable {
         case post(Int)
@@ -120,10 +125,22 @@ struct PushNotificationDestination: Identifiable, Equatable {
     let title: String
     let summary: String
     let prefersLargeSheet: Bool
+    var initialLoad: Task<PushNotificationContent, Error>? = nil
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
 
     var opensPost: Bool {
         if case .post = target { return true }
         return false
+    }
+}
+
+private extension PushNotificationDestination.Target {
+    func fetch(using api: APIClient) async throws -> PushNotificationContent {
+        switch self {
+        case .post(let id): .post(try await api.fetchPost(id: id))
+        case .detail(let id): .detail(try await api.fetchPushNotification(id: id))
+        }
     }
 }
 
@@ -147,11 +164,6 @@ struct PushNotificationDetails: Decodable {
 }
 
 struct PushNotificationDetailsView: View {
-    private enum LoadedContent {
-        case post(Post)
-        case detail(PushNotificationDetails)
-    }
-
     private enum LoadFailure {
         case unavailable, retryable
     }
@@ -159,7 +171,8 @@ struct PushNotificationDetailsView: View {
     let destination: PushNotificationDestination
     private let feedModel: NewsFeedViewModel?
     private let loadDetails: ((UUID) async throws -> PushNotificationDetails)?
-    @State private var loadedContent: LoadedContent?
+    @State private var loadedContent: PushNotificationContent?
+    @Environment(\.dismiss) private var dismiss
     @State private var failure: LoadFailure?
     @State private var attempt = 0
     @State private var browser: InAppBrowserDestination?
@@ -185,7 +198,9 @@ struct PushNotificationDetailsView: View {
         Group {
             switch loadedContent {
             case .post(let post):
-                FeedPostSheetContent(post: post, model: feedModel, loadsStoredDetail: false)
+                FeedPostSheetContent(
+                    post: post, model: feedModel, loadsStoredDetail: false, autoplaysYouTube: false
+                )
             case .detail(let details):
                 if let snapshot = details.sec13f {
                     Sec13FNotificationView(snapshot: snapshot)
@@ -193,17 +208,29 @@ struct PushNotificationDetailsView: View {
                     NativeReportNotificationView(report: report, links: details.links ?? [])
                 } else {
                     content(details)
+                        .safeAreaInset(edge: .top, spacing: 0) { closeBar }
                 }
             case nil:
                 preview
+                    .safeAreaInset(edge: .top, spacing: 0) { closeBar }
             }
         }
         .presentationDetents(needsLargeSheet ? [.large] : [.medium, .large])
         .task(id: attempt) {
             await fetchContent()
         }
+        .onDisappear { destination.initialLoad?.cancel() }
         .imageGallery(item: $gallerySelection)
         .inAppBrowserCover(item: $browser)
+    }
+
+    private var closeBar: some View {
+        HStack {
+            Spacer()
+            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭通知详情")
+        }
+        .padding(.horizontal, 12)
+        .background(.background)
     }
 
     private var preview: some View {
@@ -232,17 +259,13 @@ struct PushNotificationDetailsView: View {
         failure = nil
         let api = APIClient(baseURL: ServerConfiguration.currentURL)
         do {
-            let loaded: LoadedContent
-            switch destination.target {
-            case .post(let id):
-                loaded = .post(try await api.fetchPost(id: id))
-            case .detail(let id):
-                let details = if let loadDetails {
-                    try await loadDetails(id)
-                } else {
-                    try await api.fetchPushNotification(id: id)
-                }
-                loaded = .detail(details)
+            let loaded: PushNotificationContent
+            if attempt == 0, let initialLoad = destination.initialLoad {
+                loaded = try await initialLoad.value
+            } else if case .detail(let id) = destination.target, let loadDetails {
+                loaded = .detail(try await loadDetails(id))
+            } else {
+                loaded = try await destination.target.fetch(using: api)
             }
             try Task.checkCancellation()
             loadedContent = loaded
@@ -377,11 +400,15 @@ final class PersonPushNavigationStore: ObservableObject {
             guard let value = content.userInfo["notification_id"] as? String, let id = UUID(uuidString: value) else { return }
             target = .detail(id)
         }
+        request?.initialLoad?.cancel()
+        let api = APIClient(baseURL: ServerConfiguration.currentURL)
+        let initialLoad = Task(priority: .userInitiated) { try await target.fetch(using: api) }
         request = PushNotificationDestination(
             target: target,
             title: content.title,
             summary: content.body,
-            prefersLargeSheet: kind == "post" || kind == "sec13f" || content.categoryIdentifier == "focus-report"
+            prefersLargeSheet: kind == "post" || kind == "sec13f" || content.categoryIdentifier == "focus-report",
+            initialLoad: initialLoad
         )
     }
 
@@ -508,7 +535,13 @@ private enum EditorialPreview {
 @MainActor
 private final class EditorialPageStores {
     lazy var today = TodayWorldStore()
-    lazy var feed = NewsFeedViewModel()
+    private(set) var loadedFeed: NewsFeedViewModel?
+    var feed: NewsFeedViewModel {
+        if let loadedFeed { return loadedFeed }
+        let model = NewsFeedViewModel()
+        loadedFeed = model
+        return model
+    }
     lazy var research = InstitutionResearchStore()
 }
 
@@ -525,6 +558,7 @@ private struct EditorialRootView: View {
     @State private var selectedTab = EditorialPreview.initialTab
     @State private var notificationPresentationAnchor: UIView?
     @State private var presentedNotificationDetails: PushNotificationDestination?
+    @State private var showFeedAfterNotification = false
     @State private var lastDynamicTab: EditorialTab = .observation
     @State private var presentedExternalLink = EditorialPreview.externalLink
     @State private var signalSentiment: GoogleSignalSentimentFilter = .all
@@ -532,6 +566,10 @@ private struct EditorialRootView: View {
     @State private var visitedTabs: Set<EditorialTab> = []
     @State private var rootBottomChromeHeight: CGFloat = 0
     @State private var dismissedDeploymentIdentity: String?
+
+    private var canPrefetchBackground: Bool {
+        scenePhase == .active && personPushNavigation.request == nil && presentedNotificationDetails == nil
+    }
 
     private var deploymentStatus: DeploymentStatusSnapshot? {
         #if DEBUG
@@ -588,8 +626,12 @@ private struct EditorialRootView: View {
             return .handled
         })
         .inAppBrowserCover(item: $presentedExternalLink)
-        .sheet(item: $presentedNotificationDetails) { details in
-            PushNotificationDetailsView(destination: details, feedModel: details.opensPost ? pageStores.feed : nil)
+        .sheet(item: $presentedNotificationDetails, onDismiss: {
+            guard personPushNavigation.request == nil, showFeedAfterNotification else { return }
+            showFeedAfterNotification = false
+            selectedTab = .observation
+        }) { details in
+            PushNotificationDetailsView(destination: details, feedModel: details.opensPost ? pageStores.loadedFeed : nil)
                 .id(details.id)
                 .presentationDragIndicator(.visible)
         }
@@ -665,31 +707,31 @@ private struct EditorialRootView: View {
                 deploymentStore.stop()
             }
         }
-        .task(id: scenePhase == .active, priority: .utility) {
-            guard scenePhase == .active, selectedTab != .world else { return }
+        .task(id: canPrefetchBackground, priority: .utility) {
+            guard canPrefetchBackground, selectedTab != .world else { return }
             await pageStores.today.load()
         }
-        .task(id: scenePhase == .active, priority: .utility) {
-            guard scenePhase == .active, selectedTab == .world else { return }
+        .task(id: canPrefetchBackground, priority: .utility) {
+            guard canPrefetchBackground, selectedTab == .world else { return }
             async let signal: Void = GoogleSignalService().prepareFirstPage()
             async let adjacentFeeds: Void = pageStores.feed.prepareAdjacentSources()
             await pageStores.feed.loadInitial()
             _ = await (signal, adjacentFeeds)
         }
-        .task(id: scenePhase == .active, priority: .utility) {
-            guard scenePhase == .active else { return }
+        .task(id: canPrefetchBackground, priority: .utility) {
+            guard canPrefetchBackground else { return }
             async let directory: Void = pageStores.feed.prepareXueqiuForOpening()
             await pageStores.feed.prepareVideoAndFlashPages()
             await directory
         }
-        .task(id: scenePhase == .active, priority: .background) {
-            guard scenePhase == .active, selectedTab != .learning else { return }
+        .task(id: canPrefetchBackground, priority: .background) {
+            guard canPrefetchBackground, selectedTab != .learning else { return }
             async let overview: Void = learningStore.loadOverview()
             await peopleStore.load()
             await overview
         }
-        .task(id: scenePhase == .active, priority: .utility) {
-            guard scenePhase == .active, selectedTab != .investment else { return }
+        .task(id: canPrefetchBackground, priority: .utility) {
+            guard canPrefetchBackground, selectedTab != .investment else { return }
             await marketStore.preloadDashboard()
             guard !Task.isCancelled, selectedTab != .investment else { return }
             let stocks = ResearchHomeContent.stocks(in: marketStore.dashboard, region: .unitedStates)
@@ -710,7 +752,7 @@ private struct EditorialRootView: View {
             guard !Task.isCancelled, personPushNavigation.request?.id == request.id else { return }
             presentedExternalLink = nil
             showsSignalFilters = false
-            if request.opensPost { selectedTab = .observation }
+            showFeedAfterNotification = request.opensPost
             presentedNotificationDetails = request
             personPushNavigation.clear()
         }
@@ -736,7 +778,7 @@ private struct EditorialRootView: View {
         let isSelected = selectedTab == tab
         if isSelected || visitedTabs.contains(tab) {
             content()
-                .environment(\.rootTabIsActive, isSelected)
+                .environment(\.rootTabIsActive, isSelected && canPrefetchBackground)
                 .opacity(isSelected ? 1 : 0)
                 .allowsHitTesting(isSelected)
                 .accessibilityHidden(!isSelected)

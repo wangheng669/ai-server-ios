@@ -19,6 +19,7 @@ struct PostDetailView: View {
     @ObservedObject private var verificationStore = XAuthorVerificationStore.shared
     private let prefersFullOriginal: Bool
     private let loadsStoredDetail: Bool
+    private let autoplaysYouTube: Bool
     private let shouldRefreshNewYorkTimesArticle: Bool
     private let rssAvatarURL: URL?
     @State private var post: Post
@@ -29,6 +30,7 @@ struct PostDetailView: View {
     @State private var videoPlaybackFailed = false
     @State private var isVideoReady = false
     @State private var bilibiliPlaybackStartedAt: Date?
+    @State private var bilibiliEmbedPhase = BilibiliEmbedPhase.poster
     @State private var bilibiliPlaybackRetryTask: Task<Void, Never>?
     @State private var bilibiliPlaybackRetryCount = 0
     @State private var bilibiliSubtitleCues: [VideoSubtitleCue] = []
@@ -84,10 +86,12 @@ struct PostDetailView: View {
         preloadedNewYorkTimesArticle: NewYorkTimesArticle? = nil,
         rssAvatarURL: URL? = nil,
         loadsStoredDetail: Bool = true,
-        prefersFullOriginal: Bool = false
+        prefersFullOriginal: Bool = false,
+        autoplaysYouTube: Bool = true
     ) {
         self.prefersFullOriginal = prefersFullOriginal
         self.loadsStoredDetail = loadsStoredDetail
+        self.autoplaysYouTube = autoplaysYouTube
         self.rssAvatarURL = rssAvatarURL
         self.shouldRefreshNewYorkTimesArticle = post.isNewYorkTimes && preloadedNewYorkTimesArticle == nil
         let storedArticle = preloadedNewYorkTimesArticle ?? (post.isNewYorkTimes
@@ -119,11 +123,18 @@ struct PostDetailView: View {
             else if post.isRSS { rssDetail }
             else { standardDetail }
         }
-        .overlay(alignment: .bottomTrailing) {
-            if post.sourceName != "Truth" {
-                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭动态详情")
-                    .padding(.trailing, 16)
-                    .padding(.bottom, sheetCloseBottomPadding)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if post.sourceName == "知乎" {
+                zhihuContentToolbar
+                    .padding(.horizontal, 12)
+                    .background(.background)
+            } else if post.sourceName != "Truth", !post.isYouTube, !post.isBilibili || hidesNavigationBar {
+                HStack {
+                    Spacer()
+                    DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭动态详情")
+                }
+                .padding(.horizontal, 12)
+                .background(.background)
             }
         }
         .navigationDestination(item: $selectedXAuthor) { author in
@@ -162,6 +173,7 @@ struct PostDetailView: View {
                     } label: {
                         Image(systemName: "ellipsis")
                     }
+                    DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭视频详情")
                 }
             }
         }
@@ -205,11 +217,6 @@ struct PostDetailView: View {
             bilibiliPlaybackRetryTask?.cancel()
             bilibiliInterpretationTask?.cancel()
         }
-    }
-
-    private var sheetCloseBottomPadding: CGFloat {
-        post.isWeiboRSS || isWeChatArticle
-            || post.sourceName == "知乎" ? 72 : 16
     }
 
     private var hidesNavigationBar: Bool {
@@ -497,6 +504,9 @@ struct PostDetailView: View {
     }
 
     private var rssReaderInput: RSSReaderInput? {
+        if post.sourceName == "知乎", let html = post.zhihuAnswerHTML {
+            return RSSReaderInput(post: post, originalHTML: html)
+        }
         guard isGenericRSSDetail || isWeChatArticle else { return nil }
         return RSSReaderInput(post: post, originalHTML: rssOriginalArticleHTML)
     }
@@ -1130,7 +1140,7 @@ struct PostDetailView: View {
                 originalURL: post.linkURL
             ),
             presentedAsSheet: true,
-            startsAutomatically: true,
+            startsAutomatically: autoplaysYouTube,
             translatesRSSLocally: true
         )
     }
@@ -1154,9 +1164,17 @@ struct PostDetailView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    TruthLocalTranslationView(post: post, openOriginal: truthOriginalAction)
+                    TruthLocalTranslationView(post: post, showsOriginalText: true)
                         .font(.body)
                         .lineSpacing(6)
+                        .textSelection(.enabled)
+
+                    if let openOriginal = truthOriginalAction {
+                        Button(action: openOriginal) {
+                            Label("打开原文网站", systemImage: "arrow.up.right")
+                        }
+                        .font(.callout.weight(.medium))
+                    }
 
                     if let time = post.truthPublicationDate.map({
                         $0.formatted(.dateTime.year().month().day().hour().minute().locale(Locale(identifier: "zh_CN")))
@@ -1206,9 +1224,6 @@ struct PostDetailView: View {
     private var zhihuDetail: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                zhihuContentToolbar
-                    .padding(.bottom, 10)
-
                 Text(post.zhihuQuestionTitle)
                     .font(.system(size: 26, weight: .bold))
                     .tracking(-0.35)
@@ -1236,7 +1251,7 @@ struct PostDetailView: View {
                             }
                         }
                         .font(.system(size: 13))
-                        Text("2026-07-15 · \(post.zhihuReadingMinutes) 分钟阅读")
+                        Text(zhihuReadingMetadata)
                             .font(.system(size: 12.5))
                             .foregroundStyle(.secondary)
                     }
@@ -1285,39 +1300,36 @@ struct PostDetailView: View {
             }
             .foregroundStyle(.primary)
             .accessibilityLabel("更多")
+            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭动态详情")
         }
         .frame(height: 44)
     }
 
-    private var zhihuArticleBody: some View {
-        let paragraphs = post.zhihuArticleParagraphs
-        return LazyVStack(alignment: .leading, spacing: 20) {
-            if let first = paragraphs.first {
-                HStack(alignment: .top, spacing: 8) {
-                    Text(String(first.prefix(1)))
-                        .font(.system(size: 52, weight: .medium))
-                        .frame(width: 44, alignment: .leading)
-                    Text(String(first.dropFirst()))
-                        .font(.system(size: 16))
-                        .lineSpacing(7)
-                }
-                .textSelection(.enabled)
-            }
+    private var zhihuReadingMetadata: String {
+        let updated = post.meta?.zhihuAnswerUpdatedAt.flatMap {
+            try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse($0)
+        } ?? post.meta?.zhihuAnswerUpdatedAt.flatMap {
+            try? Date.ISO8601FormatStyle().parse($0)
+        }
+        return [updated?.formatted(.dateTime.year().month().day().locale(Locale(identifier: "zh_CN"))), "\(post.zhihuReadingMinutes) 分钟阅读"]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+    }
 
-            ForEach(Array(paragraphs.dropFirst().enumerated()), id: \.offset) { index, paragraph in
-                if index == 1, paragraphs.count > 3 {
-                    Text("“ \(paragraph)")
-                        .font(.system(size: 16))
-                        .foregroundStyle(.secondary)
-                        .lineSpacing(7)
-                        .padding(16)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
-                } else {
-                    Text(paragraph)
-                        .font(.system(size: 16))
-                        .lineSpacing(7)
-                        .textSelection(.enabled)
+    private var zhihuArticleBody: some View {
+        LazyVStack(alignment: .leading, spacing: 20) {
+            if let blocks = storedRSSArticleBlocks {
+                ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                    switch block {
+                    case .paragraph(let text, _):
+                        Text(text).font(.system(size: 16)).lineSpacing(7).textSelection(.enabled)
+                    case .image(let url):
+                        RSSArticleImage(url: url)
+                    }
+                }
+            } else {
+                ForEach(Array(post.zhihuArticleParagraphs.enumerated()), id: \.offset) { _, paragraph in
+                    Text(paragraph).font(.system(size: 16)).lineSpacing(7).textSelection(.enabled)
                 }
             }
         }
@@ -1631,27 +1643,61 @@ struct PostDetailView: View {
         }
     }
 
+    private enum BilibiliEmbedPhase { case poster, loading, ready, failed }
+
     @ViewBuilder private var bilibiliMedia: some View {
-        if let bvid = bilibiliBVID {
-            BilibiliEmbeddedPlayer(bvid: bvid)
-            .frame(height: 230)
-            .background(Color.black)
-        } else if let image = post.previewURL {
+        if bilibiliBVID != nil || post.previewURL != nil {
             ZStack {
-                RemoteImage(url: image, height: 230, cornerRadius: 0)
-                if post.linkURL != nil {
-                    Button {
-                        openOriginal()
-                    } label: {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 30, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 72, height: 72)
-                            .background(.black.opacity(0.58), in: Circle())
+                if let bvid = bilibiliBVID, bilibiliEmbedPhase == .loading || bilibiliEmbedPhase == .ready {
+                    BilibiliEmbeddedPlayer(bvid: bvid) { ready in
+                        guard bilibiliEmbedPhase == .loading else { return }
+                        bilibiliEmbedPhase = ready ? .ready : .failed
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("在 B 站观看")
+                    .allowsHitTesting(bilibiliEmbedPhase == .ready)
+                    .accessibilityHidden(bilibiliEmbedPhase != .ready)
                 }
+
+                if bilibiliEmbedPhase != .ready {
+                    Color(uiColor: .secondarySystemBackground)
+                    if let image = post.previewURL {
+                        RemoteImage(url: image, height: 230, cornerRadius: 0)
+                    }
+                    if bilibiliEmbedPhase == .loading {
+                        Label("正在加载视频", systemImage: "hourglass")
+                            .padding(10)
+                            .background(.regularMaterial, in: Capsule())
+                    } else if bilibiliEmbedPhase == .failed {
+                        HStack {
+                            Button("重试") { bilibiliEmbedPhase = .loading }
+                            if post.linkURL != nil {
+                                Button("在 B 站打开") { openOriginal() }
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    } else if bilibiliBVID != nil || post.linkURL != nil {
+                        Button {
+                            if bilibiliBVID != nil { bilibiliEmbedPhase = .loading }
+                            else { openOriginal() }
+                        } label: {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 27, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 64, height: 64)
+                                .background(.black.opacity(0.58), in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("播放 B 站视频")
+                    }
+                }
+            }
+            .frame(height: 230)
+            .background(Color(uiColor: .secondarySystemBackground))
+            .task(id: bilibiliEmbedPhase) {
+                guard bilibiliEmbedPhase == .loading else { return }
+                do {
+                    try await Task.sleep(for: .seconds(18))
+                    bilibiliEmbedPhase = .failed
+                } catch {}
             }
         }
     }
@@ -2649,14 +2695,30 @@ struct PostDetailView: View {
 
 private struct BilibiliEmbeddedPlayer: UIViewRepresentable {
     let bvid: String
+    let onReady: (Bool) -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeCoordinator() -> Coordinator { Coordinator(onReady: onReady) }
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.allowsInlineMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
         configuration.websiteDataStore = .default()
+        let signal = """
+        (() => {
+          const notify = event => {
+            if (event.target instanceof HTMLVideoElement) {
+              window.webkit.messageHandlers.bilibiliVideoReady.postMessage(true);
+            }
+          };
+          document.addEventListener('loadeddata', notify, true);
+          document.addEventListener('playing', notify, true);
+        })();
+        """
+        configuration.userContentController.addUserScript(
+            WKUserScript(source: signal, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+        )
+        configuration.userContentController.add(context.coordinator, name: "bilibiliVideoReady")
         // Bilibili's control calls the browser Fullscreen API. WKWebView keeps
         // that API disabled unless it is explicitly enabled, so the button
         // otherwise receives the tap without changing presentation.
@@ -2670,21 +2732,23 @@ private struct BilibiliEmbeddedPlayer: UIViewRepresentable {
         webView.backgroundColor = .black
         webView.scrollView.backgroundColor = .black
         webView.allowsBackForwardNavigationGestures = false
-        loadPlayer(in: webView)
+        loadPlayer(in: webView, coordinator: context.coordinator)
         return webView
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         guard context.coordinator.loadedBVID != bvid else { return }
-        loadPlayer(in: webView)
+        loadPlayer(in: webView, coordinator: context.coordinator)
     }
 
     static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "bilibiliVideoReady")
         webView.stopLoading()
         webView.loadHTMLString("", baseURL: nil)
     }
 
-    private func loadPlayer(in webView: WKWebView) {
+    private func loadPlayer(in webView: WKWebView, coordinator: Coordinator) {
+        coordinator.loadedBVID = bvid
         var components = URLComponents(string: "https://player.bilibili.com/player.html")
         components?.queryItems = [
             URLQueryItem(name: "bvid", value: bvid),
@@ -2699,12 +2763,26 @@ private struct BilibiliEmbeddedPlayer: UIViewRepresentable {
         webView.load(request)
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var loadedBVID: String?
+        private let onReady: (Bool) -> Void
 
-        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-            loadedBVID = URLComponents(url: webView.url ?? URL(fileURLWithPath: ""), resolvingAgainstBaseURL: false)?
-                .queryItems?.first(where: { $0.name == "bvid" })?.value
+        init(onReady: @escaping (Bool) -> Void) {
+            self.onReady = onReady
+        }
+
+        func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+            let host = message.frameInfo.securityOrigin.host.lowercased()
+            guard host == "bilibili.com" || host.hasSuffix(".bilibili.com") else { return }
+            onReady(true)
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            onReady(false)
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            onReady(false)
         }
 
         func webView(
@@ -3473,7 +3551,8 @@ private struct RSSArticleImage: View {
             onImageLoaded: { image in
                 guard image.size.width > 0, image.size.height > 0 else { return }
                 aspectRatio = image.size.width / image.size.height
-            }
+            },
+            decodingSize: CGSize(width: availableWidth, height: 520)
         )
         .frame(maxWidth: .infinity)
         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
@@ -3511,7 +3590,8 @@ private struct WeChatArticleImage: View {
                 let pixelHeight = CGFloat(image.cgImage?.height ?? Int(image.size.height * image.scale))
                 let ratio = pixelWidth / max(pixelHeight, 1)
                 isCompactAsset = max(pixelWidth, pixelHeight) <= 480 && (0.55...1.8).contains(ratio)
-            }
+            },
+            decodingSize: CGSize(width: availableWidth, height: 760)
         )
         .frame(width: displayWidth, height: displayHeight, alignment: .leading)
         .animation(.easeOut(duration: 0.16), value: isCompactAsset)
