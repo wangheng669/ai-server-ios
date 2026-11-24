@@ -1236,6 +1236,15 @@ struct Post: Codable, Identifiable, Hashable {
         rssArticleBlocks(overridingContent: nil)
     }
 
+    var hasStoredRSSReaderBody: Bool {
+        guard let body = htmlText(content), body.count >= 600 else { return false }
+        return body != clean(summary) && body != clean(text)
+    }
+
+    var rssReaderLeadImage: URL? {
+        feedContentImages.lazy.compactMap { MediaURL.image($0.url) }.first
+    }
+
     func rssArticleBlocks(overridingContent: String?) -> [RSSArticleBlock] {
         let preferredContent = clean(overridingContent) ?? clean(contentZH) ?? clean(content)
         guard let preferredContent else {
@@ -2450,6 +2459,31 @@ enum MediaURL {
             raw.replacingOccurrences(of: "&amp;", with: "&")
         )
         return resolvedImage(decoded)
+    }
+
+    static func articleImage(_ url: URL) -> URL {
+        let relayTarget = ImageLoader.sourceImageURL(from: url)
+        let wechatProxy = ["wechat2rss.bestblogs.dev", "wechat2rss.xlab.app"].contains(relayTarget.host?.lowercased() ?? "")
+            && relayTarget.path.split(separator: "/").last == "img-proxy"
+        let source = wechatProxy ? queryURL(in: relayTarget, name: "u") ?? relayTarget : relayTarget
+        guard var components = URLComponents(url: source, resolvingAgainstBaseURL: false),
+              components.scheme == "https",
+              components.host?.lowercased() == "mmbiz.qpic.cn",
+              ["/mmbiz_jpg/", "/mmbiz_png/"].contains(where: components.path.hasPrefix),
+              ["/0", "/640"].contains(where: components.path.hasSuffix),
+              let slash = components.path.lastIndex(of: "/"),
+              let format = components.queryItems?.first(where: { $0.name == "wx_fmt" })?.value,
+              ["jpeg", "jpg", "png"].contains(format.lowercased()) else { return url }
+        components.path = String(components.path.prefix(through: slash)) + "640"
+        var query = (components.queryItems ?? []).filter { $0.name != "tp" }
+        query.append(URLQueryItem(name: "tp", value: "webp"))
+        components.queryItems = query
+        return components.string.flatMap { resolved($0, proxy: "image-proxy") } ?? url
+    }
+
+    private static func queryURL(in url: URL, name: String) -> URL? {
+        URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == name })?.value.flatMap { URL(string: $0) }
     }
 
     static func feedImage(_ raw: String, variant: XPhotoSize) -> URL? {
