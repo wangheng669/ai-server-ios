@@ -1663,7 +1663,7 @@ struct PostDetailView: View {
                         RemoteImage(url: image, height: 230, cornerRadius: 0)
                     }
                     if bilibiliEmbedPhase == .loading {
-                        Label("正在加载视频", systemImage: "hourglass")
+                        Label("正在加载播放器", systemImage: "hourglass")
                             .padding(10)
                             .background(.regularMaterial, in: Capsule())
                     } else if bilibiliEmbedPhase == .failed {
@@ -1695,7 +1695,7 @@ struct PostDetailView: View {
             .task(id: bilibiliEmbedPhase) {
                 guard bilibiliEmbedPhase == .loading else { return }
                 do {
-                    try await Task.sleep(for: .seconds(18))
+                    try await Task.sleep(for: .seconds(24))
                     bilibiliEmbedPhase = .failed
                 } catch {}
             }
@@ -2704,21 +2704,6 @@ private struct BilibiliEmbeddedPlayer: UIViewRepresentable {
         configuration.allowsInlineMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
         configuration.websiteDataStore = .default()
-        let signal = """
-        (() => {
-          const notify = event => {
-            if (event.target instanceof HTMLVideoElement) {
-              window.webkit.messageHandlers.bilibiliVideoReady.postMessage(true);
-            }
-          };
-          document.addEventListener('loadeddata', notify, true);
-          document.addEventListener('playing', notify, true);
-        })();
-        """
-        configuration.userContentController.addUserScript(
-            WKUserScript(source: signal, injectionTime: .atDocumentStart, forMainFrameOnly: false)
-        )
-        configuration.userContentController.add(context.coordinator, name: "bilibiliVideoReady")
         // Bilibili's control calls the browser Fullscreen API. WKWebView keeps
         // that API disabled unless it is explicitly enabled, so the button
         // otherwise receives the tap without changing presentation.
@@ -2742,7 +2727,6 @@ private struct BilibiliEmbeddedPlayer: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
-        webView.configuration.userContentController.removeScriptMessageHandler(forName: "bilibiliVideoReady")
         webView.stopLoading()
         webView.loadHTMLString("", baseURL: nil)
     }
@@ -2763,7 +2747,7 @@ private struct BilibiliEmbeddedPlayer: UIViewRepresentable {
         webView.load(request)
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+    final class Coordinator: NSObject, WKNavigationDelegate {
         var loadedBVID: String?
         private let onReady: (Bool) -> Void
 
@@ -2771,9 +2755,7 @@ private struct BilibiliEmbeddedPlayer: UIViewRepresentable {
             self.onReady = onReady
         }
 
-        func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-            let host = message.frameInfo.securityOrigin.host.lowercased()
-            guard host == "bilibili.com" || host.hasSuffix(".bilibili.com") else { return }
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             onReady(true)
         }
 
