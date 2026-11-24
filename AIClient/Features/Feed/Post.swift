@@ -813,6 +813,28 @@ struct Post: Codable, Identifiable, Hashable {
         needsXQuotedTranslation || needsXReplyContextRefresh || needsXReplyContextTranslation
     }
 
+    var xBodyTranslationInput: XTranslationInput? {
+        guard needsXTranslation, !isXRetweetWrapper, let id = xTweetID else { return nil }
+        return .init(tweetID: id, original: xStoredOriginalContent, sourceLanguage: meta?.lang,
+                     replyContext: xReplyContext?.text)
+    }
+
+    var xQuoteTranslationInput: XTranslationInput? {
+        guard needsXQuotedTranslation, let quote = xQuotedPost,
+              let id = quote.id, let original = quote.originalText else { return nil }
+        return .init(tweetID: id, original: original)
+    }
+
+    var xReplyTranslationInput: XTranslationInput? {
+        guard needsXReplyContextTranslation, let reply = xReplyContext, let original = reply.text,
+              let id = reply.id ?? meta?.inReplyToStatusID else { return nil }
+        return .init(tweetID: id, original: original)
+    }
+
+    var xTranslationInputs: [XTranslationInput] {
+        [xBodyTranslationInput, xQuoteTranslationInput, xReplyTranslationInput].compactMap { $0 }
+    }
+
     func mergingXServerContexts(from fresh: Post) -> Post {
         guard id == fresh.id else { return self }
         var result = self

@@ -766,14 +766,13 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     private func translateXMainPostIfNeeded(_ post: Post) async {
-        guard post.needsXTranslation,
-              let tweetID = post.xTweetID,
+        guard let input = post.xBodyTranslationInput,
               xPresentation(for: post.id)?.translation == nil,
               !loadingXTranslationIDs.contains(post.id) else { return }
         loadingXTranslationIDs.insert(post.id)
         defer { loadingXTranslationIDs.remove(post.id) }
         do {
-            let value = try await resolvedXTranslation(tweetID: tweetID, sourceText: post.xStoredOriginalContent)
+            let value = try await resolvedXTranslation(input)
             guard !Task.isCancelled else { return }
             let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !normalized.isEmpty, normalized != post.originalDisplayContent, Self.containsHanCharacters(normalized) else { return }
@@ -786,19 +785,16 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     func translateXQuotedPostIfNeeded(_ post: Post) async {
-        guard post.needsXQuotedTranslation,
-              let quote = post.meta?.quotedTweet,
-              let tweetID = quote.id,
-              let sourceText = quote.originalText,
+        guard let input = post.xQuoteTranslationInput,
               xPresentation(for: post.id)?.quotedTranslation == nil,
               !loadingXQuotedTranslationIDs.contains(post.id) else { return }
         loadingXQuotedTranslationIDs.insert(post.id)
         defer { loadingXQuotedTranslationIDs.remove(post.id) }
         do {
-            let value = try await resolvedXTranslation(tweetID: tweetID, sourceText: sourceText)
+            let value = try await resolvedXTranslation(input)
             guard !Task.isCancelled else { return }
             let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !normalized.isEmpty, normalized != sourceText, Self.containsHanCharacters(normalized) else { return }
+            guard !normalized.isEmpty, normalized != input.original, Self.containsHanCharacters(normalized) else { return }
             stageXPresentation(for: post.id) { $0.quotedTranslation = normalized }
         } catch is CancellationError {
             return
@@ -829,7 +825,9 @@ final class NewsFeedViewModel: ObservableObject {
                 || language?.hasPrefix("zh") == true {
                 nil
             } else {
-                try? await resolvedXTranslation(tweetID: detail?.id ?? replyID, sourceText: sourceText)
+                try? await resolvedXTranslation(.init(
+                    tweetID: detail?.id ?? stored?.id ?? replyID, original: sourceText, sourceLanguage: language
+                ))
             }
             guard !Task.isCancelled else { return }
             let reply = XReplyContext(
@@ -883,7 +881,9 @@ final class NewsFeedViewModel: ObservableObject {
 
             guard detail.lang?.lowercased().hasPrefix("zh") != true,
                   xPresentation(for: post.id)?.translation == nil else { return }
-            let value = try await resolvedXTranslation(tweetID: detail.id, sourceText: detail.fullText)
+            let value = try await resolvedXTranslation(.init(
+                tweetID: detail.id, original: detail.fullText, sourceLanguage: detail.lang
+            ))
             guard !Task.isCancelled else { return }
             let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !normalized.isEmpty, normalized != detail.fullText else { return }
@@ -895,9 +895,10 @@ final class NewsFeedViewModel: ObservableObject {
         }
     }
 
-    private func resolvedXTranslation(tweetID: String, sourceText: String) async throws -> String {
+    private func resolvedXTranslation(_ input: XTranslationInput) async throws -> String {
         try await FeedTranslationCache.shared.translateXPost(
-            tweetID: tweetID, original: sourceText, using: fetchXTranslation
+            tweetID: input.tweetID, original: input.original, sourceLanguage: input.sourceLanguage,
+            replyContext: input.replyContext, using: fetchXTranslation
         )
     }
 
@@ -1019,6 +1020,7 @@ final class NewsFeedViewModel: ObservableObject {
             cache[next] = prepared.snapshot
         }
         let saved = cache[next] ?? prepared?.snapshot
+        if next == .x, let saved { seedCachedXTranslations(for: saved.posts) }
         posts = saved?.posts ?? []
         page = saved?.page ?? 1
         canLoadMore = saved?.canLoadMore ?? true
@@ -1058,6 +1060,10 @@ final class NewsFeedViewModel: ObservableObject {
         async let videos: Void = prepareSource(.youtube)
         await prepareSource(.flash)
         await videos
+    }
+
+    func prepareXForOpening() async {
+        await prepareSource(.x)
     }
 
     func prepareAdjacentSources() async {
@@ -1105,6 +1111,7 @@ final class NewsFeedViewModel: ObservableObject {
             let limit = pageSize(for: source)
             do {
                 let posts = try await fetchPage(1, limit: limit, source: source, bypassCache: source == .x)
+                if source == .x { await warmXFirstScreen(posts) }
                 await restoration
                 try Task.checkCancellation()
                 let snapshot = Snapshot(posts: posts, page: 1, canLoadMore: hasMorePages(source, count: posts.count))
@@ -1132,6 +1139,9 @@ final class NewsFeedViewModel: ObservableObject {
               let saved = await diskCache.load(source: source, flashCategory: nil, serverURL: serverURL),
               !Task.isCancelled, preparedPages[source] == nil else { return }
         let snapshot = Snapshot(posts: saved.posts, page: saved.page, canLoadMore: saved.canLoadMore)
+        if source == .x, #available(iOS 26.0, *) {
+            FeedTranslationCache.shared.warmXTranslations(snapshot.posts.prefix(10).flatMap(\.xTranslationInputs))
+        }
         if source == self.source, posts.isEmpty, isLoading, usesDefaultFeed(source) {
             showPreparedSnapshot(snapshot)
         }
@@ -1140,6 +1150,7 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     private func showPreparedSnapshot(_ snapshot: Snapshot) {
+        if source == .x { seedCachedXTranslations(for: snapshot.posts) }
         posts = snapshot.posts
         page = snapshot.page
         canLoadMore = snapshot.canLoadMore
@@ -1236,6 +1247,7 @@ final class NewsFeedViewModel: ObservableObject {
                     xueqiuFeedID: selectedXueqiuFeedID,
                     bypassCache: requestedSource == .x || !restoringSnapshot
                 )
+                if requestedSource == .x, posts.isEmpty { await warmXFirstScreen(result) }
                 snapshot = Snapshot(posts: result, page: 1, canLoadMore: hasMorePages(requestedSource, count: result.count))
             }
             await restoration
@@ -1250,6 +1262,7 @@ final class NewsFeedViewModel: ObservableObject {
             }
             if requestedSource == .x {
                 pendingXPostUpdates.removeAll(keepingCapacity: true)
+                seedCachedXTranslations(for: result)
                 pretranslateTimeline(result)
                 schedulePresentationPrewarm(for: result)
             }
@@ -1310,6 +1323,7 @@ final class NewsFeedViewModel: ObservableObject {
             guard !Task.isCancelled, requestGeneration == generation else { return }
             var ids = Set(posts.map(\.id))
             let added = result.filter { ids.insert($0.id).inserted }
+            if requestedSource == .x { seedCachedXTranslations(for: added) }
             schedulePresentationPrewarm(for: added)
             pretranslateTimeline(added)
             posts += added
@@ -1360,16 +1374,50 @@ final class NewsFeedViewModel: ObservableObject {
 
     var xTimelineNextPage: Int { page + 1 }
 
+    private func warmXFirstScreen(_ posts: [Post]) async {
+        guard #available(iOS 26.0, *), !Task.isCancelled else { return }
+        let candidates = posts.prefix(10)
+        let cache = FeedTranslationCache.shared
+        let keys = cache.warmXTranslations(candidates.flatMap(\.xTranslationInputs))
+        let firstRows = Set(candidates.prefix(3).flatMap(\.xTranslationInputs).map(\.key))
+        await cache.waitForXTranslations(keys.filter { firstRows.contains($0) }, upTo: .milliseconds(350))
+    }
+
+    private func seedCachedXTranslations(for posts: [Post]) {
+        let cache = FeedTranslationCache.shared
+        func translation(for input: XTranslationInput?) -> String? {
+            guard let input else { return nil }
+            return cache.cachedXTranslation(tweetID: input.tweetID, original: input.original)
+        }
+        var prepared: [Int: XPresentation] = [:]
+        for post in posts {
+            let body = translation(for: post.xBodyTranslationInput)
+            let quote = translation(for: post.xQuoteTranslationInput)
+            let existing = xPresentation(for: post.id) ?? XPresentation()
+            var presentation = existing
+            if let body { presentation.translation = body }
+            if let quote { presentation.quotedTranslation = quote }
+            if let replyText = translation(for: post.xReplyTranslationInput),
+               let reply = post.xReplyContext {
+                presentation.reply = XReplyContext(
+                    id: reply.id, authorName: reply.authorName, screenName: reply.screenName,
+                    avatarURL: reply.avatarURL, text: reply.text, textZH: replyText
+                )
+            }
+            if (presentation.translation != existing.translation || presentation.quotedTranslation != existing.quotedTranslation
+                || presentation.reply != existing.reply) || pendingXPresentations[post.id] != nil {
+                prepared[post.id] = presentation
+                pendingXPresentations[post.id] = nil
+            }
+        }
+        if !prepared.isEmpty { xPresentations.merge(prepared) { _, latest in latest } }
+    }
+
     private func pretranslateTimeline(_ posts: [Post]) {
         guard source == .x, !posts.isEmpty else { return }
         let candidates = Array(posts.prefix(10))
-        for post in candidates where post.needsXTranslation && xPresentation(for: post.id)?.translation == nil {
-            guard let tweetID = post.xTweetID else { continue }
-            if let value = FeedTranslationCache.shared.cachedXTranslation(
-                tweetID: tweetID, original: post.xStoredOriginalContent
-            ) {
-                stageXPresentation(for: post.id) { $0.translation = value }
-            }
+        if #available(iOS 26.0, *) {
+            FeedTranslationCache.shared.warmXTranslations(candidates.flatMap(\.xTranslationInputs))
         }
         Task(priority: .utility) { [weak self] in
             guard let self else { return }
@@ -1532,7 +1580,9 @@ final class NewsFeedViewModel: ObservableObject {
     func acceptPendingRealtimePosts() {
         guard !pendingRealtimePosts.isEmpty else { return }
         let existingIDs = Set(posts.map(\.id))
-        posts.insert(contentsOf: pendingRealtimePosts.filter { !existingIDs.contains($0.id) }, at: 0)
+        let additions = pendingRealtimePosts.filter { !existingIDs.contains($0.id) }
+        if source == .x { seedCachedXTranslations(for: additions) }
+        posts.insert(contentsOf: additions, at: 0)
         pendingRealtimePosts = []
         cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
         persistCurrentSnapshot()

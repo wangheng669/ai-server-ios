@@ -2379,6 +2379,9 @@ struct PostDetailView: View {
             nil
         }
         if post.sourceName == "X", let tweetID = post.xTweetID {
+            if #available(iOS 26.0, *), let input = post.xBodyTranslationInput {
+                FeedTranslationCache.shared.warmXTranslations([input])
+            }
             if let liveDetail = try? await client.fetchXTweetDetail(tweetID: tweetID) {
                 verificationStore.recordLive(handle: liveDetail.author?.screenName, verified: liveDetail.author?.verified)
                 xLiveDetail = liveDetail
@@ -2400,6 +2403,7 @@ struct PostDetailView: View {
             if post.needsXTranslation,
                let translation = try? await FeedTranslationCache.shared.translateXPost(
                    tweetID: tweetID, original: xLiveDetail?.fullText ?? post.xStoredOriginalContent,
+                   sourceLanguage: xLiveDetail?.lang ?? post.meta?.lang, replyContext: post.xReplyContext?.text,
                    using: client.fetchXTranslation
                ), !Task.isCancelled {
                 xLiveTranslationText = translation
