@@ -588,6 +588,7 @@ struct MarketQuoteUpdate: Decodable {
     let changePercent: String?
     let timestamp: Int64?
     let receivedAt: Int64?
+    let quality: MarketQuoteQuality?
 
     func merging(into current: MarketQuote?) -> MarketQuote {
         let tradingSession = MarketTradingSession(rawValue: marketSession ?? current?.marketSession)
@@ -651,8 +652,8 @@ struct MarketQuoteUpdate: Decodable {
             trend: snapshotTrend,
             nightTrend: extendedTrend,
             liveTrendValue: liveTrendValue,
-            stale: false,
-            quality: sessionChanged || tradingSession.isActivelyTrading ? nil : current?.quality
+            stale: quality?.status == "stale" || quality?.status == "unavailable",
+            quality: quality
         )
         merged.peStatic = current?.peStatic
         merged.peType = current?.peType
