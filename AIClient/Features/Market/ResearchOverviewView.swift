@@ -1,7 +1,27 @@
 import SwiftUI
 
-private enum ResearchSection: String, CaseIterable {
-    case overview = "概览", company = "公司", industry = "行业", macro = "宏观", viewpoints = "观点"
+private enum ResearchTopic: String, CaseIterable, Identifiable {
+    case company = "公司", industry = "行业", macro = "宏观", viewpoints = "观点"
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .company: "公司研究"
+        case .industry: "行业全景"
+        case .macro: "宏观指标"
+        case .viewpoints: "机构观点"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .company: "building.2"
+        case .industry: "square.grid.2x2"
+        case .macro: "chart.line.uptrend.xyaxis"
+        case .viewpoints: "text.bubble"
+        }
+    }
 }
 
 enum ResearchHomeContent {
@@ -35,96 +55,25 @@ private enum ResearchStyle {
     }
 }
 
-/// The research shell owns its visible sections; each section keeps its existing detail flows.
 struct ResearchHomeView: View {
-    @Environment(\.rootTabIsActive) private var rootTabIsActive
-    @State private var visitedSections: Set<ResearchSection> = []
     let store: MarketStore
-    @ObservedObject var researchStore: InstitutionResearchStore
+    let researchStore: InstitutionResearchStore
     let companyStore: CompanyResearchStore
     let onOpenGlobalRanking: () -> Void
     let onOpenInvestors: () -> Void
     let onOpenMarketQuotes: (MarketRegion) -> Void
     let onOpenMarketDetail: (String) -> Void
     let onOpenRetailInvestors: () -> Void
-    @State private var section: ResearchSection = {
+    @Environment(\.rootTabIsActive) private var rootTabIsActive
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var stockRegion: MarketRegion = .unitedStates
+    @State private var presentedTopic: ResearchTopic? = {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--company-preview") { return .company }
         #endif
-        return .overview
+        return nil
     }()
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 4) {
-                ForEach(ResearchSection.allCases, id: \.self) { item in
-                    Button { section = item } label: {
-                        Text(item.rawValue)
-                            .font(.subheadline.weight(section == item ? .semibold : .medium))
-                            .foregroundStyle(section == item ? ResearchStyle.accent : ResearchStyle.muted)
-                            .frame(maxWidth: .infinity, minHeight: 32)
-                            .background(section == item ? ResearchStyle.selection : .clear, in: Capsule())
-                            .frame(minHeight: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("research-section-\(item.rawValue)")
-                    .accessibilityAddTraits(section == item ? .isSelected : [])
-                }
-            }
-            .padding(.horizontal, ResearchStyle.inset)
-            .padding(.bottom, 2)
-            .overlay(alignment: .bottom) { ResearchStyle.divider.frame(height: 1) }
-            ZStack {
-                sectionContent(.overview) {
-                    ResearchOverviewView(
-                        store: store,
-                        onOpenMacro: { section = .macro }, onOpenGlobalRanking: onOpenGlobalRanking,
-                        onOpenInvestors: onOpenInvestors,
-                        onOpenIndustries: { section = .industry }, onOpenMarketQuotes: onOpenMarketQuotes,
-                        onOpenMarketDetail: onOpenMarketDetail, onOpenRetailInvestors: onOpenRetailInvestors
-                    )
-                }
-                sectionContent(.company) { CompanyResearchView(store: companyStore) }
-                sectionContent(.industry) { IndustryPanoramaView() }
-                sectionContent(.macro) { ChinaMacroView() }
-                sectionContent(.viewpoints) {
-                    NavigationStack { InstitutionResearchView(store: researchStore) }
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .background(ResearchStyle.surface)
-        .onChange(of: section, initial: true) { _, value in visitedSections.insert(value) }
-    }
-
-    @ViewBuilder
-    private func sectionContent<Content: View>(_ target: ResearchSection, @ViewBuilder content: () -> Content) -> some View {
-        if section == target || visitedSections.contains(target) {
-            content()
-                .environment(\.rootTabIsActive, rootTabIsActive && section == target)
-                .opacity(section == target ? 1 : 0)
-                .allowsHitTesting(section == target)
-                .accessibilityHidden(section != target)
-                .zIndex(section == target ? 1 : 0)
-                .transition(.identity)
-        }
-    }
-}
-
-private struct ResearchOverviewView: View {
-    let store: MarketStore
-    let onOpenMacro: () -> Void
-    let onOpenGlobalRanking: () -> Void
-    let onOpenInvestors: () -> Void
-    let onOpenIndustries: () -> Void
-    let onOpenMarketQuotes: (MarketRegion) -> Void
-    let onOpenMarketDetail: (String) -> Void
-    let onOpenRetailInvestors: () -> Void
-    @Environment(\.rootTabIsActive) private var rootTabIsActive
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @State private var stockRegion: MarketRegion = .unitedStates
-    @Environment(\.scenePhase) private var scenePhase
 
     private let primaryMarkets = ResearchHomeContent.primaryMarkets
     // These are explicitly identified as representative companies, rather than invented sector indices.
@@ -134,19 +83,21 @@ private struct ResearchOverviewView: View {
     private var stocks: [MarketQuote] {
         ResearchHomeContent.stocks(in: store.dashboard, region: stockRegion)
     }
+    private var isLoadingMarket: Bool { store.dashboard == nil && store.errorMessage == nil }
+    private var shouldRefreshCharts: Bool { rootTabIsActive && scenePhase == .active && presentedTopic == nil }
 
     private var afterHoursSymbols: [String] {
-        guard rootTabIsActive, scenePhase == .active, stockRegion == .unitedStates else { return [] }
+        guard shouldRefreshCharts, stockRegion == .unitedStates else { return [] }
         return ResearchHomeContent.afterHoursSymbols(for: stocks)
     }
 
     var body: some View {
         ScrollView {
-            if store.dashboard == nil && store.errorMessage == nil {
-                ContentLoadingPlaceholder(title: "正在准备市场概览", layout: .chart, rowCount: 3)
-                    .accessibilityIdentifier("research-home-loading")
-            } else {
-                VStack(spacing: 20) {
+            VStack(spacing: 16) {
+                if isLoadingMarket {
+                    ContentLoadingPlaceholder(title: "正在准备市场概览", layout: .chart)
+                        .accessibilityIdentifier("research-home-loading")
+                } else {
                     if let message = store.errorMessage {
                         Button { Task { await store.refresh() } } label: {
                             Label("\(message) · 点击重试", systemImage: "arrow.clockwise")
@@ -158,17 +109,40 @@ private struct ResearchOverviewView: View {
                         .buttonStyle(.plain)
                     }
                     globalMarkets
+                }
+                researchTopics
+                if !isLoadingMarket {
                     coreStocks
                     industries
-                    utilities
                 }
-                .padding(.horizontal, ResearchStyle.inset)
-                .padding(.top, 8)
-                .padding(.bottom, 16)
+                utilities
             }
+            .padding(.horizontal, ResearchStyle.inset)
+            .padding(.top, 8)
+            .padding(.bottom, 16)
         }
+        .background(ResearchStyle.surface)
         .accessibilityIdentifier("research-overview")
         .scrollIndicators(.hidden)
+        .appSheet(item: $presentedTopic) { topic in
+            ResearchTopicSheet(title: topic.title) {
+                switch topic {
+                case .company:
+                    CompanyResearchView(store: companyStore)
+                case .industry:
+                    IndustryPanoramaView()
+                case .macro:
+                    ChinaMacroView()
+                case .viewpoints:
+                    NavigationStack { InstitutionResearchView(store: researchStore) }
+                }
+            }
+            .appPresentationDetents([.large])
+            .appPresentationCornerRadius(28)
+            .appPresentationBackground(ResearchStyle.surface)
+            .appPresentationDragIndicator()
+            .appPresentationScrollsWithoutExpanding()
+        }
         .task(id: afterHoursSymbols) {
             let symbols = afterHoursSymbols
             guard !symbols.isEmpty else { return }
@@ -180,14 +154,34 @@ private struct ResearchOverviewView: View {
                 catch { return }
             }
         }
-        .task(id: rootTabIsActive && scenePhase == .active && store.dashboard != nil) {
-            guard rootTabIsActive, scenePhase == .active, store.dashboard != nil else { return }
+        .task(id: shouldRefreshCharts && store.dashboard != nil) {
+            guard shouldRefreshCharts, store.dashboard != nil else { return }
             while !Task.isCancelled {
                 await store.preloadListCharts(symbols: chartSymbols)
                 do { try await Task.sleep(for: .seconds(30)) }
                 catch { return }
             }
         }
+    }
+
+    private var researchTopics: some View {
+        let columns = dynamicTypeSize.isAccessibilitySize ? 2 : 4
+        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: columns), spacing: 4) {
+            ForEach(ResearchTopic.allCases) { topic in
+                Button { presentedTopic = topic } label: {
+                    Label(topic.rawValue, systemImage: topic.icon)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(ResearchStyle.accent)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(topic.title)
+                .accessibilityIdentifier("research-topic-\(topic.rawValue)")
+            }
+        }
+        .padding(4)
+        .background(ResearchStyle.marketSurface, in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var globalMarkets: some View {
@@ -373,7 +367,9 @@ private struct ResearchOverviewView: View {
 
     private var industries: some View {
         VStack(spacing: 0) {
-            sectionHeading("行业表现", trailing: "全部行业", status: "代表公司", action: onOpenIndustries)
+            sectionHeading("行业表现", trailing: "全部行业", status: "代表公司") {
+                presentedTopic = .industry
+            }
             ResearchStyle.divider.frame(height: 0.5)
             let column = GridItem(.flexible())
             LazyVGrid(columns: dynamicTypeSize.isAccessibilitySize ? [column] : [column, column], spacing: 0) {
@@ -459,7 +455,6 @@ private struct ResearchOverviewView: View {
             : AnyLayout(HStackLayout(spacing: 0))
         return layout {
             utility("机构持仓", icon: "person.2", action: onOpenInvestors)
-            utility("宏观指标", icon: "chart.line.uptrend.xyaxis", action: onOpenMacro)
             utility("资产排行", icon: "list.number", action: onOpenGlobalRanking)
         }
         .padding(.horizontal, 6)
@@ -522,6 +517,30 @@ private struct ResearchOverviewView: View {
         }
         if let minutes = quote.visibleDelayMinutes { return "延迟\(minutes)分钟" }
         return nil
+    }
+}
+
+private struct ResearchTopicSheet<Content: View>: View {
+    @Environment(\.dismiss) private var dismiss
+    let title: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 0)
+                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭\(title)")
+            }
+            .padding(.horizontal, ResearchStyle.inset)
+            .padding(.top, 12)
+            .overlay(alignment: .bottom) { ResearchStyle.divider.frame(height: 1) }
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .background(ResearchStyle.surface)
     }
 }
 
