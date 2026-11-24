@@ -1383,11 +1383,14 @@ actor ImageLoader {
     }
 
     static func prefetchXTimelineImages(for posts: [Post]) async {
-        var requests: [PrefetchRequest] = []
-        for post in posts.prefix(7) {
-            if let avatar = post.avatarURL {
-                requests.append(.init(url: avatar, width: 38, height: 38, prefersCompactXAvatar: true))
-            }
+        let upcomingPosts = posts.prefix(7)
+        async let avatarWarmup: Void = prefetchAvatars(
+            upcomingPosts.compactMap(\.avatarURL),
+            maximumConcurrentLoads: 2
+        )
+
+        var mediaRequests: [PrefetchRequest] = []
+        for post in upcomingPosts {
             let media: [URL]
             if post.feedPlaybackURL != nil {
                 media = [post.xFeedVideoPoster].compactMap { $0 }
@@ -1396,20 +1399,25 @@ actor ImageLoader {
                 media = photos.isEmpty ? [post.previewURL].compactMap { $0 } : Array(photos.prefix(4))
             }
             let quotedMedia = post.xQuotedPost?.media?.compactMap(\.feedDisplayURL) ?? []
-            requests += (media + quotedMedia).map {
+            mediaRequests += (media + quotedMedia).map {
                 .init(url: $0, width: 0, height: 0, prefersCompactXAvatar: false, isTimelinePreview: true)
             }
         }
         var seen = Set<PrefetchRequest>()
-        await prefetch(requests.filter { seen.insert($0).inserted }, maximumConcurrentLoads: 4)
+        await prefetch(mediaRequests.filter { seen.insert($0).inserted }, maximumConcurrentLoads: 2)
+        await avatarWarmup
     }
 
-    static func prefetchAvatars(_ urls: [URL], maximumCount: Int = 12) async {
+    static func prefetchAvatars(
+        _ urls: [URL],
+        maximumCount: Int = 12,
+        maximumConcurrentLoads: Int = 4
+    ) async {
         var seen = Set<URL>()
         let requests = urls.filter { seen.insert($0).inserted }.prefix(maximumCount).map {
             PrefetchRequest(url: $0, width: 44, height: 44, prefersCompactXAvatar: true)
         }
-        await prefetch(requests, maximumConcurrentLoads: 4)
+        await prefetch(requests, maximumConcurrentLoads: maximumConcurrentLoads)
     }
 
     /// Finishes the initial reading snapshot even if a remote image is slow.
