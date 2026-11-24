@@ -2,14 +2,6 @@ import OSLog
 import SwiftUI
 import UIKit
 
-private let focusUpdateSession: URLSession = {
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-    configuration.timeoutIntervalForRequest = 4
-    configuration.timeoutIntervalForResource = 4
-    return URLSession(configuration: configuration)
-}()
-
 enum TodayBriefStyle {
     static let horizontalInset: CGFloat = 22
     static let maximumCardWidth: CGFloat = 480
@@ -1263,7 +1255,7 @@ struct TodayToolsMenu<Heading: View, Report: View>: View {
         var isTransient: Bool {
             switch self {
             case .server(500), .server(502), .server(503), .server(504),
-                 .network(.timedOut), .network(.networkConnectionLost),
+                 .network(.timedOut), .network(.networkConnectionLost), .network(.secureConnectionFailed),
                  .network(.notConnectedToInternet), .network(.cannotConnectToHost),
                  .network(.cannotFindHost), .network(.dnsLookupFailed):
                 return true
@@ -1583,12 +1575,23 @@ struct TodayToolsMenu<Heading: View, Report: View>: View {
         let url = channel.appendingPathComponent("latest.json").appending(queryItems: [
             .init(name: "check", value: UUID().uuidString)
         ])
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 4)
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await focusUpdateSession.data(for: request)
+            (data, response) = try await withThrowingTaskGroup(of: (Data, URLResponse).self) { group in
+                group.addTask { [request] in
+                    try await URLSession.shared.data(for: request)
+                }
+                group.addTask {
+                    try await Task.sleep(for: .seconds(4))
+                    throw URLError(.timedOut)
+                }
+                defer { group.cancelAll() }
+                guard let result = try await group.next() else { throw CancellationError() }
+                return result
+            }
         } catch let error as URLError {
             if error.code == .cancelled { throw CancellationError() }
             throw UpdateCheckFailure.network(error.code)

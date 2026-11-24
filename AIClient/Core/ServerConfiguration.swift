@@ -27,7 +27,7 @@ enum NetworkErrorPresentation {
              .serverCertificateNotYetValid,
              .clientCertificateRejected,
              .clientCertificateRequired:
-            return "安全连接失败，请检查 VPN 或代理设置后重试"
+            return "无法建立安全连接，请稍后重试"
         case .notConnectedToInternet, .networkConnectionLost:
             return "网络连接已断开，请检查网络后重试"
         case .timedOut:
