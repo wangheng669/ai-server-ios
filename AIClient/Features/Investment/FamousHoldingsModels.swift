@@ -19,25 +19,21 @@ struct FamousHoldingsSummary: Codable {
     let increased: Int
     let decreased: Int
     let exited: Int
-    let unchanged: Int?
+    let unchanged: Int
 }
 
 struct FamousHoldingsManager: Codable, Identifiable {
     let key: String
-    let cik: String
     let displayName: String
     let institutionName: String
-    let portraitUrl: String?
     let reportDate: String
     let filingDate: String
-    let holdingsCount: Int?
+    let accession: String
+    let filingUrl: URL?
+    let holdingsCount: Int
     let positionsCount: Int
     let totalValueUsd: Double
     let summary: FamousHoldingsSummary
-    let changesCount: Int
-    let changes: [FamousHoldingChange]
-    let topPositions: [FamousHoldingChange]
-    let sectors: [FamousHoldingsSector]
     let analytics: FamousHoldingsAnalytics
     let positions: [FamousHoldingChange]?
     let exitedPositions: [FamousHoldingChange]?
@@ -45,57 +41,69 @@ struct FamousHoldingsManager: Codable, Identifiable {
     var id: String { key }
 
     var reportIdentity: FamousHoldingsReportIdentity {
-        FamousHoldingsReportIdentity(managerKey: key, reportDate: reportDate, filingDate: filingDate)
+        FamousHoldingsReportIdentity(managerKey: key, reportDate: reportDate, filingDate: filingDate, accession: accession)
     }
 
     var hasCompletePositions: Bool {
         (positions?.count ?? 0) == positionsCount && (exitedPositions?.count ?? 0) == summary.exited
     }
 
-
+    var canCompare: Bool { analytics.previousReportDate != nil }
 }
 
 struct FamousHoldingsReportIdentity: Hashable {
     let managerKey: String
     let reportDate: String
     let filingDate: String
+    let accession: String
 
     func covers(_ requested: Self) -> Bool {
-        managerKey == requested.managerKey
-            && (reportDate > requested.reportDate || (reportDate == requested.reportDate && filingDate >= requested.filingDate))
+        guard managerKey == requested.managerKey else { return false }
+        if reportDate != requested.reportDate { return reportDate > requested.reportDate }
+        if filingDate != requested.filingDate { return filingDate > requested.filingDate }
+        return accession == requested.accession
     }
 }
 
 struct FamousHoldingsAnalytics: Codable {
+    let previousReportDate: String?
     let previousTotalValueUsd: Double?
     let totalValueChangeUsd: Double
     let totalValueChangePct: Double
 }
 
-struct FamousHoldingsSector: Codable {
-    let name: String
-    let weightPct: Double
-}
-
 struct FamousHoldingChange: Codable, Identifiable {
-    private let recordId: String?
-    let symbol: String?
-    let name: String
-    let companyLogo: String?
+    let id: String
+    let originalName: String
+    let cusip: String
+    let titleOfClass: String
+    let putCall: String?
+    let sharesType: String?
     let action: FamousHoldingAction
     let previousWeightPct: Double
     let weightPct: Double
     let weightChangePct: Double
     let valueUsd: Double
-    let previousValueUsd: Double?
+    let previousValueUsd: Double
+}
 
-    var id: String {
-        recordId ?? "\(symbol ?? name)-\(action.rawValue)-\(weightPct)-\(valueUsd)"
-    }
+enum HoldingDisclosureType: String, CaseIterable, Identifiable {
+    case shares = "按股或份额申报"
+    case put = "看跌期权"
+    case call = "看涨期权"
+    case principal = "按本金申报"
+    case unknown = "申报类型未识别"
 
-    private enum CodingKeys: String, CodingKey {
-        case recordId = "id"
-        case symbol, name, companyLogo, action, previousWeightPct, weightPct, weightChangePct, valueUsd, previousValueUsd
+    var id: Self { self }
+
+    init(position: FamousHoldingChange) {
+        switch (position.putCall?.uppercased(), position.sharesType?.uppercased()) {
+        case ("PUT", _): self = .put
+        case ("CALL", _): self = .call
+        case (_, "PRN"): self = .principal
+        case (_, "SH"): self = .shares
+        default: self = .unknown
+        }
     }
 }
 
@@ -112,7 +120,7 @@ enum FamousHoldingAction: String, Codable {
         case .increased: "增持"
         case .decreased: "减持"
         case .exited: "清仓"
-        case .unchanged: "未变动"
+        case .unchanged: "数量未变"
         }
     }
 }

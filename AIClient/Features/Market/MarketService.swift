@@ -100,8 +100,7 @@ struct MarketService: Sendable {
         var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/market/famous-holdings"), resolvingAgainstBaseURL: false)
         if let managerKey {
             components?.queryItems = [
-                .init(name: "manager", value: managerKey),
-                .init(name: "view", value: "positions")
+                .init(name: "manager", value: managerKey)
             ]
         }
         guard let url = components?.url else { throw MarketServiceError.invalidURL }

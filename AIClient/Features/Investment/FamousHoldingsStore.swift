@@ -57,7 +57,7 @@ final class FamousHoldingsStore {
             return
         } catch {
             guard !Task.isCancelled else { return }
-            errorMessage = error.localizedDescription
+            errorMessage = NetworkErrorPresentation.message(for: error)
         }
     }
 
@@ -106,8 +106,8 @@ final class FamousHoldingsStore {
 }
 
 private enum FamousHoldingsCache {
-    private static let payloadKey = "market.famous-holdings.cache.v3"
-    private static let savedAtKey = "market.famous-holdings.cache.saved-at.v3"
+    private static let payloadKey = "market.famous-holdings.cache.v4"
+    private static let savedAtKey = "market.famous-holdings.cache.saved-at.v4"
     private static let maxAge: TimeInterval = 7 * 24 * 60 * 60
 
     static func load() -> FamousHoldings? {
