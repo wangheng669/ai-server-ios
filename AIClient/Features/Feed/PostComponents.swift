@@ -1356,6 +1356,10 @@ actor ImageLoader {
 
     static let weChatCardCoverSize = CGSize(width: 98, height: 86)
 
+    static func newYorkTimesCoverSize(screenWidth: CGFloat) -> CGSize {
+        CGSize(width: min(screenWidth, 680), height: 245)
+    }
+
     static func prefetchFeedImages(for posts: [Post], source: FeedSource) async {
         if source == .x {
             await prefetchXTimelineImages(for: posts)
@@ -1385,6 +1389,9 @@ actor ImageLoader {
             } else if source == .wechat {
                 mediaURLs = [post.weChatCardPreviewURL].compactMap { $0 }
                 targetSize = weChatCardCoverSize
+            } else if post.isNewYorkTimes {
+                mediaURLs = Array(post.imageURLs.prefix(1))
+                targetSize = newYorkTimesCoverSize(screenWidth: screenWidth)
             } else if socialTimeline, post.videoURLs.isEmpty {
                 mediaURLs = Array(post.feedImageURLs.prefix(4))
             } else {
@@ -1888,6 +1895,11 @@ struct PostMediaGrid: View {
         imageTapLabel ?? (onImageTap == nil ? "查看图片" : "查看文章详情")
     }
 
+    private func coverDecodingSize(for url: URL) -> CGSize? {
+        guard post.isNewYorkTimes, post.imageURLs.first == url else { return nil }
+        return ImageLoader.newYorkTimesCoverSize(screenWidth: UIScreen.main.bounds.width)
+    }
+
     private var resolvedSingleImageHeight: CGFloat {
         if let singleImageHeight { return singleImageHeight }
         let resolvedWidth = availableWidth ?? UIScreen.main.bounds.width - 28
@@ -1998,7 +2010,8 @@ struct PostMediaGrid: View {
                         cornerRadius: cornerRadius,
                         contentMode: singleImageContentMode,
                         onImageLoaded: isXTimelinePreview ? nil : { recordLoadedImage($0, at: url, isSingleImage: true) },
-                        usesTimelinePlaceholder: isXTimelinePreview
+                        usesTimelinePlaceholder: isXTimelinePreview,
+                        decodingSize: coverDecodingSize(for: url)
                     )
                 }
                 .frame(maxWidth: .infinity)
@@ -2015,7 +2028,8 @@ struct PostMediaGrid: View {
                                 cornerRadius: 6,
                                 contentMode: .fit,
                                 onImageLoaded: isXTimelinePreview ? nil : { recordLoadedImage($0, at: url, isSingleImage: false) },
-                                usesTimelinePlaceholder: isXTimelinePreview
+                                usesTimelinePlaceholder: isXTimelinePreview,
+                                decodingSize: coverDecodingSize(for: url)
                             )
                             .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
                         }
@@ -2031,7 +2045,8 @@ struct PostMediaGrid: View {
                         height: resolvedSingleImageHeight,
                         cornerRadius: cornerRadius,
                         contentMode: singleImageContentMode,
-                        usesTimelinePlaceholder: isXTimelinePreview
+                        usesTimelinePlaceholder: isXTimelinePreview,
+                        decodingSize: coverDecodingSize(for: preview)
                     )
                 }
                 .buttonStyle(.plain)

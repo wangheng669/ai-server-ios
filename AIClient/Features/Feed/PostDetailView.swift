@@ -22,6 +22,7 @@ struct PostDetailView: View {
     private let autoplaysYouTube: Bool
     private let hasInitialNewYorkTimesDetail: Bool
     private let initialNewYorkTimesLink: URL?
+    private let initialNewYorkTimesCoverURL: URL?
     private let rssAvatarURL: URL?
     @State private var post: Post
     @State private var player: AVPlayer?
@@ -100,6 +101,7 @@ struct PostDetailView: View {
         let hasStoredDetail = post.isNewYorkTimes && (preloadedNewYorkTimesPost != nil || !loadsStoredDetail)
         self.hasInitialNewYorkTimesDetail = hasStoredDetail
         self.initialNewYorkTimesLink = post.isNewYorkTimes ? post.linkURL : nil
+        self.initialNewYorkTimesCoverURL = post.isNewYorkTimes ? post.imageURLs.first : nil
         let storedArticle = hasStoredDetail ? NewYorkTimesArticle(storedPost: initialPost) : nil
         _post = State(initialValue: initialPost)
         _newYorkTimesBody = State(initialValue: storedArticle.map(NewYorkTimesBody.ready) ?? .loading)
@@ -233,18 +235,27 @@ struct PostDetailView: View {
         case ready(NewYorkTimesArticle)
         case unavailable
         case failed
+
+        var article: NewYorkTimesArticle? {
+            guard case .ready(let article) = self else { return nil }
+            return article
+        }
     }
 
     private var newYorkTimesDetail: some View {
-        ScrollView {
+        let cover = newYorkTimesCover(in: newYorkTimesBody.article)
+        return ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 newYorkTimesHeader
+                if let cover {
+                    NewYorkTimesArticleImage(photo: cover.photo, height: 245, coverDisplayURL: cover.displayURL)
+                }
                 switch newYorkTimesBody {
                 case .loading:
                     ProgressView("正在加载完整文章…")
                         .foregroundStyle(.secondary)
                 case .ready(let article):
-                    newYorkTimesContent(article)
+                    newYorkTimesContent(article, cover: cover?.photo)
                 case .unavailable:
                     newYorkTimesLoadFailure("暂时没有可在此阅读的正文。")
                 case .failed:
@@ -305,13 +316,8 @@ struct PostDetailView: View {
         }
     }
 
-    private func newYorkTimesContent(_ article: NewYorkTimesArticle) -> some View {
-        let cover = newYorkTimesCover(in: article)
-        return LazyVStack(alignment: .leading, spacing: 22) {
-            if let cover {
-                NewYorkTimesArticleImage(photo: cover, height: 245)
-            }
-
+    private func newYorkTimesContent(_ article: NewYorkTimesArticle, cover: NewYorkTimesArticlePhoto?) -> some View {
+        LazyVStack(alignment: .leading, spacing: 22) {
             ForEach(article.blocks.indices, id: \.self) { index in
                 switch article.blocks[index] {
                 case .paragraph(let text):
@@ -327,9 +333,12 @@ struct PostDetailView: View {
         }
     }
 
-    private func newYorkTimesCover(in article: NewYorkTimesArticle) -> NewYorkTimesArticlePhoto? {
-        guard let url = article.cover?.url ?? post.imageURLs.first else { return nil }
-        let inlineCover = article.blocks.lazy.compactMap { block -> NewYorkTimesArticlePhoto? in
+    private func newYorkTimesCover(
+        in article: NewYorkTimesArticle?
+    ) -> (photo: NewYorkTimesArticlePhoto, displayURL: URL)? {
+        let storedURL = initialNewYorkTimesCoverURL ?? post.imageURLs.first
+        guard let url = article?.cover?.url ?? storedURL else { return nil }
+        let inlineCover = article?.blocks.lazy.compactMap { block -> NewYorkTimesArticlePhoto? in
             guard case .image(let photo) = block, photo.matches(url) else { return nil }
             return photo
         }.first
@@ -338,11 +347,15 @@ struct PostDetailView: View {
             MediaURL.image(image.url).map(cover.matches) == true
         }?.altText
         let storedCredit = post.imageURLs.first.flatMap { cover.matches($0) ? post.meta?.photoCredit : nil }
-        return NewYorkTimesArticlePhoto(
-            url: article.cover?.url ?? inlineCover?.url ?? url,
-            caption: article.cover?.caption ?? inlineCover?.caption ?? storedCaption,
-            credit: article.cover?.credit ?? inlineCover?.credit ?? storedCredit
+        let photo = NewYorkTimesArticlePhoto(
+            url: article?.cover?.url ?? inlineCover?.url ?? url,
+            caption: article?.cover?.caption ?? inlineCover?.caption ?? storedCaption,
+            credit: article?.cover?.credit ?? inlineCover?.credit ?? storedCredit
         )
+        // The page may use a larger rendition of the same photo. Keep the feed request
+        // in the reader, and use the original rendition when the photo is opened.
+        let displayURL = storedURL.flatMap { photo.matches($0) ? $0 : nil } ?? photo.url
+        return (photo, displayURL)
     }
 
     private func newYorkTimesParagraph(
@@ -3756,6 +3769,7 @@ private struct WeiboDetailImage: View {
 private struct NewYorkTimesArticleImage: View {
     let photo: NewYorkTimesArticlePhoto
     let height: CGFloat
+    var coverDisplayURL: URL? = nil
     @State private var gallerySelection: ImageGallerySelection?
 
     var body: some View {
@@ -3763,8 +3777,15 @@ private struct NewYorkTimesArticleImage: View {
             Button {
                 gallerySelection = ImageGallerySelection(urls: [photo.url], initialIndex: 0)
             } label: {
-                RemoteImage(url: photo.url, height: height, contentMode: .fit)
-                    .contentShape(Rectangle())
+                RemoteImage(
+                    url: coverDisplayURL ?? photo.url,
+                    height: height,
+                    contentMode: .fit,
+                    decodingSize: coverDisplayURL.map { _ in
+                        ImageLoader.newYorkTimesCoverSize(screenWidth: UIScreen.main.bounds.width)
+                    }
+                )
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("查看文章配图")
