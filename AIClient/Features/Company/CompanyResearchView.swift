@@ -403,8 +403,8 @@ struct CompanyResearchView: View {
                 }
             }
             .padding(.horizontal, ResearchDesign.inset)
-            .padding(.top, 6)
-            .padding(.bottom, 24)
+            .padding(.top, 12)
+            .padding(.bottom, 64)
         }
         .scrollIndicators(.hidden)
         .background(InvestmentDesign.surface)

@@ -143,7 +143,7 @@ struct MarketView: View {
         )
         .environment(\.rootTabIsActive, isResearchVisible)
         .appSheet(isPresented: $showsRetailInvestors) {
-            RetailInvestorView(store: investorMoodStore)
+            RetailInvestorView(store: investorMoodStore, onClose: { showsRetailInvestors = false })
                 .appPresentationDetents([.large])
                 .appPresentationCornerRadius(28)
                 .appPresentationBackground(InvestmentDesign.surface)
@@ -554,7 +554,6 @@ private struct MarketQuotesPage: View {
             .padding(.bottom, 60)
         }
         .accessibilityIdentifier("market-quotes-page-\(scope.id)")
-        .refreshable { await store.refresh() }
         .scrollIndicators(.hidden)
         .background(MarketStyle.surface)
         .appSheet(isPresented: $showsMarketStructure) {

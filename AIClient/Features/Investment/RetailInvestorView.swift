@@ -5,7 +5,7 @@ import UIKit
 
 struct RetailInvestorView: View {
     let store: InvestorMoodStore
-    @Environment(\.dismiss) private var dismiss
+    let onClose: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selectedID: InvestorMoodItem.ID?
     @State private var playbackItem: InvestorMoodItem?
@@ -20,13 +20,11 @@ struct RetailInvestorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ResearchSheetHeading(title: "散户观点", onClose: dismiss.callAsFunction)
-                .frame(maxWidth: TodayBriefStyle.maximumCardWidth)
-
             if items.count > 1 {
                 pageProgress
                     .frame(maxWidth: TodayBriefStyle.maximumCardWidth)
                     .padding(.horizontal, ResearchDesign.inset)
+                    .padding(.top, 12)
             }
 
             if items.isEmpty {
@@ -37,6 +35,8 @@ struct RetailInvestorView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(InvestmentDesign.surface)
+        .floatingSheetClose("关闭散户观点", action: onClose)
+        .accessibilityAction(.escape) { onClose() }
         .task {
             await store.refreshInvestorMood(force: true)
         }
@@ -142,6 +142,7 @@ private struct InvestorMoodVideoCard: View {
 
             ResearchDesign.line.frame(height: 1)
             originalVideoButton
+                .padding(.trailing, 52)
                 .padding(.vertical, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -293,8 +293,8 @@ struct InstitutionResearchView: View {
                         coverage(payload)
                     }
                     .padding(.horizontal, 18)
+                    .padding(.bottom, 64)
                 }
-                .refreshable { await store.load(force: true) }
             } else if store.isLoading {
                 ContentLoadingPlaceholder(title: "正在载入研究报告")
                     .frame(maxHeight: .infinity, alignment: .top)
@@ -394,7 +394,7 @@ struct InstitutionResearchView: View {
                 .padding(.horizontal, 20)
             }
         }
-        .padding(.top, 4)
+        .padding(.top, 12)
         .padding(.bottom, 4)
         .overlay(alignment: .bottom) { ResearchDesign.line.frame(height: 1) }
     }

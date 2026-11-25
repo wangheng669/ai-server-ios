@@ -457,7 +457,7 @@ struct ChinaMacroView: View {
             }
             .padding(.horizontal, InvestmentDesign.pageInset)
             .padding(.top, 14)
-            .padding(.bottom, 24)
+            .padding(.bottom, 64)
         }
         .background(InvestmentDesign.surface)
         .task(id: rootTabIsActive && scenePhase == .active) {
