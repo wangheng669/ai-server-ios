@@ -81,7 +81,7 @@ struct PostDetailView: View {
     @State private var isLoadingXReplyContext = false
     @State private var isLoadingXFullText: Bool
     @State private var imageGallerySelection: ImageGallerySelection?
-    @State private var showsXueqiuQuote = false
+    @State private var xueqiuQuoteLinkUnavailable = false
     @State private var xueqiuOpenFailed = false
     @State private var presentedArticleLink: InAppBrowserDestination?
     @Environment(\.dismiss) private var dismiss
@@ -1063,14 +1063,8 @@ struct PostDetailView: View {
             openArticleLink(url)
             return .handled
         })
-        .appSheet(isPresented: $showsXueqiuQuote) {
-            XueqiuQuotedPostView(
-                post: post,
-                author: presentation.quoteAuthor,
-                bodyText: presentation.quoteBody.map { xueqiuRichText($0, links: presentation.quoteLinks) },
-                imageURLs: presentation.quoteImageURLs
-            )
-            .readingSheetPresentation()
+        .alert("缺少雪球帖子链接", isPresented: $xueqiuQuoteLinkUnavailable) {
+            Button("知道了", role: .cancel) {}
         }
         .alert("无法打开雪球 App", isPresented: $xueqiuOpenFailed) {
             Button("知道了", role: .cancel) {}
@@ -1081,7 +1075,11 @@ struct PostDetailView: View {
 
     private func xueqiuQuoteCard(_ presentation: XueqiuPresentation) -> some View {
         Button {
-            showsXueqiuQuote = true
+            guard let url = post.linkURL, XueqiuQuotedPostBrowser.isPostURL(url) else {
+                xueqiuQuoteLinkUnavailable = true
+                return
+            }
+            presentedArticleLink = InAppBrowserDestination(url: url, opensXueqiuQuote: true)
         } label: {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -1116,7 +1114,7 @@ struct PostDetailView: View {
             .contentShape(RoundedRectangle(cornerRadius: 9))
         }
         .buttonStyle(.plain)
-        .accessibilityHint("打开引用帖")
+        .accessibilityHint("在焦点内打开雪球原帖")
         .accessibilityIdentifier("xueqiu-quoted-post-card")
     }
 
@@ -2798,54 +2796,6 @@ struct PostDetailView: View {
         }
     }
 
-}
-
-private struct XueqiuQuotedPostView: View {
-    let post: Post
-    let author: String?
-    let bodyText: Text?
-    let imageURLs: [URL]
-    @Environment(\.dismiss) private var dismiss
-    @State private var articleLink: InAppBrowserDestination?
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Text(author.map { "@\($0)" } ?? "引用帖")
-                    .font(.headline)
-                    .accessibilityAddTraits(.isHeader)
-
-                if let bodyText {
-                    bodyText
-                        .font(.system(size: 20))
-                        .lineSpacing(10)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                if !imageURLs.isEmpty {
-                    PostMediaGrid(
-                        post: post,
-                        imageURLs: imageURLs,
-                        singleImageMaxHeight: 620,
-                        availableWidth: UIScreen.main.bounds.width - 32,
-                        displaysVideoPlayer: false
-                    )
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
-            .padding(.top, 22)
-            .padding(.bottom, 60)
-        }
-        .background(Color(uiColor: .systemBackground))
-        .floatingSheetClose("关闭引用帖", action: dismiss.callAsFunction)
-        .environment(\.openURL, OpenURLAction { url in
-            articleLink = InAppBrowserDestination(url: url)
-            return .handled
-        })
-        .inAppBrowserCover(item: $articleLink)
-    }
 }
 
 private struct BilibiliEmbeddedPlayer: UIViewRepresentable {
