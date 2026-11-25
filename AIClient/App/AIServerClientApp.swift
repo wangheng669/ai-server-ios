@@ -52,6 +52,18 @@ final class AppOrientationController {
 final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(
         _ application: UIApplication,
+        configurationForConnecting session: UISceneSession,
+        options: UIScene.ConnectionOptions
+    ) -> UISceneConfiguration {
+        let configuration = UISceneConfiguration(name: nil, sessionRole: session.role)
+        if session.role == .windowApplication {
+            configuration.delegateClass = FocusSceneDelegate.self
+        }
+        return configuration
+    }
+
+    func application(
+        _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         let notificationCenter = UNUserNotificationCenter.current()
@@ -109,6 +121,45 @@ final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate, UNUserNo
     ) -> UIInterfaceOrientationMask {
         MainActor.assumeIsolated {
             AppOrientationController.shared.supportedOrientations
+        }
+    }
+}
+
+final class FocusSceneDelegate: NSObject, UIWindowSceneDelegate {
+    private static let notificationSettingsShortcut = "com.wangheng.aiserverclient.notification-settings"
+    private static let notificationSettingsURL = URL(string: UIApplication.openNotificationSettingsURLString)
+    private var shouldOpenNotificationSettings = false
+
+    func scene(
+        _ scene: UIScene,
+        willConnectTo session: UISceneSession,
+        options connectionOptions: UIScene.ConnectionOptions
+    ) {
+        shouldOpenNotificationSettings = connectionOptions.shortcutItem?.type == Self.notificationSettingsShortcut
+    }
+
+    func sceneDidBecomeActive(_ scene: UIScene) {
+        guard shouldOpenNotificationSettings else { return }
+        shouldOpenNotificationSettings = false
+        guard let url = Self.notificationSettingsURL else { return }
+        UIApplication.shared.open(url)
+    }
+
+    func windowScene(
+        _ windowScene: UIWindowScene,
+        performActionFor shortcutItem: UIApplicationShortcutItem,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
+        guard shortcutItem.type == Self.notificationSettingsShortcut,
+              let url = Self.notificationSettingsURL else {
+            completionHandler(false)
+            return
+        }
+        if windowScene.activationState == .foregroundActive {
+            UIApplication.shared.open(url, completionHandler: completionHandler)
+        } else {
+            shouldOpenNotificationSettings = true
+            completionHandler(true)
         }
     }
 }
