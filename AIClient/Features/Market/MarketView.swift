@@ -1731,7 +1731,9 @@ private struct MarketInstrumentDetailView: View {
     }
 
     private func stockShortcut(_ title: String, url: URL, identifier: String) -> some View {
-        Link(destination: url) {
+        Button {
+            UIApplication.shared.open(url)
+        } label: {
             Text(title)
                 .font(.footnote.weight(.semibold))
                 .lineLimit(1)
