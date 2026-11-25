@@ -170,7 +170,6 @@ struct TodayBriefProjection: Sendable {
         let id: String
         let content: Content
         let followUps: [String]
-        let title: String?
         let section: String
         let stock: TodayCompanyStock?
 
@@ -205,8 +204,6 @@ struct TodayBriefProjection: Sendable {
     private(set) var sources: [Int: TodaySourcePresentation] = [:]
     private(set) var previews: [URL: UIImage] = [:]
     private(set) var hasPreparedPreviews = false
-
-    var cardCount: Int { cards.count }
 
     func sectionTitle(at index: Int) -> String? {
         guard !cards.isEmpty else { return nil }
@@ -275,7 +272,7 @@ struct TodayBriefProjection: Sendable {
             }
             return Card(
                 id: "highlight-" + event.id, content: .event(event), followUps: followUps,
-                title: item.title, section: "重点", stock: TodayCompanyStock.match(event: event, systems: systems)
+                section: "重点", stock: TodayCompanyStock.match(event: event, systems: systems)
             )
         }
         var companyCards: [Card] = []
@@ -293,7 +290,6 @@ struct TodayBriefProjection: Sendable {
                         id: "company-\(section.id)-\(group.id)-\(system.id)",
                         content: .company(CompanyCard(system, fact: fact)),
                         followUps: takeFollowUps(for: key),
-                        title: system.headline,
                         section: section.sectionName,
                         stock: TodayCompanyStock.match(systemKey: system.systemKey, sourceKeys: Set(fact?.sourceKeys ?? []))
                     ))
@@ -304,7 +300,7 @@ struct TodayBriefProjection: Sendable {
             let event = TodayReadingEvent.highlight(watch.item, systems: systems)
             return Card(
                 id: "watch-" + event.id, content: .event(event), followUps: [],
-                title: watch.item.title, section: "后续关注", stock: TodayCompanyStock.match(event: event, systems: systems)
+                section: "后续关注", stock: TodayCompanyStock.match(event: event, systems: systems)
             )
         }
         cards = highlights + companyCards + standaloneWatches
@@ -319,17 +315,12 @@ struct TodayBriefProjection: Sendable {
     }
 }
 
-struct TodayBriefNavigation: Equatable {
-    enum Destination: Equatable {
-        case group(String)
-        case step(Int)
-    }
-
-    let destination: Destination
+struct TodayBriefGroupJump: Equatable {
+    let title: String
     private let id = UUID()
 
-    init(_ destination: Destination) {
-        self.destination = destination
+    init(title: String) {
+        self.title = title
     }
 }
 
@@ -339,8 +330,7 @@ struct TodayBriefOverviewView: View {
     let viewport: CGSize
     let isLoadingSources: Bool
     let retryReport: () async -> Void
-    let navigation: TodayBriefNavigation?
-    @Binding var showsDirectory: Bool
+    let groupJump: TodayBriefGroupJump?
     @Binding var selectedIndex: Int
 
     var body: some View {
@@ -354,8 +344,7 @@ struct TodayBriefOverviewView: View {
             } else {
                 TodayBriefDeck(
                     brief: brief, marketStore: marketStore, viewport: viewport, isLoadingSources: isLoadingSources,
-                    retryReport: retryReport, navigation: navigation,
-                    showsDirectory: $showsDirectory, selectedIndex: $selectedIndex
+                    retryReport: retryReport, groupJump: groupJump, selectedIndex: $selectedIndex
                 )
             }
         }
@@ -587,8 +576,7 @@ private struct TodayBriefDeck: View {
     let viewport: CGSize
     let isLoadingSources: Bool
     let retryReport: () async -> Void
-    let navigation: TodayBriefNavigation?
-    @Binding var showsDirectory: Bool
+    let groupJump: TodayBriefGroupJump?
     @Binding var selectedIndex: Int
 
     private enum DragAxis {
@@ -663,22 +651,7 @@ private struct TodayBriefDeck: View {
         .frame(minHeight: max(maximumHeight, cardHeight) + stackHeight + stagePadding, alignment: .top)
         .clipped()
         .contentShape(Rectangle())
-        .simultaneousGesture(swipeGesture(cardWidth: cardWidth), including: showsDirectory ? .none : .all)
-        .accessibilityHidden(showsDirectory)
-        .overlay(alignment: .top) {
-            if showsDirectory {
-                ZStack(alignment: .top) {
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .onTapGesture { showsDirectory = false }
-                        .accessibilityHidden(true)
-                    directory(selection: selection)
-                        .frame(width: cardWidth)
-                        .modifier(TodayMenuSurface())
-                        .padding(.top, 6)
-                }
-            }
-        }
+        .simultaneousGesture(swipeGesture(cardWidth: cardWidth))
         .marketInstrumentDetailSheet(item: $presentedStock, store: marketStore)
         .task(id: visibleStockSymbol, priority: .utility) {
             guard let visibleStockSymbol else { return }
@@ -708,15 +681,12 @@ private struct TodayBriefDeck: View {
             summaryHeights = summaryHeights.filter { current.contains($0.key) }
             originalsHeights = originalsHeights.filter { current.contains($0.key) }
         }
-        .onChange(of: navigation) { _, request in
-            guard let request else { return }
-            switch request.destination {
-            case let .group(title):
-                guard let section = brief.sectionShortcuts.first(where: { $0.title == title }) else { return }
-                jumpToCard(section.firstCardIndex)
-            case let .step(direction):
-                advance(direction)
+        .onChange(of: groupJump) { _, jump in
+            guard let jump, let section = brief.sectionShortcuts.first(where: { $0.title == jump.title }) else {
+                return
             }
+            settlement = nil
+            selectedIndex = section.firstCardIndex
         }
         .onChange(of: rootTabIsActive) { _, active in
             if !active {
@@ -775,68 +745,10 @@ private struct TodayBriefDeck: View {
             .allowsHitTesting(index == selection)
             .accessibilityHidden(index != selection)
             .accessibilityIdentifier("today-card-\(card.id)")
+            .accessibilityAction(named: Text("下一张")) { advance(1) }
+            .accessibilityAction(named: Text("上一张")) { advance(-1) }
             .id(card.id)
         }
-    }
-
-    private func directory(selection: Int) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("本期目录")
-                .font(.headline)
-                .accessibilityAddTraits(.isHeader)
-                .padding(.leading, 10)
-                .padding(.vertical, 8)
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 2) {
-                        ForEach(Array(brief.cards.enumerated()), id: \.element.id) { index, card in
-                            Button {
-                                jumpToCard(index)
-                            } label: {
-                                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                    Text("\(index + 1)").monospacedDigit()
-                                        .foregroundStyle(TodayBriefStyle.accent)
-                                        .frame(minWidth: 22, alignment: .leading)
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(card.title ?? card.text ?? card.sourceLabel)
-                                            .lineLimit(2)
-                                        if !card.sourceLabel.isEmpty {
-                                            Text(card.sourceLabel).font(.caption).foregroundStyle(.secondary)
-                                        }
-                                    }
-                                    Spacer(minLength: 0)
-                                }
-                                .font(.subheadline)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .frame(minHeight: 44, alignment: .leading)
-                                .background(
-                                    TodayBriefStyle.accent.opacity(index == selection ? 0.1 : 0),
-                                    in: RoundedRectangle(cornerRadius: 8)
-                                )
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityAddTraits(index == selection ? .isSelected : [])
-                            .id(card.id)
-                        }
-                    }
-                }
-                .contentMargins(.bottom, 52, for: .scrollContent)
-                .onAppear { proxy.scrollTo(brief.cards[selection].id, anchor: .center) }
-            }
-            .scrollIndicators(.hidden)
-            .frame(height: min(CGFloat(brief.cards.count) * 56, 272))
-        }
-        .padding([.horizontal, .bottom], 10)
-        .floatingSheetClose("关闭目录") { showsDirectory = false }
-        .accessibilityIdentifier("today-card-directory")
-    }
-
-    private func jumpToCard(_ index: Int) {
-        settlement = nil
-        selectedIndex = index
-        showsDirectory = false
     }
 
     private func swipeGesture(cardWidth: CGFloat) -> some Gesture {
