@@ -80,6 +80,7 @@ struct PostDetailView: View {
     @State private var isLoadingXReplyContext = false
     @State private var isLoadingXFullText: Bool
     @State private var weiboImageSelection: ImageGallerySelection?
+    @State private var showsXueqiuQuote = false
     @State private var xueqiuOpenFailed = false
     @State private var presentedArticleLink: InAppBrowserDestination?
     @Environment(\.dismiss) private var dismiss
@@ -1013,29 +1014,8 @@ struct PostDetailView: View {
                         )
                     }
 
-                    if let quoteBody = presentation.quoteBody {
-                        VStack(alignment: .leading, spacing: 14) {
-                            (Text(presentation.quoteAuthor.map { "@\($0)： " } ?? "")
-                                .foregroundStyle(Color.blue) + xueqiuRichText(quoteBody, links: presentation.quoteLinks))
-                                .font(.system(size: 16.5))
-                                .lineSpacing(7)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-
-                            if !presentation.quoteImageURLs.isEmpty {
-                                PostMediaGrid(
-                                    post: post,
-                                    imageURLs: presentation.quoteImageURLs,
-                                    singleImageMaxHeight: 520,
-                                    availableWidth: UIScreen.main.bounds.width - 60,
-                                    cornerRadius: 7
-                                )
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 14)
-                        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 9))
+                    if presentation.quoteBody != nil || !presentation.quoteImageURLs.isEmpty {
+                        xueqiuQuoteCard(presentation)
                     }
 
                     if !post.videoURLs.isEmpty || !presentation.unplacedImageURLs.isEmpty {
@@ -1061,11 +1041,61 @@ struct PostDetailView: View {
             openArticleLink(url)
             return .handled
         })
+        .appSheet(isPresented: $showsXueqiuQuote) {
+            XueqiuQuotedPostView(
+                post: post,
+                author: presentation.quoteAuthor,
+                bodyText: presentation.quoteBody.map { xueqiuRichText($0, links: presentation.quoteLinks) },
+                imageURLs: presentation.quoteImageURLs
+            )
+            .readingSheetPresentation()
+        }
         .alert("无法打开雪球 App", isPresented: $xueqiuOpenFailed) {
             Button("知道了", role: .cancel) {}
         } message: {
             Text("请确认已安装雪球 App。")
         }
+    }
+
+    private func xueqiuQuoteCard(_ presentation: XueqiuPresentation) -> some View {
+        Button {
+            showsXueqiuQuote = true
+        } label: {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    (Text(presentation.quoteAuthor.map { "@\($0)： " } ?? "")
+                        .foregroundStyle(Color.blue) + xueqiuRichText(presentation.quoteBody ?? ""))
+                        .font(.system(size: 16.5))
+                        .lineSpacing(7)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                }
+
+                if !presentation.quoteImageURLs.isEmpty {
+                    PostMediaGrid(
+                        post: post,
+                        imageURLs: presentation.quoteImageURLs,
+                        singleImageMaxHeight: 520,
+                        availableWidth: UIScreen.main.bounds.width - 60,
+                        cornerRadius: 7,
+                        displaysVideoPlayer: false
+                    )
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                }
+            }
+            .padding(14)
+            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 9))
+            .contentShape(RoundedRectangle(cornerRadius: 9))
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("打开引用帖")
+        .accessibilityIdentifier("xueqiu-quoted-post-card")
     }
 
     private var xueqiuDetailAuthor: some View {
@@ -2746,6 +2776,54 @@ struct PostDetailView: View {
         }
     }
 
+}
+
+private struct XueqiuQuotedPostView: View {
+    let post: Post
+    let author: String?
+    let bodyText: Text?
+    let imageURLs: [URL]
+    @Environment(\.dismiss) private var dismiss
+    @State private var articleLink: InAppBrowserDestination?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Text(author.map { "@\($0)" } ?? "引用帖")
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+
+                if let bodyText {
+                    bodyText
+                        .font(.system(size: 20))
+                        .lineSpacing(10)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if !imageURLs.isEmpty {
+                    PostMediaGrid(
+                        post: post,
+                        imageURLs: imageURLs,
+                        singleImageMaxHeight: 620,
+                        availableWidth: UIScreen.main.bounds.width - 32,
+                        displaysVideoPlayer: false
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.top, 22)
+            .padding(.bottom, 60)
+        }
+        .background(Color(uiColor: .systemBackground))
+        .floatingSheetClose("关闭引用帖", action: dismiss.callAsFunction)
+        .environment(\.openURL, OpenURLAction { url in
+            articleLink = InAppBrowserDestination(url: url)
+            return .handled
+        })
+        .inAppBrowserCover(item: $articleLink)
+    }
 }
 
 private struct BilibiliEmbeddedPlayer: UIViewRepresentable {
