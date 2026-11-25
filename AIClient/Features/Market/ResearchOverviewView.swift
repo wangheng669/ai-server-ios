@@ -966,7 +966,6 @@ private struct ResearchStockQuotes: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var quotes: [MarketQuote] { entries.compactMap(\.quote) }
-    private var showsExtendedHours: Bool { region == .unitedStates }
     private var extendedSession: MarketTradingSession {
         quotes.contains { $0.tradingSession == .premarket } ? .premarket : .overnight
     }
@@ -974,7 +973,7 @@ private struct ResearchStockQuotes: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if showsExtendedHours {
+            if quotes.contains(where: showsSessionBreakdown) {
                 VStack(spacing: 8) {
                     ForEach(entries) { entry in
                         stockEntry(entry)
@@ -1013,13 +1012,18 @@ private struct ResearchStockQuotes: View {
         }
     }
 
+    private func showsSessionBreakdown(for quote: MarketQuote) -> Bool {
+        region == .unitedStates && quote.tradingSession != .regular
+    }
+
     private func stockRow(_ quote: MarketQuote) -> some View {
+        let showsBreakdown = showsSessionBreakdown(for: quote)
         let active = quote.stale != true && !store.isShowingCachedSnapshot
         let lastTrade = store.lastSessionTrade(for: quote)
-        let subtitle = stockSubtitle(quote, active: active, hasLastTrade: lastTrade != nil)
+        let subtitle = stockSubtitle(quote, showsBreakdown: showsBreakdown, active: active, hasLastTrade: lastTrade != nil)
         return Button { onOpen(quote.symbol) } label: {
             VStack(alignment: .leading, spacing: 6) {
-                if showsExtendedHours {
+                if showsBreakdown {
                     HStack(spacing: 8) {
                         Text(quote.presentationName).font(.subheadline.weight(.semibold))
                         Text([subtitle, quote.currency].compactMap { $0 }.joined(separator: " · "))
@@ -1034,15 +1038,15 @@ private struct ResearchStockQuotes: View {
                     .padding(.horizontal, 5)
                     sessionPrices(quote, active: active)
                 } else {
-                    regularPrice(quote, subtitle: subtitle)
+                    compactQuote(quote, subtitle: subtitle)
                 }
                 if let lastTrade {
                     MarketLastSessionTradeNote(trade: lastTrade, symbol: quote.symbol)
-                        .padding(.horizontal, showsExtendedHours ? 5 : 0)
+                        .padding(.horizontal, showsBreakdown ? 5 : 0)
                 }
             }
             .monospacedDigit()
-            .padding(.horizontal, showsExtendedHours ? 8 : 12)
+            .padding(.horizontal, showsBreakdown ? 8 : 12)
             .padding(.vertical, 8)
             .frame(minHeight: 52)
             .contentShape(Rectangle())
@@ -1066,7 +1070,7 @@ private struct ResearchStockQuotes: View {
         .background(ResearchDesign.fill, in: RoundedRectangle(cornerRadius: 8))
     }
 
-    private func regularPrice(_ quote: MarketQuote, subtitle: String) -> some View {
+    private func compactQuote(_ quote: MarketQuote, subtitle: String) -> some View {
         let price = quote.stale == true ? "—" : quote.marketDisplayPrice.formatted(
             .number.precision(.fractionLength(marketPriceDigits(quote.marketDisplayPrice, symbol: quote.symbol)))
         )
@@ -1084,7 +1088,7 @@ private struct ResearchStockQuotes: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 3) {
                 Text([price, quote.currency].compactMap { $0 }.joined(separator: " "))
-                    .font(.subheadline.weight(.semibold))
+                    .font(region == .unitedStates ? .body.weight(.semibold) : .subheadline.weight(.semibold))
                     .minimumScaleFactor(0.75)
                 Text(change)
                     .font(.caption.weight(.semibold))
@@ -1093,11 +1097,15 @@ private struct ResearchStockQuotes: View {
         }
     }
 
-    private func stockSubtitle(_ quote: MarketQuote, active: Bool, hasLastTrade: Bool) -> String {
+    private func stockSubtitle(
+        _ quote: MarketQuote, showsBreakdown: Bool, active: Bool, hasLastTrade: Bool
+    ) -> String {
         let code = region == .europe && quote.listingCountryCode == "US" ? "\(quote.displayCode) · 美股" : quote.displayCode
         if hasLastTrade { return code }
         if !active { return "\(code) · 待更新" }
-        return showsExtendedHours ? code : "\(code)\n\(quote.researchStatus)"
+        if showsBreakdown { return code }
+        let separator = region == .unitedStates ? " · " : "\n"
+        return "\(code)\(separator)\(quote.researchStatus)"
     }
 }
 struct MarketUnavailableQuoteRow: View {
