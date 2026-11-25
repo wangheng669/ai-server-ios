@@ -21,6 +21,7 @@
 		00964D188729A223382D77B6 /* AIServerClientApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E0A2CF0E9F20AA431B17A59 /* AIServerClientApp.swift */; };
 		0310C5B2F83B870E8FA03AB9 /* MarketView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33DF2FE619F731E7105C5F23 /* MarketView.swift */; };
 		AE5700000000000000000001 /* ResearchOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE5700000000000000000002 /* ResearchOverviewView.swift */; };
+		AE5700000000000000000003 /* ResearchSentimentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE5700000000000000000004 /* ResearchSentimentView.swift */; };
 		2C5CFCCBD05F4D809EA0D9F1 /* StockSessionQuotes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71E5B0C99C04637B08DDE34 /* StockSessionQuotes.swift */; };
 		A4C0294615B549F6B4884150 /* VolatilityResearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4C0294615B549F6B4884151 /* VolatilityResearchView.swift */; };
 		0C1A2B3C4D5E6F708192A3B4 /* ChinaMacroView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D2E3F405162738495A6B7C8 /* ChinaMacroView.swift */; };
@@ -133,6 +134,7 @@
 		2E3E8C146E7D023F0970E445 /* PeopleService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleService.swift; sourceTree = "<group>"; };
 		33DF2FE619F731E7105C5F23 /* MarketView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketView.swift; sourceTree = "<group>"; };
 		AE5700000000000000000002 /* ResearchOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResearchOverviewView.swift; sourceTree = "<group>"; };
+		AE5700000000000000000004 /* ResearchSentimentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResearchSentimentView.swift; sourceTree = "<group>"; };
 		B71E5B0C99C04637B08DDE34 /* StockSessionQuotes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StockSessionQuotes.swift; sourceTree = "<group>"; };
 		3686E2A6A6443140E186A435 /* WikipediaArticleSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikipediaArticleSupport.swift; sourceTree = "<group>"; };
 		3B4D5F60718293A4B5C6D7E8 /* PersonPushNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonPushNotificationManager.swift; sourceTree = "<group>"; };
@@ -369,6 +371,7 @@
 				82E95DF23DE2CBD0DEEC463B /* MarketStore.swift */,
 				33DF2FE619F731E7105C5F23 /* MarketView.swift */,
 				AE5700000000000000000002 /* ResearchOverviewView.swift */,
+				AE5700000000000000000004 /* ResearchSentimentView.swift */,
 				B71E5B0C99C04637B08DDE34 /* StockSessionQuotes.swift */,
 				A4C0294615B549F6B4884151 /* VolatilityResearchView.swift */,
 			);
@@ -585,6 +588,7 @@
 				212E02E9454406B9CEE36D72 /* MarketStore.swift in Sources */,
 				0310C5B2F83B870E8FA03AB9 /* MarketView.swift in Sources */,
 				AE5700000000000000000001 /* ResearchOverviewView.swift in Sources */,
+				AE5700000000000000000003 /* ResearchSentimentView.swift in Sources */,
 				2C5CFCCBD05F4D809EA0D9F1 /* StockSessionQuotes.swift in Sources */,
 				A4C0294615B549F6B4884150 /* VolatilityResearchView.swift in Sources */,
 				FFAD6FA1551774C67C10B5A6 /* NewsFeedView.swift in Sources */,

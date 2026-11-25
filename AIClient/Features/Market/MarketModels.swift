@@ -75,7 +75,8 @@ struct MarketDashboard: Codable {
     var coreIndices: [MarketQuote]
     var referenceIndices: [MarketQuote]
     let realtimeProxies: [MarketRealtimeProxyDefinition]
-    var metrics: [MarketQuote]
+    private var metricEntries: [MarketMetricEntry]
+    var metrics: [MarketQuote] { metricEntries.compactMap(\.quote) }
     var componentsByRegion: [String: [MarketQuote]]
     var crypto: [MarketQuote]
     var commodities: [MarketQuote]
@@ -97,7 +98,8 @@ struct MarketDashboard: Codable {
 
     enum CodingKeys: String, CodingKey {
         case dataContract, definitionVersion, generatedAt, refreshIntervalMs, coreIndices, referenceIndices, realtimeProxies
-        case metrics, componentsByRegion, crypto, commodities
+        case metricEntries = "metrics"
+        case componentsByRegion, crypto, commodities
         case indexSessions, componentsMeta, freshness, missingSymbols, expectedSymbols, symbolHealth, regions
         case ashareOverview, marketStructure, sentiment
     }
@@ -111,7 +113,8 @@ struct MarketDashboard: Codable {
         coreIndices = try values.decodeLossyQuotes(forKey: .coreIndices)
         referenceIndices = try values.decodeLossyQuotes(forKey: .referenceIndices)
         realtimeProxies = try values.decodeIfPresent([MarketRealtimeProxyDefinition].self, forKey: .realtimeProxies) ?? []
-        metrics = try values.decodeLossyQuotes(forKey: .metrics)
+        metricEntries = try values.decodeIfPresent([LossyMarketValue<MarketMetricEntry>].self, forKey: .metricEntries)?
+            .compactMap(\.value) ?? []
         componentsByRegion = try values.decodeLossyQuoteArrays(forKey: .componentsByRegion)
         crypto = try values.decodeLossyQuotes(forKey: .crypto)
         commodities = try values.decodeLossyQuotes(forKey: .commodities)
@@ -130,7 +133,9 @@ struct MarketDashboard: Codable {
     mutating func replace(_ quote: MarketQuote) {
         replace(quote, in: &coreIndices)
         replace(quote, in: &referenceIndices)
-        replace(quote, in: &metrics)
+        if let index = metricEntries.firstIndex(where: { $0.quote?.symbol == quote.symbol }) {
+            metricEntries[index] = .quote(quote)
+        }
         for region in Array(componentsByRegion.keys) {
             replace(quote, in: &componentsByRegion[region, default: []])
         }
@@ -166,32 +171,72 @@ struct MarketDashboard: Codable {
             .filter { seen.insert($0.symbol).inserted }
     }
 
+    func unavailableMetric(symbol: String) -> MarketQuoteQuality? {
+        for entry in metricEntries {
+            if case let .unavailable(metric) = entry, metric.symbol == symbol { return metric.quality }
+        }
+        return nil
+    }
+
     private func replace(_ quote: MarketQuote, in quotes: inout [MarketQuote]) {
         guard let index = quotes.firstIndex(where: { $0.symbol == quote.symbol }) else { return }
         quotes[index] = quote
     }
 }
 
-private struct LossyMarketQuote: Decodable {
-    let value: MarketQuote?
+private enum MarketMetricEntry: Codable {
+    struct Unavailable: Codable {
+        let symbol: String
+        let quality: MarketQuoteQuality
+    }
+
+    case quote(MarketQuote), unavailable(Unavailable)
+
+    var quote: MarketQuote? {
+        guard case let .quote(quote) = self else { return nil }
+        return quote
+    }
 
     init(from decoder: Decoder) throws {
-        value = try? MarketQuote(from: decoder)
+        if let quote = try? MarketQuote(from: decoder) {
+            self = .quote(quote)
+        } else {
+            let metric = try Unavailable(from: decoder)
+            guard metric.quality.status == "unavailable" else {
+                throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Invalid market metric"))
+            }
+            self = .unavailable(metric)
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        switch self {
+        case let .quote(quote): try quote.encode(to: encoder)
+        case let .unavailable(metric): try metric.encode(to: encoder)
+        }
+    }
+}
+
+private struct LossyMarketValue<Value: Decodable>: Decodable {
+    let value: Value?
+
+    init(from decoder: Decoder) throws {
+        value = try? Value(from: decoder)
     }
 }
 
 private extension KeyedDecodingContainer where Key == MarketDashboard.CodingKeys {
     func decodeLossyQuotes(forKey key: Key) throws -> [MarketQuote] {
-        try decodeIfPresent([LossyMarketQuote].self, forKey: key)?.compactMap(\.value) ?? []
+        try decodeIfPresent([LossyMarketValue<MarketQuote>].self, forKey: key)?.compactMap(\.value) ?? []
     }
 
     func decodeLossyQuoteDictionary(forKey key: Key) throws -> [String: MarketQuote]? {
-        try decodeIfPresent([String: LossyMarketQuote].self, forKey: key)?
+        try decodeIfPresent([String: LossyMarketValue<MarketQuote>].self, forKey: key)?
             .compactMapValues(\.value)
     }
 
     func decodeLossyQuoteArrays(forKey key: Key) throws -> [String: [MarketQuote]] {
-        try decode([String: [LossyMarketQuote]].self, forKey: key)
+        try decode([String: [LossyMarketValue<MarketQuote>]].self, forKey: key)
             .mapValues { $0.compactMap(\.value) }
     }
 }
@@ -292,6 +337,12 @@ struct MarketQuoteQuality: Codable, Hashable {
     let asOfTimestamp: Int64?
     let tradingDate: String?
     let fallbackUsed: Bool?
+
+    var unavailableLabel: String {
+        let label = reason == "official_close_unavailable" ? "正式收盘价暂缺" : "报价暂缺"
+        guard let tradingDate else { return label }
+        return "\(tradingDate.suffix(5)) \(label)"
+    }
 }
 
 struct MarketQuote: Codable, Identifiable, Hashable {
@@ -317,6 +368,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     var netIncomeTTM: Double?
     var week52Low: Double?
     var currency: String?
+    let listingCountryCode: String?
     var fundamentalsCurrency: String?
     var fiscalYear: String?
     var fundamentalsSource: String?
@@ -403,7 +455,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case symbol, name, displayName, instrumentType, proxyFor, referenceSymbol, historicalSymbol, displayMode, priceUnit
         case price, openPrice, previousClose, high, low, pe, marketCap, peStatic, peType, netIncomeTTM, week52Low
-        case currency, fundamentalsCurrency, fiscalYear, fundamentalsSource, fundamentalsAsOf, volume, turnover
+        case currency, listingCountryCode, fundamentalsCurrency, fiscalYear, fundamentalsSource, fundamentalsAsOf, volume, turnover
         case dataSource, delaySeconds, marketSession, sessionPrice, sessionChangePercent, sessionDataSource
         case changePercent, timestamp, receivedAt, quality, trend, nightTrend, stale
     }
@@ -430,6 +482,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         netIncomeTTM: Double? = nil,
         week52Low: Double? = nil,
         currency: String? = nil,
+        listingCountryCode: String? = nil,
         fundamentalsCurrency: String? = nil,
         fiscalYear: String? = nil,
         fundamentalsSource: String? = nil,
@@ -472,6 +525,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         self.netIncomeTTM = netIncomeTTM
         self.week52Low = week52Low
         self.currency = currency
+        self.listingCountryCode = listingCountryCode
         self.fundamentalsCurrency = fundamentalsCurrency
         self.fiscalYear = fiscalYear
         self.fundamentalsSource = fundamentalsSource
@@ -517,6 +571,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         netIncomeTTM = try values.decodeIfPresent(Double.self, forKey: .netIncomeTTM)
         week52Low = try values.decodeIfPresent(Double.self, forKey: .week52Low)
         currency = try values.decodeIfPresent(String.self, forKey: .currency)
+        listingCountryCode = try values.decodeIfPresent(String.self, forKey: .listingCountryCode)
         fundamentalsCurrency = try values.decodeIfPresent(String.self, forKey: .fundamentalsCurrency)
         fiscalYear = try values.decodeIfPresent(String.self, forKey: .fiscalYear)
         fundamentalsSource = try values.decodeIfPresent(String.self, forKey: .fundamentalsSource)
@@ -645,6 +700,7 @@ struct MarketQuoteUpdate: Decodable {
             low: low ?? current?.low,
             pe: current?.pe,
             marketCap: current?.marketCap,
+            listingCountryCode: current?.listingCountryCode,
             volume: volume ?? current?.volume,
             turnover: turnover ?? current?.turnover,
             dataSource: dataSource ?? current?.dataSource,
@@ -941,6 +997,22 @@ struct MarketMarginPoint: Codable, Identifiable {
 }
 
 struct MarketSentiment: Codable {
+    struct HistoryPoint: Codable, Identifiable {
+        let timestamp: Int64
+        let value: Double
+        var id: Int64 { timestamp }
+        var date: Date { Date(timeIntervalSince1970: Double(timestamp) / 1000) }
+    }
+
+    struct Indicator: Codable, Identifiable {
+        let key: String
+        let label: String
+        let score: Double?
+        let ratingZh: String?
+        let updatedAt: String?
+        var id: String { key }
+    }
+
     let score: Double
     let previousClose: Double?
     let ratingZh: String
@@ -949,6 +1021,8 @@ struct MarketSentiment: Codable {
     let source: String?
     let available: Bool?
     let stale: Bool?
+    let historical: [HistoryPoint]?
+    let indicators: [Indicator]?
 }
 
 struct MarketCompanyValuationHistoryResponse: Decodable {

@@ -361,7 +361,10 @@ final class MarketStore {
                 (health.status == .stale && health.lastSessionTrade == nil &&
                  dashboard.quote(symbol: health.symbol)?.stale != false)
         }
-        return marketHealthSummary(issues)
+        let unavailableSymbols = Set(issues.compactMap { health in
+            dashboard.unavailableMetric(symbol: health.symbol) == nil ? nil : health.symbol
+        })
+        return marketHealthSummary(issues, unavailableSymbols: unavailableSymbols)
     }
 
     func lastSessionTrade(for quote: MarketQuote) -> MarketLastSessionTrade? {
@@ -592,12 +595,12 @@ func marketChartCanUseCache(_ chart: MarketChart, loadedAt: Date, now: Date = Da
     return now.timeIntervalSince(loadedAt) < maximumAge
 }
 
-func marketHealthSummary(_ issues: [MarketSymbolHealth]) -> String? {
+func marketHealthSummary(_ issues: [MarketSymbolHealth], unavailableSymbols: Set<String>) -> String? {
     guard !issues.isEmpty else { return nil }
     let names = issues.prefix(3).map { marketSymbolDisplayName($0.symbol) }
     let listedNames = names.joined(separator: "、")
     let suffix = issues.count > names.count ? "\(listedNames)等 \(issues.count) 项" : listedNames
-    let staleCount = issues.filter { $0.status == .stale }.count
+    let staleCount = issues.filter { $0.status == .stale && !unavailableSymbols.contains($0.symbol) }.count
     let missingCount = issues.count - staleCount
     if missingCount > 0, staleCount > 0 { return "部分行情缺失或延迟：\(suffix)" }
     if missingCount > 0 { return "部分行情暂缺：\(suffix)" }

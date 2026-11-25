@@ -1,7 +1,9 @@
 import SwiftUI
 
-private enum ResearchTopic: String, CaseIterable, Identifiable {
-    case company = "公司", industry = "行业", macro = "宏观", viewpoints = "观点"
+private enum ResearchTopic: String, Identifiable {
+    case company = "公司", industry = "行业", macro = "宏观", viewpoints = "观点", sentiment = "市场情绪"
+
+    static let shortcuts: [Self] = [.company, .industry, .macro, .viewpoints]
 
     var id: Self { self }
 
@@ -11,6 +13,7 @@ private enum ResearchTopic: String, CaseIterable, Identifiable {
         case .industry: "行业全景"
         case .macro: "宏观指标"
         case .viewpoints: "机构观点"
+        case .sentiment: "CNN 恐慌与贪婪指数"
         }
     }
 
@@ -20,6 +23,7 @@ private enum ResearchTopic: String, CaseIterable, Identifiable {
         case .industry: "square.grid.2x2"
         case .macro: "chart.line.uptrend.xyaxis"
         case .viewpoints: "text.bubble"
+        case .sentiment: "gauge.with.dots.needle.50percent"
         }
     }
 }
@@ -61,7 +65,7 @@ struct ResearchHomeView: View {
     let companyStore: CompanyResearchStore
     let onOpenGlobalRanking: () -> Void
     let onOpenInvestors: () -> Void
-    let onOpenMarketQuotes: (MarketRegion) -> Void
+    let onOpenMarketQuotes: (MarketQuotesScope) -> Void
     let onOpenMarketDetail: (String) -> Void
     let onOpenRetailInvestors: () -> Void
     @Environment(\.rootTabIsActive) private var rootTabIsActive
@@ -131,6 +135,7 @@ struct ResearchHomeView: View {
         .background(ResearchStyle.surface)
         .accessibilityIdentifier("research-overview")
         .scrollIndicators(.hidden)
+        .refreshable { await store.refresh() }
         .appSheet(item: $presentedTopic) { topic in
             ResearchTopicSheet(title: topic.title) {
                 switch topic {
@@ -142,6 +147,8 @@ struct ResearchHomeView: View {
                     ChinaMacroView()
                 case .viewpoints:
                     NavigationStack { InstitutionResearchView(store: researchStore) }
+                case .sentiment:
+                    ResearchSentimentView(store: store)
                 }
             }
             .appPresentationDetents([.large])
@@ -174,7 +181,7 @@ struct ResearchHomeView: View {
     private var researchTopics: some View {
         let columns = dynamicTypeSize.isAccessibilitySize ? 2 : 4
         return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: columns), spacing: 4) {
-            ForEach(ResearchTopic.allCases) { topic in
+            ForEach(ResearchTopic.shortcuts) { topic in
                 Button { presentedTopic = topic } label: {
                     Label(topic.rawValue, systemImage: topic.icon)
                         .font(.footnote.weight(.semibold))
@@ -197,7 +204,7 @@ struct ResearchHomeView: View {
                 "全球市场", trailing: "全部行情", prominent: true,
                 status: store.isShowingCachedSnapshot ? "缓存行情" : nil
             ) {
-                onOpenMarketQuotes(.unitedStates)
+                onOpenMarketQuotes(.global)
             }
             let layout = dynamicTypeSize.isAccessibilitySize
                 ? AnyLayout(VStackLayout(spacing: 0))
@@ -232,6 +239,7 @@ struct ResearchHomeView: View {
     private func marketIndex(title: String, symbol: String) -> some View {
         let quote = store.quote(symbol: symbol)
         let color = ResearchStyle.tint(quote)
+        let trend = store.listTrendValues(for: quote)
         return Button { onOpenMarketDetail(symbol) } label: {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
@@ -243,15 +251,13 @@ struct ResearchHomeView: View {
                 Text(quote?.marketDisplayFormattedPercent ?? "—")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(color)
-                ResearchSparkline(values: store.listTrendValues(for: quote), color: color)
+                ResearchSparkline(values: trend, color: color, emptyLabel: trendStatus(symbol: symbol))
                     .equatable()
                     .frame(height: 22)
                     .padding(.top, 2)
-                if let subtitle = quoteSubtitle(quote) {
-                    Text(subtitle)
-                        .font(.caption2)
-                        .foregroundStyle(ResearchStyle.muted)
-                }
+                Text(quote?.researchStatus ?? "暂无行情")
+                    .font(.caption2)
+                    .foregroundStyle(ResearchStyle.muted)
             }
             .monospacedDigit()
             .lineLimit(1)
@@ -290,6 +296,15 @@ struct ResearchHomeView: View {
                     tickerChange(quote)
                         .font(.caption2.weight(.semibold))
                 }
+                if showsPrice, let unit = quote?.priceUnit ?? quote?.currency {
+                    Text(unit)
+                        .font(.caption2)
+                        .foregroundStyle(ResearchStyle.muted)
+                }
+                Text(quote?.researchStatus ?? "暂无行情")
+                    .font(.caption2)
+                    .foregroundStyle(ResearchStyle.muted)
+                    .lineLimit(2)
             }
             .monospacedDigit()
             .lineLimit(1)
@@ -312,8 +327,8 @@ struct ResearchHomeView: View {
         layout {
             metric("VIX", symbol: "^VIX", yield: false)
             metric("美债10Y", symbol: "^TNX", yield: true)
-            Button(action: onOpenRetailInvestors) {
-                indicator("市场情绪") {
+            Button { presentedTopic = .sentiment } label: {
+                indicator("CNN 市场情绪") {
                     HStack(alignment: .firstTextBaseline, spacing: 3) {
                         Text(sentiment.map { String(format: "%.1f", $0.score) } ?? "—")
                         Text("/100").font(.caption).foregroundStyle(ResearchStyle.muted)
@@ -351,12 +366,15 @@ struct ResearchHomeView: View {
             } detail: {
                 Text(change.map { String(format: yield ? "%+.0f bp" : "%+.2f 点", $0 * (yield ? 100 : 1)) } ?? "—")
                     .foregroundStyle(ResearchStyle.tint(quote))
-                if symbol == "^VIX", let quote, quote.stale != true, quote.tradingSession == .premarket,
-                   let timestamp = quote.quality?.asOfTimestamp {
-                    Text("盘前快照 \(marketShortTimestamp(timestamp))")
+                if let quality = store.dashboard?.unavailableMetric(symbol: symbol), quote == nil {
+                    Text(quality.unavailableLabel)
                         .foregroundStyle(ResearchStyle.muted)
-                } else if let subtitle = quoteSubtitle(quote) {
-                    Text(subtitle).foregroundStyle(ResearchStyle.muted)
+                        .lineLimit(2)
+                } else {
+                    Text(quote?.researchStatus ?? "暂无行情").foregroundStyle(ResearchStyle.muted)
+                    if let timestamp = quote?.marketAsOfTimestamp {
+                        Text(marketShortTimestamp(timestamp)).foregroundStyle(ResearchStyle.muted)
+                    }
                 }
             }
         }
@@ -404,7 +422,9 @@ struct ResearchHomeView: View {
             HStack(spacing: 6) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
-                    Text(quote?.hasIndicativeOvernightPrice == true ? "\(symbol) · 夜盘参考" : symbol)
+                    Text(symbol)
+                        .font(.caption2).foregroundStyle(ResearchStyle.muted)
+                    Text(quote?.researchStatus ?? "暂无行情")
                         .font(.caption2).foregroundStyle(ResearchStyle.muted)
                 }
                 Spacer(minLength: 0)
@@ -427,7 +447,7 @@ struct ResearchHomeView: View {
     private var coreStocks: some View {
         VStack(spacing: 2) {
             sectionHeading(store.dashboard?.componentsMeta?.label ?? "核心股票", trailing: "全部股票") {
-                onOpenMarketQuotes(stockRegion)
+                onOpenMarketQuotes(.region(stockRegion))
             }
             stockRegionSelector
             if stocks.isEmpty {
@@ -437,7 +457,7 @@ struct ResearchHomeView: View {
             } else {
                 ResearchStockQuotes(
                     quotes: stocks,
-                    showsExtendedHours: stockRegion == .unitedStates,
+                    region: stockRegion,
                     store: store,
                     onOpen: onOpenMarketDetail
                 )
@@ -474,6 +494,7 @@ struct ResearchHomeView: View {
         return layout {
             utility("机构持仓", icon: "person.2", action: onOpenInvestors)
             utility("资产排行", icon: "list.number", action: onOpenGlobalRanking)
+            utility("散户观点", icon: "bubble.left.and.bubble.right", action: onOpenRetailInvestors)
         }
         .padding(.horizontal, 6)
         .background(ResearchStyle.marketSurface, in: RoundedRectangle(cornerRadius: 12))
@@ -527,14 +548,34 @@ struct ResearchHomeView: View {
         guard let quote else { return "—" }
         return quote.marketDisplayPrice.formatted(.number.precision(.fractionLength(2)))
     }
-    private func quoteSubtitle(_ quote: MarketQuote?) -> String? {
-        guard let quote else { return "暂无行情" }
-        if quote.stale == true { return "行情待更新" }
-        if quote.tradingSession == .closed, let date = quote.quality?.tradingDate {
+    private func trendStatus(symbol: String) -> String {
+        if store.isLoadingChart(symbol: symbol, range: .day) { return "走势加载中" }
+        if store.chartError(symbol: symbol, range: .day) != nil { return "走势加载失败" }
+        return store.chartSnapshot(symbol: symbol, range: .day) == nil && store.quote(symbol: symbol) != nil
+            ? "走势待加载" : "暂无走势"
+    }
+}
+
+private extension MarketQuote {
+    var researchStatus: String {
+        if stale == true { return "报价待更新" }
+        if tradingSession == .closed, let date = quality?.tradingDate {
             return "\(date.suffix(5)) 收盘"
         }
-        if let minutes = quote.visibleDelayMinutes { return "延迟\(minutes)分钟" }
-        return nil
+        let sessionLabel: String
+        if hasIndicativeOvernightPrice {
+            sessionLabel = "夜盘参考 · 中间价"
+        } else if symbol == "^VIX", tradingSession == .premarket {
+            sessionLabel = "盘前快照"
+        } else if tradingSession.isExtended, !hasActiveExtendedSessionQuote {
+            sessionLabel = "常规收盘"
+        } else {
+            sessionLabel = tradingSession.displayLabel
+        }
+        if let minutes = visibleDelayMinutes {
+            return "\(sessionLabel) · 延迟 \(minutes) 分钟"
+        }
+        return quality?.status == "delayed" ? "\(sessionLabel) · 延迟报价" : sessionLabel
     }
 }
 
@@ -564,10 +605,11 @@ private struct ResearchTopicSheet<Content: View>: View {
 
 private struct ResearchStockQuotes: View {
     let quotes: [MarketQuote]
-    let showsExtendedHours: Bool
+    let region: MarketRegion
     let store: MarketStore
     let onOpen: (String) -> Void
 
+    private var showsExtendedHours: Bool { region == .unitedStates }
     private var extendedSession: MarketTradingSession {
         quotes.contains { $0.tradingSession == .premarket } ? .premarket : .overnight
     }
@@ -634,26 +676,31 @@ private struct ResearchStockQuotes: View {
                         Text(stockSubtitle(quote, active: active, hasLastTrade: lastTrade != nil))
                             .font(.caption2)
                             .foregroundStyle(ResearchStyle.muted)
-                            .lineLimit(1)
+                            .lineLimit(showsExtendedHours ? 1 : 3)
                             .minimumScaleFactor(0.75)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                     if showsExtendedHours {
-                        let sessions = StockSessionQuotes(quote: quote, chart: store.dayChartForSessionQuotes(symbol: quote.symbol),
-                                                          extendedSession: extendedSession, isCurrent: active)
+                        let sessions = store.stockSessionQuotes(for: quote, chartSymbol: quote.symbol,
+                                                                extendedSession: extendedSession, isCurrent: active)
                         ForEach(sessions.columns) { column in
                             StockSessionPriceCell(column: column, symbol: quote.symbol, muted: ResearchStyle.muted)
                         }
                     } else {
-                        Text(quote.stale == true ? "—" : quote.marketDisplayPrice.formatted(
-                            .number.precision(.fractionLength(marketPriceDigits(quote.marketDisplayPrice, symbol: quote.symbol)))
-                        ))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text(quote.stale == true ? "—" : quote.marketDisplayPrice.formatted(
+                                .number.precision(.fractionLength(marketPriceDigits(quote.marketDisplayPrice, symbol: quote.symbol)))
+                            ))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            if let currency = quote.currency {
+                                Text(currency).font(.caption2).foregroundStyle(ResearchStyle.muted)
+                            }
+                        }
                         .lineLimit(1).minimumScaleFactor(0.75)
                         .frame(maxWidth: .infinity, alignment: .trailing)
-                        Text(quote.marketDisplayFormattedPercent)
+                        Text(quote.stale == true ? "—" : quote.marketDisplayFormattedPercent)
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(ResearchStyle.tint(quote))
                             .lineLimit(1).minimumScaleFactor(0.75)
@@ -675,18 +722,17 @@ private struct ResearchStockQuotes: View {
     }
 
     private func stockSubtitle(_ quote: MarketQuote, active: Bool, hasLastTrade: Bool) -> String {
-        if hasLastTrade { return quote.displayCode }
-        if !active { return "\(quote.displayCode) · 待更新" }
-        if !showsExtendedHours, quote.tradingSession == .closed, let date = quote.quality?.tradingDate {
-            return "\(quote.displayCode) · \(date.suffix(5)) 收盘"
-        }
-        return quote.displayCode
+        let code = region == .europe && quote.listingCountryCode == "US" ? "\(quote.displayCode) · 美股" : quote.displayCode
+        if hasLastTrade { return code }
+        if !active { return "\(code) · 待更新" }
+        return showsExtendedHours ? code : "\(code)\n\(quote.researchStatus)"
     }
 }
 
 private struct ResearchSparkline: View, Equatable {
     let values: [Double]
     let color: Color
+    let emptyLabel: String
 
     var body: some View {
         GeometryReader { proxy in
@@ -703,7 +749,7 @@ private struct ResearchSparkline: View, Equatable {
                 Path { $0.addLines(points) }
                     .stroke(color, style: StrokeStyle(lineWidth: 1.3, lineCap: .round, lineJoin: .round))
             } else {
-                Text("暂无走势").font(.caption2).foregroundStyle(ResearchStyle.muted)
+                Text(emptyLabel).font(.caption2).foregroundStyle(ResearchStyle.muted)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             }
         }

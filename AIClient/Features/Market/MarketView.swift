@@ -59,9 +59,9 @@ struct MarketView: View {
         false
         #endif
     }()
-    @State private var selectedMarketQuotesRegion: MarketRegion? = {
+    @State private var selectedMarketQuotesScope: MarketQuotesScope? = {
         #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("--market-core-stocks-preview") ? .unitedStates : nil
+        ProcessInfo.processInfo.arguments.contains("--market-core-stocks-preview") ? .region(.unitedStates) : nil
         #else
         nil
         #endif
@@ -85,7 +85,7 @@ struct MarketView: View {
     @Environment(\.rootTabIsActive) private var rootTabIsActive
 
     private var isResearchVisible: Bool {
-        rootTabIsActive && selectedDetail == nil && selectedMarketQuotesRegion == nil
+        rootTabIsActive && selectedDetail == nil && selectedMarketQuotesScope == nil
             && !showsRetailInvestors && !showsInvestors && !showsGlobalRanking
     }
 
@@ -112,8 +112,8 @@ struct MarketView: View {
             onOpenInvestors: {
                 showsInvestors = true
             },
-            onOpenMarketQuotes: { region in
-                selectedMarketQuotesRegion = region
+            onOpenMarketQuotes: { scope in
+                selectedMarketQuotesScope = scope
             },
             onOpenMarketDetail: { symbol in
                 #if DEBUG
@@ -155,8 +155,8 @@ struct MarketView: View {
             .appPresentationBackground(InvestmentDesign.surface)
             .appPresentationScrollsWithoutExpanding()
         }
-        .appSheet(item: $selectedMarketQuotesRegion) { region in
-            MarketQuotesSheet(region: region, store: store)
+        .appSheet(item: $selectedMarketQuotesScope) { scope in
+            MarketQuotesSheet(scope: scope, store: store)
                 .appPresentationDetents([.large])
                 .appPresentationCornerRadius(28)
                 .appPresentationBackground(MarketStyle.surface)
@@ -247,37 +247,58 @@ enum MarketRegion: String, CaseIterable, Identifiable {
     }
 }
 
+enum MarketQuotesScope: Hashable, Identifiable {
+    case global
+    case region(MarketRegion)
+
+    var id: String { region?.dashboardID ?? "global" }
+    var title: String { region?.rawValue ?? "全球" }
+
+    var region: MarketRegion? {
+        guard case let .region(region) = self else { return nil }
+        return region
+    }
+}
+
 private struct MarketRegionPicker: View {
     let store: MarketStore
-    @Binding var selection: MarketRegion
+    @Binding var selection: MarketQuotesScope
 
     var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 4) {
-                ForEach(MarketRegion.allCases) { region in
-                    regionButton(region)
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: 4) {
+                    scopeButton(.global, accessibilityLabel: "全球市场")
+                    ForEach(MarketRegion.allCases) { region in
+                        regionButton(region)
+                    }
                 }
             }
+            .scrollIndicators(.hidden)
+            .onChange(of: selection, initial: true) { _, scope in
+                proxy.scrollTo(scope, anchor: .center)
+            }
         }
-        .scrollIndicators(.hidden)
     }
 
     private func regionButton(_ region: MarketRegion) -> some View {
-        let isSelected = selection == region
-        let weight: Font.Weight = isSelected ? .semibold : .medium
         let quote = store.quote(symbol: region.primarySymbol)
         let overnightQuote = region == .unitedStates && quote?.tradingSession != .regular
             ? marketActiveIndexSession(store.dashboard?.indexSessions?[region.primarySymbol])
             : nil
         let movementQuote = overnightQuote ?? quote
         let status = tabStatus(for: region, quote: quote, overnightQuote: overnightQuote)
+        return scopeButton(.region(region), accessibilityLabel: "\(region.rawValue)，\(tabMovementLabel(for: movementQuote))，\(status.accessibilityLabel)")
+    }
 
+    private func scopeButton(_ scope: MarketQuotesScope, accessibilityLabel: String) -> some View {
+        let isSelected = selection == scope
         return Button {
-            selection = region
+            selection = scope
         } label: {
             VStack(spacing: 6) {
-                Text(region.rawValue)
-                    .font(.system(size: 14, weight: weight))
+                Text(scope.title)
+                    .font(.system(size: 14, weight: isSelected ? .semibold : .medium))
                     .foregroundStyle(isSelected ? InvestmentDesign.accent : .primary)
                 Capsule()
                     .fill(isSelected ? InvestmentDesign.accent : .clear)
@@ -288,10 +309,11 @@ private struct MarketRegionPicker: View {
             .background(isSelected ? InvestmentDesign.accent.opacity(0.10) : .clear, in: RoundedRectangle(cornerRadius: 12))
             .contentShape(Rectangle())
         }
-        .id(region)
+        .id(scope)
         .buttonStyle(.plain)
-        .accessibilityLabel("\(region.rawValue)，\(tabMovementLabel(for: movementQuote))，\(status.accessibilityLabel)")
+        .accessibilityLabel(accessibilityLabel)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityIdentifier("market-quotes-scope-\(scope.id)")
     }
 
     private func tabMovementTint(for quote: MarketQuote?) -> Color {
@@ -338,20 +360,20 @@ private struct MarketRegionPicker: View {
 }
 
 private struct MarketQuotesSheet: View {
-    @State private var region: MarketRegion
+    @State private var scope: MarketQuotesScope
     let store: MarketStore
     @Environment(\.dismiss) private var dismiss
     @State private var selectedDetail: MarketDetailRoute?
 
-    init(region: MarketRegion, store: MarketStore) {
-        _region = State(initialValue: region)
+    init(scope: MarketQuotesScope, store: MarketStore) {
+        _scope = State(initialValue: scope)
         self.store = store
     }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 4) {
-                MarketRegionPicker(store: store, selection: $region)
+                MarketRegionPicker(store: store, selection: $scope)
                 DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭市场行情")
             }
                 .padding(.horizontal, 12)
@@ -360,12 +382,12 @@ private struct MarketQuotesSheet: View {
                 .background(InvestmentDesign.surface)
                 .overlay(alignment: .bottom) { Divider() }
 
-            TabView(selection: $region) {
-                ForEach(MarketRegion.allCases) { pageRegion in
-                    MarketQuotesPage(region: pageRegion, store: store, isActive: region == pageRegion && selectedDetail == nil) { symbol in
+            TabView(selection: $scope) {
+                ForEach([MarketQuotesScope.global] + MarketRegion.allCases.map(MarketQuotesScope.region)) { page in
+                    MarketQuotesPage(scope: page, store: store, isActive: scope == page && selectedDetail == nil) { symbol in
                         selectedDetail = MarketDetailRoute(symbol: symbol)
                     }
-                    .tag(pageRegion)
+                    .tag(page)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
@@ -388,7 +410,7 @@ private struct MarketQuotesSheet: View {
 }
 
 private struct MarketQuotesPage: View {
-    let region: MarketRegion
+    let scope: MarketQuotesScope
     let store: MarketStore
     let isActive: Bool
     let onSelectQuote: (String) -> Void
@@ -400,16 +422,21 @@ private struct MarketQuotesPage: View {
     @State private var displayedLogoPaths: [String: String]
     @ScaledMetric(relativeTo: .body) private var indexCardWidth: CGFloat = 136
 
-    init(region: MarketRegion, store: MarketStore, isActive: Bool, onSelectQuote: @escaping (String) -> Void) {
-        self.region = region
+    init(scope: MarketQuotesScope, store: MarketStore, isActive: Bool, onSelectQuote: @escaping (String) -> Void) {
+        self.scope = scope
         self.store = store
         self.isActive = isActive
         self.onSelectQuote = onSelectQuote
         _displayedLogoPaths = State(initialValue: store.companyLogoPaths)
     }
 
+    private var region: MarketRegion? { scope.region }
+
     private var indexSymbols: [String] {
-        region == .china && chinaScope == .all ? region.allSymbols : region.symbols
+        guard let region else {
+            return ResearchHomeContent.chartSymbols + ["^KS11", "^STOXX50E", "GC1!", "BINANCE:BTCUSDT"]
+        }
+        return region == .china && chinaScope == .all ? region.allSymbols : region.symbols
     }
 
     private var indices: [MarketQuote] {
@@ -417,7 +444,8 @@ private struct MarketQuotesPage: View {
     }
 
     private var stocks: [MarketQuote] {
-        store.dashboard?.componentsByRegion[region.dashboardID] ?? []
+        guard let region else { return [] }
+        return store.dashboard?.componentsByRegion[region.dashboardID] ?? []
     }
 
     private var stocksTitle: String {
@@ -509,7 +537,7 @@ private struct MarketQuotesPage: View {
             }
             .padding(.vertical, 14)
         }
-        .accessibilityIdentifier("market-quotes-page-\(region.dashboardID)")
+        .accessibilityIdentifier("market-quotes-page-\(scope.id)")
         .refreshable { await store.refresh() }
         .scrollIndicators(.hidden)
         .background(MarketStyle.surface)
@@ -539,9 +567,10 @@ private struct MarketQuotesPage: View {
     }
 
     private var indexSectionTitle: String {
-        switch region {
-        case .commodity: "商品行情"
-        case .crypto: "加密资产"
+        switch scope {
+        case .global: "全球市场"
+        case .region(.commodity): "商品行情"
+        case .region(.crypto): "加密资产"
         default: "主要指数"
         }
     }
@@ -604,11 +633,11 @@ private struct MarketQuotesPage: View {
         VStack(spacing: 12) {
             if store.isLoading {
                 ProgressView()
-                Text("正在加载\(region.rawValue)市场行情")
+                Text("正在加载\(scope.title)市场行情")
             } else {
                 Image(systemName: "chart.line.uptrend.xyaxis")
                     .font(.title2)
-                Text(store.errorMessage == nil ? "暂无\(region.rawValue)市场行情" : "行情暂时无法加载")
+                Text(store.errorMessage == nil ? "暂无\(scope.title)市场行情" : "行情暂时无法加载")
                 if store.errorMessage != nil {
                     Button("重新加载") { Task { await store.refresh() } }
                         .buttonStyle(.bordered)
@@ -624,7 +653,7 @@ private struct MarketQuotesPage: View {
     }
 
     private var requestID: String {
-        "\(region.dashboardID):\(requestedQuotes.map(\.symbol).joined(separator: ","))"
+        "\(scope.id):\(requestedQuotes.map(\.symbol).joined(separator: ","))"
     }
 }
 
@@ -1523,7 +1552,8 @@ private struct MarketIndexDetailView: View {
                         detailChange
                     }
                 }
-                Text(quote?.marketAsOfLabel ?? "行情更新中")
+                Text(quote?.marketAsOfLabel ?? store.dashboard?.unavailableMetric(symbol: symbol)?.unavailableLabel
+                     ?? "行情更新中")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if selectedRange == .day, let quote, quote.hasActiveExtendedSessionQuote {
@@ -1547,9 +1577,8 @@ private struct MarketIndexDetailView: View {
 
     private func stockSessionHeader(_ quote: MarketQuote) -> some View {
         let extended: MarketTradingSession = quote.tradingSession == .premarket ? .premarket : .overnight
-        let sessions = StockSessionQuotes(quote: quote, chart: store.dayChartForSessionQuotes(symbol: chartSymbol),
-                                          extendedSession: extended,
-                                          isCurrent: quote.stale != true && !store.isShowingCachedSnapshot)
+        let sessions = store.stockSessionQuotes(for: quote, chartSymbol: chartSymbol, extendedSession: extended,
+                                                isCurrent: quote.stale != true && !store.isShowingCachedSnapshot)
         return VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .top, spacing: 4) {
                 ForEach(sessions.columns) { column in
