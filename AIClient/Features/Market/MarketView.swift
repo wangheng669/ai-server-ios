@@ -437,8 +437,11 @@ private struct MarketQuotesPage: View {
         return region == .china && chinaScope == .all ? region.allSymbols : region.symbols
     }
 
-    private var indices: [MarketQuote] {
-        indexSymbols.compactMap { store.quote(symbol: $0) }
+    private var indices: [MarketDashboardQuoteEntry] {
+        indexSymbols.compactMap { symbol in
+            if let quote = store.quote(symbol: symbol) { return .quote(quote) }
+            return store.dashboard?.commodityEntries.first(where: { $0.id == symbol })
+        }
     }
 
     private var stocks: [MarketDashboardQuoteEntry] {
@@ -451,7 +454,7 @@ private struct MarketQuotesPage: View {
     }
 
     private var requestedQuotes: [MarketQuote] {
-        (indices + stocks.compactMap(\.quote)).reduce(into: [MarketQuote]()) { result, quote in
+        (indices + stocks).compactMap(\.quote).reduce(into: [MarketQuote]()) { result, quote in
             guard !result.contains(where: { $0.symbol == quote.symbol }) else { return }
             result.append(quote)
         }
@@ -522,13 +525,9 @@ private struct MarketQuotesPage: View {
                                 switch entry {
                                 case let .quote(quote):
                                     quoteRow(quote)
-                                case let .unavailable(stock):
-                                    Button { onSelectQuote(stock.symbol) } label: {
-                                        MarketUnavailableStockRow(stock: stock, store: store)
-                                            .padding(.horizontal, 18)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .accessibilityIdentifier("market-quote-\(stock.symbol)")
+                                case let .unavailable(quote):
+                                    unavailableQuoteButton(quote)
+                                        .padding(.horizontal, 18)
                                 }
                                 if entry.id != stocks.last?.id {
                                     Divider().padding(.leading, 66).padding(.trailing, 18)
@@ -588,9 +587,15 @@ private struct MarketQuotesPage: View {
     private var indexOverview: some View {
         if dynamicTypeSize.isAccessibilitySize {
             VStack(spacing: 0) {
-                ForEach(indices, id: \.symbol) { quote in
-                    quoteRow(quote)
-                    if quote.symbol != indices.last?.symbol {
+                ForEach(indices) { entry in
+                    switch entry {
+                    case let .quote(quote):
+                        quoteRow(quote)
+                    case let .unavailable(quote):
+                        unavailableQuoteButton(quote)
+                            .padding(.horizontal, 18)
+                    }
+                    if entry.id != indices.last?.id {
                         Divider().padding(.horizontal, 18)
                     }
                 }
@@ -601,18 +606,33 @@ private struct MarketQuotesPage: View {
                 alignment: .leading,
                 spacing: 8
             ) {
-                ForEach(indices, id: \.symbol) { quote in
-                    Button { onSelectQuote(quote.symbol) } label: {
-                        MarketOverviewIndexCard(quote: quote, trend: store.listTrendValues(for: quote))
+                ForEach(indices) { entry in
+                    switch entry {
+                    case let .quote(quote):
+                        Button { onSelectQuote(quote.symbol) } label: {
+                            MarketOverviewIndexCard(quote: quote, trend: store.listTrendValues(for: quote))
+                        }
+                        .buttonStyle(MarketPressStyle())
+                        .accessibilityIdentifier("market-quote-\(quote.symbol)")
+                        .accessibilityHint("弹出行情详情")
+                    case let .unavailable(quote):
+                        unavailableQuoteButton(quote)
+                            .padding(.horizontal, 10)
                     }
-                    .buttonStyle(MarketPressStyle())
-                    .accessibilityIdentifier("market-quote-\(quote.symbol)")
-                    .accessibilityHint("弹出行情详情")
                 }
             }
             .padding(.horizontal, 18)
             .accessibilityIdentifier("market-quotes-indices")
         }
+    }
+
+    private func unavailableQuoteButton(_ quote: MarketDashboardQuoteEntry.Unavailable) -> some View {
+        Button { onSelectQuote(quote.symbol) } label: {
+            MarketUnavailableQuoteRow(quote: quote, store: store)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("market-quote-\(quote.symbol)")
+        .accessibilityHint("弹出行情详情")
     }
 
     private func quoteRow(_ quote: MarketQuote) -> some View {
@@ -1434,12 +1454,14 @@ private struct MarketIndexDetailView: View {
                         componentStocks
                     }
                     MarketSummary(quote: quote, isIndex: isIndex)
-                    Text(quoteSourceText)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 6)
+                    if unavailableQuote == nil {
+                        Text(quoteSourceText)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 6)
+                    }
                 }
                 .padding(.horizontal, 10)
                 .padding(.bottom, 60)
@@ -1483,7 +1505,7 @@ private struct MarketIndexDetailView: View {
                     .accessibilityHidden(true)
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text(quote?.detailPresentationName ?? CoreDescriptor(symbol: symbol).name)
+                Text(quote?.detailPresentationName ?? unavailableQuote?.presentationName ?? CoreDescriptor(symbol: symbol).name)
                     .font(.title3.weight(.bold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
@@ -1526,10 +1548,16 @@ private struct MarketIndexDetailView: View {
 
     private var instrumentSubtitle: String {
         let instrument = quote?.detailInstrumentLabel ?? CoreDescriptor(symbol: symbol).code
-        return [instrument, quote?.currency].compactMap { $0 }.joined(separator: " · ")
+        return [instrument, quote?.currency ?? unavailableQuote?.currency].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private var unavailableQuote: MarketDashboardQuoteEntry.Unavailable? {
+        guard quote == nil else { return nil }
+        return store.dashboard?.unavailableQuote(symbol: symbol)
     }
 
     private var quoteStatus: String {
+        if unavailableQuote != nil { return "报价暂缺" }
         if store.isShowingCachedSnapshot || quote?.stale == true { return "行情待更新" }
         return quote?.freshnessLabel ?? "更新中"
     }
@@ -1545,11 +1573,11 @@ private struct MarketIndexDetailView: View {
 
     private var detailHeader: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if quote == nil, let stock = store.dashboard?.unavailableStock(symbol: symbol) {
+            if let missing = unavailableQuote {
                 Text("当前报价暂缺")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                if let trade = store.lastSessionTrade(symbol: symbol, asOf: stock.quality.asOfTimestamp) {
+                if let trade = store.lastSessionTrade(symbol: symbol, asOf: missing.quality.asOfTimestamp) {
                     MarketLastSessionTradeNote(trade: trade, symbol: symbol)
                 }
             } else if let quote, showsStockSessionQuotes {
