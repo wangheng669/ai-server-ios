@@ -670,7 +670,7 @@ private struct EditorialRootView: View {
         }) { details in
             PushNotificationDetailsView(destination: details, feedModel: details.opensPost ? pageStores.loadedFeed : nil)
                 .id(details.id)
-                .presentationDragIndicator(.visible)
+                .presentationDragIndicator(.hidden)
         }
         .overlay(alignment: .topLeading) {
             if let deploymentStatus {

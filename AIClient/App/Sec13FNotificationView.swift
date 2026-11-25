@@ -129,7 +129,8 @@ struct Sec13FNotificationView: View {
         .accessibilityIdentifier("sec13f-notification-detail")
         .sheet(item: $detail) { route in
             Sec13FHoldingsListView(manager: route.manager, initialFilter: route.filter)
-                .presentationDetents([.large]).presentationDragIndicator(.visible)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
         }
         .inAppBrowserCover(item: $browser)
     }
@@ -354,7 +355,7 @@ struct Sec13FNotificationPreview: View {
                     let snapshot = try JSONDecoder().decode(Sec13FNotificationSnapshot.self, from: Data(data.utf8))
                     return PushNotificationDetails(title: "13F", body: "示例数据", links: nil, imageURL: nil, sec13f: snapshot)
                 }
-                .presentationDragIndicator(.visible)
+                .presentationDragIndicator(.hidden)
             }
     }
 }

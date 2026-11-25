@@ -247,7 +247,6 @@ private struct AppModalPresenter<Sheet: View>: UIViewControllerRepresentable {
             if let selected = options.selection, sheet.selectedDetentIdentifier != selected.identifier {
                 sheet.selectedDetentIdentifier = selected.identifier
             }
-            sheet.prefersGrabberVisible = options.showsGrabber
             if let radius = options.cornerRadius { sheet.preferredCornerRadius = radius }
             sheet.prefersScrollingExpandsWhenScrolledToEdge = !options.scrollsWithoutExpanding
         }
@@ -256,6 +255,7 @@ private struct AppModalPresenter<Sheet: View>: UIViewControllerRepresentable {
             if fullscreen { return AppFullScreenPresentationController(presentedViewController: presented, presenting: presenting) }
             let sheet = UISheetPresentationController(presentedViewController: presented, presenting: presenting)
             sheet.delegate = self
+            sheet.prefersGrabberVisible = false
             applyOptions(to: sheet)
             return sheet
         }
@@ -362,21 +362,18 @@ private struct AppModalOptions: Equatable {
     var onSelectionChange: ((AppModalDetent) -> Void)?
     var cornerRadius: CGFloat?
     var scrollsWithoutExpanding = false
-    var showsGrabber = false
     var background: Color?
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.detents == rhs.detents && lhs.selection == rhs.selection
             && lhs.cornerRadius == rhs.cornerRadius
             && lhs.scrollsWithoutExpanding == rhs.scrollsWithoutExpanding
-            && lhs.showsGrabber == rhs.showsGrabber
             && lhs.background == rhs.background
     }
     mutating func merge(_ other: Self) {
         if let value = other.detents { detents = value; selection = other.selection; onSelectionChange = other.onSelectionChange }
         if let value = other.cornerRadius { cornerRadius = value }
         scrollsWithoutExpanding = scrollsWithoutExpanding || other.scrollsWithoutExpanding
-        showsGrabber = showsGrabber || other.showsGrabber
         if let value = other.background { background = value }
     }
 }
@@ -400,9 +397,6 @@ extension View {
     }
     func appPresentationScrollsWithoutExpanding() -> some View {
         transformPreference(AppModalOptionsKey.self) { $0.scrollsWithoutExpanding = true }
-    }
-    func appPresentationDragIndicator() -> some View {
-        transformPreference(AppModalOptionsKey.self) { $0.showsGrabber = true }
     }
 }
 

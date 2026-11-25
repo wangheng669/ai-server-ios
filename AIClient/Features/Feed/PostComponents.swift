@@ -121,7 +121,6 @@ extension View {
         appPresentationDetents([.large])
             .appPresentationCornerRadius(28)
             .appPresentationScrollsWithoutExpanding()
-            .appPresentationDragIndicator()
     }
 }
 
