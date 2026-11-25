@@ -762,12 +762,14 @@ private struct EditorialRootView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 8) {
+            VStack(spacing: 0) {
+                FocusUpdateTip()
                 if selectedTab == .signal {
                     GoogleSignalFilterButton(
                         sentiment: signalSentiment,
                         showsFilters: $showsSignalFilters
                     )
+                    .padding(.bottom, 8)
                 }
 
                 // Root navigation stays visible regardless of page scrolling or detail state.
