@@ -37,7 +37,7 @@ struct MarketService: Sendable {
     }
 
     func recentDailyCloses(symbol: String) async throws -> MarketChart {
-        try await chart(symbol: symbol, interval: "1d", range: "5d", limit: 5, refresh: false)
+        try await chart(symbol: symbol, interval: "1d", range: "5d", limit: 16, refresh: false)
     }
 
     private func chart(symbol: String, interval: String, range: String, limit: Int, refresh: Bool) async throws -> MarketChart {
