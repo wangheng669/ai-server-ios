@@ -83,7 +83,6 @@ struct ResearchHomeView: View {
         return nil
     }()
 
-    private let primaryMarkets = ResearchHomeContent.primaryMarkets
     private var chartSymbols: [String] { ResearchHomeContent.chartSymbols }
     private let stockRegions: [MarketRegion] = [.unitedStates, .china, .japan, .korea, .europe]
     private var stocks: [MarketQuote] {
@@ -200,206 +199,19 @@ struct ResearchHomeView: View {
     }
 
     private var globalMarkets: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 6) {
             sectionHeading(
                 "全球市场", trailing: "全部行情", prominent: true,
                 status: store.isShowingCachedSnapshot ? "缓存行情" : nil
             ) {
                 onOpenMarketQuotes(.global)
             }
-            let layout = dynamicTypeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(spacing: 0))
-                : AnyLayout(HStackLayout(alignment: .top, spacing: 0))
-            layout {
-                ForEach(primaryMarkets, id: \.1) { title, symbol in
-                    marketIndex(title: title, symbol: symbol)
-                        .overlay(alignment: dynamicTypeSize.isAccessibilitySize ? .top : .leading) {
-                            if symbol != primaryMarkets.first?.1 {
-                                if dynamicTypeSize.isAccessibilitySize {
-                                    ResearchStyle.divider.frame(height: 1).padding(.horizontal, 10)
-                                } else {
-                                    ResearchStyle.divider.frame(width: 1).padding(.vertical, 11)
-                                }
-                            }
-                        }
-                }
-            }
-            .background(ResearchStyle.marketSurface, in: RoundedRectangle(cornerRadius: 15))
-
-            layout {
-                ticker("欧洲 STOXX 50", symbol: "^STOXX50E", showsPrice: false)
-                ticker("黄金", symbol: "GC1!", showsPrice: true)
-                ticker("比特币", symbol: "BINANCE:BTCUSDT", showsPrice: true)
-            }
-            .padding(.vertical, 5)
-            ResearchStyle.divider.frame(height: 1)
-            marketIndicators(layout)
+            ResearchGlobalMarketSnapshot(
+                store: store,
+                onOpenQuote: onOpenMarketDetail,
+                onOpenSentiment: { presentedTopic = .sentiment }
+            )
         }
-    }
-
-    private func marketIndex(title: String, symbol: String) -> some View {
-        let quote = store.quote(symbol: symbol)
-        let color = ResearchStyle.tint(quote)
-        let trend = store.listTrendValues(for: quote)
-        return Button { onOpenMarketDetail(symbol) } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.primary)
-                Text(price(quote))
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.primary)
-                Text(quote?.marketDisplayFormattedPercent ?? "—")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(color)
-                ResearchSparkline(values: trend, color: color, emptyLabel: trendStatus(symbol: symbol))
-                    .equatable()
-                    .frame(height: 22)
-                    .padding(.top, 2)
-                Text(quote?.researchStatus ?? "暂无行情")
-                    .font(.caption2)
-                    .foregroundStyle(ResearchStyle.muted)
-            }
-            .monospacedDigit()
-            .lineLimit(1)
-            .minimumScaleFactor(0.74)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 11)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("research-market-\(symbol)")
-    }
-
-    private func ticker(_ title: String, symbol: String, showsPrice: Bool) -> some View {
-        let quote = store.quote(symbol: symbol)
-        return Button { onOpenMarketDetail(symbol) } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(ResearchStyle.muted)
-                if showsPrice {
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 4) {
-                            Text(price(quote)).foregroundStyle(.primary)
-                            tickerChange(quote)
-                        }
-                        .fixedSize(horizontal: true, vertical: false)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(price(quote)).foregroundStyle(.primary)
-                            tickerChange(quote)
-                        }
-                    }
-                    .font(.caption2.weight(.semibold))
-                } else {
-                    tickerChange(quote)
-                        .font(.caption2.weight(.semibold))
-                }
-                if showsPrice, let unit = quote?.priceUnit ?? quote?.currency {
-                    Text(unit)
-                        .font(.caption2)
-                        .foregroundStyle(ResearchStyle.muted)
-                }
-                Text(quote?.researchStatus ?? "暂无行情")
-                    .font(.caption2)
-                    .foregroundStyle(ResearchStyle.muted)
-                    .lineLimit(2)
-            }
-            .monospacedDigit()
-            .lineLimit(1)
-            .minimumScaleFactor(0.74)
-            .padding(.horizontal, 10)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("research-market-\(symbol)")
-    }
-
-    private func tickerChange(_ quote: MarketQuote?) -> some View {
-        Text(quote?.marketDisplayFormattedPercent ?? "—")
-            .foregroundStyle(ResearchStyle.tint(quote))
-    }
-
-    private func marketIndicators(_ layout: AnyLayout) -> some View {
-        layout {
-            metric("VIX", symbol: "^VIX", yield: false)
-            metric("美债10Y", symbol: "^TNX", yield: true)
-            Button { presentedTopic = .sentiment } label: {
-                indicator("CNN 市场情绪") {
-                    HStack(alignment: .firstTextBaseline, spacing: 3) {
-                        Text(sentiment.map { String(format: "%.1f", $0.score) } ?? "—")
-                        Text("/100").font(.caption).foregroundStyle(ResearchStyle.muted)
-                    }
-                } detail: {
-                    Text(sentiment?.ratingZh ?? "暂无数据")
-                        .foregroundStyle(ResearchStyle.muted)
-                    if let date = marketISODate(sentiment?.updatedAt) {
-                        Text(marketShortTimestamp(Int64(date.timeIntervalSince1970 * 1000)))
-                            .foregroundStyle(ResearchStyle.muted)
-                    }
-                    if sentiment?.stale == true {
-                        Text("待更新").foregroundStyle(ResearchStyle.muted)
-                    }
-                }
-            }
-            .buttonStyle(.plain)
-            .accessibilityElement(children: .combine)
-            .accessibilityIdentifier("research-sentiment")
-        }
-        .padding(.top, 9)
-    }
-
-    private var sentiment: MarketSentiment? {
-        guard let value = store.dashboard?.sentiment, value.available != false else { return nil }
-        return value
-    }
-
-    private func metric(_ title: String, symbol: String, yield: Bool) -> some View {
-        let quote = store.quote(symbol: symbol)
-        let change = quote?.marketDisplayChangeValue
-        return Button { onOpenMarketDetail(symbol) } label: {
-            indicator(title) {
-                Text(quote.map { String(format: yield ? "%.2f%%" : "%.2f", $0.marketDisplayPrice) } ?? "—")
-            } detail: {
-                Text(change.map { String(format: yield ? "%+.0f bp" : "%+.2f 点", $0 * (yield ? 100 : 1)) } ?? "—")
-                    .foregroundStyle(ResearchStyle.tint(quote))
-                if let quality = store.dashboard?.unavailableMetric(symbol: symbol), quote == nil {
-                    Text(quality.unavailableLabel)
-                        .foregroundStyle(ResearchStyle.muted)
-                        .lineLimit(2)
-                } else {
-                    Text(quote?.researchStatus ?? "暂无行情").foregroundStyle(ResearchStyle.muted)
-                    if let timestamp = quote?.marketAsOfTimestamp {
-                        Text(marketShortTimestamp(timestamp)).foregroundStyle(ResearchStyle.muted)
-                    }
-                }
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("research-market-\(symbol)")
-    }
-
-    private func indicator<Value: View, Detail: View>(
-        _ title: String,
-        @ViewBuilder value: () -> Value,
-        @ViewBuilder detail: () -> Detail
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title).font(.caption.weight(.medium)).foregroundStyle(ResearchStyle.muted)
-            value().font(.title3.weight(.semibold)).foregroundStyle(.primary)
-            detail().font(.caption2.weight(.medium))
-        }
-        .monospacedDigit()
-        .lineLimit(1)
-        .minimumScaleFactor(0.74)
-        .padding(.horizontal, 10)
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .contentShape(Rectangle())
     }
 
     private var industries: some View {
@@ -511,15 +323,250 @@ struct ResearchHomeView: View {
             .accessibilityIdentifier("research-all-\(title)")
         }
     }
+}
+
+private struct ResearchGlobalMarketSnapshot: View {
+    let store: MarketStore
+    let onOpenQuote: (String) -> Void
+    let onOpenSentiment: () -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .caption) private var changeColumnWidth: CGFloat = 66
+    @ScaledMetric(relativeTo: .caption2) private var sparklineHeight: CGFloat = 30
+
+    private var usesSingleColumn: Bool { dynamicTypeSize >= .xxxLarge }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            primaryIndices
+
+            panel {
+                ticker("欧洲 STOXX 50", symbol: "^STOXX50E", showsPrice: false)
+                rowDivider
+                ticker("黄金", symbol: "GC1!", showsPrice: true)
+                rowDivider
+                ticker("比特币", symbol: "BINANCE:BTCUSDT", showsPrice: true)
+            }
+
+            panel {
+                metric("VIX", symbol: "^VIX", isYield: false)
+                rowDivider
+                metric("美债 10 年期", symbol: "^TNX", isYield: true)
+                rowDivider
+                sentimentRow
+            }
+        }
+    }
+
+    private var primaryIndices: some View {
+        let layout = usesSingleColumn
+            ? AnyLayout(VStackLayout(spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 8))
+
+        return layout {
+            ForEach(ResearchHomeContent.primaryMarkets, id: \.1) { title, symbol in
+                indexCard(title, symbol: symbol)
+            }
+        }
+    }
+
+    private func indexCard(_ title: String, symbol: String) -> some View {
+        let quote = store.quote(symbol: symbol)
+        let value = price(quote)
+        let change = quote?.marketDisplayFormattedPercent ?? "—"
+        let tint = ResearchStyle.tint(quote)
+        let shape = RoundedRectangle(cornerRadius: 14)
+        let status = Text(quoteStatus(quote, symbol: symbol))
+            .font(.caption2)
+            .foregroundStyle(ResearchStyle.muted)
+
+        return Button { onOpenQuote(symbol) } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                    .font(.footnote.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Text(value)
+                    .font(.title3.weight(.bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .accessibilityLabel("价格 \(value)")
+                changeBadge(change, tint: tint)
+                    .accessibilityLabel("涨跌幅 \(change)")
+                ResearchSparkline(
+                    values: store.listTrendValues(for: quote),
+                    color: tint,
+                    emptyLabel: trendStatus(symbol: symbol, hasQuote: quote != nil)
+                )
+                .equatable()
+                .frame(height: sparklineHeight)
+                if usesSingleColumn {
+                    status.fixedSize(horizontal: false, vertical: true)
+                } else {
+                    status.lineLimit(2, reservesSpace: true)
+                }
+            }
+            .monospacedDigit()
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(ResearchStyle.marketSurface, in: shape)
+            .overlay { shape.strokeBorder(ResearchStyle.divider).allowsHitTesting(false) }
+            .contentShape(shape)
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("research-market-\(symbol)")
+    }
+
+    private func ticker(_ title: String, symbol: String, showsPrice: Bool) -> some View {
+        let quote = store.quote(symbol: symbol)
+        let change = quote?.marketDisplayFormattedPercent ?? "—"
+        return snapshotRow(
+            title, status: quoteStatus(quote, symbol: symbol),
+            identifier: "research-market-\(symbol)", action: { onOpenQuote(symbol) }
+        ) {
+            if showsPrice {
+                reading(price(quote), unit: quote?.priceUnit ?? quote?.currency)
+            }
+            changeBadge(change, tint: ResearchStyle.tint(quote))
+                .frame(width: changeColumnWidth, alignment: .trailing)
+                .accessibilityLabel("涨跌幅 \(change)")
+        }
+    }
+
+    private func metric(_ title: String, symbol: String, isYield: Bool) -> some View {
+        let quote = store.quote(symbol: symbol)
+        let status = quoteStatus(quote, symbol: symbol)
+        let timestamp = quote?.marketAsOfTimestamp.map(marketShortTimestamp)
+        let value = quote.map { String(format: isYield ? "%.2f%%" : "%.2f", $0.marketDisplayPrice) } ?? "—"
+        let change = quote?.marketDisplayChangeValue.map {
+            isYield ? String(format: "%+.0f bp", $0 * 100) : String(format: "%+.2f 点", $0)
+        } ?? "—"
+
+        return snapshotRow(
+            title, status: [status, timestamp].compactMap { $0 }.joined(separator: " · "),
+            identifier: "research-market-\(symbol)", action: { onOpenQuote(symbol) }
+        ) {
+            reading(value)
+            changeBadge(change, tint: ResearchStyle.tint(quote))
+                .frame(width: changeColumnWidth, alignment: .trailing)
+                .accessibilityLabel("变动 \(change)")
+        }
+    }
+
+    private var sentimentRow: some View {
+        let sentiment = store.dashboard?.sentiment.flatMap { $0.available == false ? nil : $0 }
+        let timestamp = marketISODate(sentiment?.updatedAt).map {
+            marketShortTimestamp(Int64($0.timeIntervalSince1970 * 1000))
+        }
+        let status = [sentiment?.ratingZh ?? "暂无数据", timestamp, sentiment?.stale == true ? "待更新" : nil]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+
+        return snapshotRow(
+            "CNN 市场情绪", status: status,
+            identifier: "research-sentiment", action: onOpenSentiment
+        ) {
+            VStack(alignment: .trailing, spacing: 5) {
+                Text(sentiment.map { String(format: "%.1f / 100", $0.score) } ?? "—")
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+                    .fixedSize(horizontal: true, vertical: false)
+                if let score = sentiment?.score, (0...100).contains(score) {
+                    ProgressView(value: score, total: 100)
+                        .tint(ResearchStyle.accent)
+                        .frame(width: 72)
+                        .accessibilityHidden(true)
+                }
+            }
+        }
+        .background(ResearchStyle.marketSurface)
+    }
+
+    private func snapshotRow<Readings: View>(
+        _ title: String,
+        status: String,
+        identifier: String,
+        action: @escaping () -> Void,
+        @ViewBuilder readings: () -> Readings
+    ) -> some View {
+        let layout = usesSingleColumn
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 10))
+
+        return Button(action: action) {
+            layout {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                    Text(status)
+                        .font(.caption2)
+                        .foregroundStyle(ResearchStyle.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                HStack(spacing: 6, content: readings)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(minHeight: 48)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(identifier)
+    }
+
+    private func reading(_ value: String, unit: String? = nil) -> some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
+            if let unit {
+                Text(unit)
+                    .font(.caption2)
+                    .foregroundStyle(ResearchStyle.muted)
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private func changeBadge(_ value: String, tint: Color) -> some View {
+        Text(value)
+            .font(.caption.weight(.semibold))
+            .monospacedDigit()
+            .foregroundStyle(tint)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(tint.opacity(0.09), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func panel<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 14)
+        return VStack(spacing: 0, content: content)
+            .clipShape(shape)
+            .overlay { shape.strokeBorder(ResearchStyle.divider).allowsHitTesting(false) }
+    }
+
+    private var rowDivider: some View {
+        ResearchStyle.divider.frame(height: 0.5).padding(.horizontal, 12)
+    }
 
     private func price(_ quote: MarketQuote?) -> String {
         guard let quote else { return "—" }
         return quote.marketDisplayPrice.formatted(.number.precision(.fractionLength(2)))
     }
-    private func trendStatus(symbol: String) -> String {
+
+    private func quoteStatus(_ quote: MarketQuote?, symbol: String) -> String {
+        quote?.researchStatus ?? store.dashboard?.unavailableQuote(symbol: symbol)?.quality.unavailableLabel ?? "暂无行情"
+    }
+
+    private func trendStatus(symbol: String, hasQuote: Bool) -> String {
         if store.isLoadingChart(symbol: symbol, range: .day) { return "走势加载中" }
         if store.chartError(symbol: symbol, range: .day) != nil { return "走势加载失败" }
-        return store.chartSnapshot(symbol: symbol, range: .day) == nil && store.quote(symbol: symbol) != nil
+        return store.chartSnapshot(symbol: symbol, range: .day) == nil && hasQuote
             ? "走势待加载" : "暂无走势"
     }
 }
@@ -881,22 +928,28 @@ private struct ResearchSparkline: View, Equatable {
         GeometryReader { proxy in
             let points = normalizedPoints(in: proxy.size)
             if let first = points.first, let last = points.last {
-                Path { path in
-                    path.addLines(points)
-                    path.addLine(to: CGPoint(x: last.x, y: proxy.size.height))
-                    path.addLine(to: CGPoint(x: first.x, y: proxy.size.height))
-                    path.closeSubpath()
+                ZStack {
+                    Path { path in
+                        path.addLines(points)
+                        path.addLine(to: CGPoint(x: last.x, y: proxy.size.height))
+                        path.addLine(to: CGPoint(x: first.x, y: proxy.size.height))
+                        path.closeSubpath()
+                    }
+                    .fill(LinearGradient(colors: [color.opacity(0.18), color.opacity(0.02)],
+                                         startPoint: .top, endPoint: .bottom))
+                    Path { $0.addLines(points) }
+                        .stroke(color, style: StrokeStyle(lineWidth: 1.3, lineCap: .round, lineJoin: .round))
                 }
-                .fill(LinearGradient(colors: [color.opacity(0.18), color.opacity(0.02)],
-                                     startPoint: .top, endPoint: .bottom))
-                Path { $0.addLines(points) }
-                    .stroke(color, style: StrokeStyle(lineWidth: 1.3, lineCap: .round, lineJoin: .round))
+                .accessibilityHidden(true)
             } else {
-                Text(emptyLabel).font(.caption2).foregroundStyle(ResearchStyle.muted)
+                Text(emptyLabel)
+                    .font(.caption2)
+                    .foregroundStyle(ResearchStyle.muted)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             }
         }
-        .accessibilityHidden(true)
     }
 
     private func normalizedPoints(in size: CGSize) -> [CGPoint] {
