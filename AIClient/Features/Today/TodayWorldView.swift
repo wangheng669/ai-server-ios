@@ -359,10 +359,9 @@ struct TodayWorldView: View {
     @State private var waitingForRechargeReturn = false
     @State private var showsStatus = false
     @State private var showsTools = false
-    @State private var showsDirectory = false
     @State private var statusHeight: CGFloat = 0
     @State private var cardSelection: (date: String, index: Int)?
-    @State private var cardNavigation: TodayBriefNavigation?
+    @State private var groupJump: TodayBriefGroupJump?
 
     init(store: TodayWorldStore, marketStore: MarketStore) {
         _store = StateObject(wrappedValue: store)
@@ -439,8 +438,7 @@ struct TodayWorldView: View {
                             ),
                             isLoadingSources: store.isLoading || store.isLoadingSources,
                             retryReport: { await store.loadReport(force: true) },
-                            navigation: cardNavigation,
-                            showsDirectory: $showsDirectory,
+                            groupJump: groupJump,
                             selectedIndex: selectedCardIndex(for: brief.date)
                         )
                         .id(brief.date)
@@ -456,29 +454,21 @@ struct TodayWorldView: View {
         .safeAreaInset(edge: .bottom, spacing: 4) {
             if let brief = store.brief, brief.sectionShortcuts.count > 1 {
                 TodayBriefGroupBar(brief: brief, selectedIndex: selectedCardIndex(for: brief.date).wrappedValue) { title in
-                    cardNavigation = TodayBriefNavigation(.group(title))
+                    groupJump = TodayBriefGroupJump(title: title)
                 }
             }
         }
         .padding(.bottom, bottomChromeHeight + 8)
         .onChange(of: store.brief?.date) { _, date in
             if cardSelection?.date != date { cardSelection = nil }
-            showsDirectory = false
-        }
-        .onChange(of: store.brief?.cardCount) { _, count in
-            if count == 0 { showsDirectory = false }
         }
         .onChange(of: showsTools) { _, open in
-            if open {
-                showsStatus = false
-                showsDirectory = false
-            }
+            if open { showsStatus = false }
         }
         .onChange(of: rootTabIsActive) { _, active in
             if !active {
                 showsTools = false
                 showsStatus = false
-                showsDirectory = false
             }
         }
     }
@@ -506,46 +496,9 @@ struct TodayWorldView: View {
         if let editionNotice {
             TodayEditionStatusButton(notice: editionNotice, isOpen: showsStatus) {
                 showsTools = false
-                showsDirectory = false
                 showsStatus.toggle()
             }
         }
-        if let brief = store.brief, brief.cardCount > 0 {
-            readingPosition(
-                selection: min(selectedCardIndex(for: brief.date).wrappedValue, brief.cardCount - 1),
-                count: brief.cardCount
-            )
-        }
-    }
-
-    private func readingPosition(selection: Int, count: Int) -> some View {
-        Button {
-            showsTools = false
-            showsStatus = false
-            showsDirectory.toggle()
-        } label: {
-            HStack(spacing: 5) {
-                Text("\(selection + 1) / \(count)").monospacedDigit()
-                Image(systemName: "list.bullet").accessibilityHidden(true)
-            }
-            .font(.caption.weight(.semibold))
-            .fixedSize()
-            .padding(.horizontal, 8)
-            .frame(minWidth: 44, minHeight: 44)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(TodayBriefStyle.accent)
-        .accessibilityLabel("本期目录")
-        .accessibilityValue("第 \(selection + 1) 张，共 \(count) 张")
-        .accessibilityAdjustableAction { direction in
-            switch direction {
-            case .increment: cardNavigation = TodayBriefNavigation(.step(1))
-            case .decrement: cardNavigation = TodayBriefNavigation(.step(-1))
-            @unknown default: break
-            }
-        }
-        .accessibilityIdentifier("today-card-position")
     }
 
     private var emptyReportView: some View {
