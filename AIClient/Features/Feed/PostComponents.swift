@@ -133,16 +133,10 @@ extension View {
         }
     }
 
-    @ViewBuilder
-    func readingSheetPresentation(allowsUserExpansion: Bool = false) -> some View {
-        if allowsUserExpansion {
-            appPresentationDetents([.medium, .large])
-                .appPresentationCornerRadius(28)
-        } else {
-            appPresentationDetents([.large])
-                .appPresentationCornerRadius(28)
-                .appPresentationScrollsWithoutExpanding()
-        }
+    func readingSheetPresentation() -> some View {
+        appPresentationDetents([.large])
+            .appPresentationCornerRadius(28)
+            .appPresentationScrollsWithoutExpanding()
     }
 
     func measureReadingSheetContent(when isReady: Bool, additionalHeight: CGFloat = 0) -> some View {
