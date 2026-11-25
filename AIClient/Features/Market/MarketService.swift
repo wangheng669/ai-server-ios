@@ -32,6 +32,11 @@ struct MarketService: Sendable {
         return try await request(url, as: MarketDashboardResponse.self, bypassCache: true).data
     }
 
+    func ashareIndustryQuotes() async throws -> MarketAShareIndustryQuotes {
+        let url = baseURL.appending(path: "api/ios/v1/market/ashare-industry-quotes")
+        return try await request(url, as: MarketAShareIndustryQuotesResponse.self, bypassCache: true).data
+    }
+
     func chart(symbol: String, range: MarketRange, refresh: Bool = false) async throws -> MarketChart {
         try await chart(symbol: symbol, interval: range.apiInterval, range: range.apiRange, limit: range.apiLimit, refresh: refresh)
     }

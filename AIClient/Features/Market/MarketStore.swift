@@ -7,6 +7,11 @@ final class MarketStore {
     private static let realtimeUIFlushInterval = Duration.milliseconds(750)
 
     private(set) var dashboard: MarketDashboard?
+    private(set) var ashareIndustryQuotes: MarketAShareIndustryQuotes?
+    private(set) var industryQuotesUnavailable = false
+    private(set) var isRefreshingIndustryQuotes = false
+    @ObservationIgnored private var industryQuoteLoadTask: Task<Void, Never>?
+    @ObservationIgnored private var industryQuoteLoadedAt: Date?
     private var chartSnapshots: [ChartKey: MarketChartSnapshot] = [:]
     private var chartLoadTasks: [ChartKey: Task<Void, Never>] = [:]
     private(set) var chartErrors: [ChartKey: String] = [:]
@@ -77,6 +82,38 @@ final class MarketStore {
 
     func refresh(force: Bool = true) async {
         await startDashboardRefresh(force: force)?.value
+    }
+
+    func refreshAShareIndustryQuotes(force: Bool = false) async {
+        guard !Task.isCancelled else { return }
+        if let industryQuoteLoadTask {
+            await industryQuoteLoadTask.value
+            return
+        }
+        if !force, let industryQuoteLoadedAt, Date().timeIntervalSince(industryQuoteLoadedAt) < 45 {
+            return
+        }
+
+        isRefreshingIndustryQuotes = true
+        let task = Task {
+            defer {
+                isRefreshingIndustryQuotes = false
+                industryQuoteLoadTask = nil
+            }
+            do {
+                ashareIndustryQuotes = try await service.ashareIndustryQuotes()
+                industryQuoteLoadedAt = Date()
+                industryQuotesUnavailable = false
+            } catch is CancellationError {
+                return
+            } catch {
+                ashareIndustryQuotes = nil
+                industryQuoteLoadedAt = nil
+                industryQuotesUnavailable = true
+            }
+        }
+        industryQuoteLoadTask = task
+        await task.value
     }
 
     func preloadDashboard() async {
