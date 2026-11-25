@@ -1936,8 +1936,8 @@ struct EmbeddedWebPage: View {
             Button("退出登录", role: .destructive) { model.logoutWeibo() }
             Button("取消", role: .cancel) {}
         } message: {
-            if let displayName = model.weiboDisplayName {
-                Text("当前账号：\(displayName)")
+            if let account = model.weiboAccount {
+                Text("当前账号：\(account.displayName)")
             }
         }
     }
@@ -1967,28 +1967,9 @@ struct EmbeddedWebPage: View {
     }
 
     @ViewBuilder private var weiboAccountButtonLabel: some View {
-        if let avatarURL = model.weiboAvatarURL {
-            AvatarView(
-                url: avatarURL,
-                name: model.weiboDisplayName ?? "微博",
-                size: 30,
-                placeholderSymbol: model.isAuthenticating ? "checkmark.circle.fill" : "person.crop.circle"
-            )
-            .overlay { Circle().stroke(.quaternary, lineWidth: 0.5) }
-        } else if let initial = model.weiboAccountInitial {
-            Text(initial)
-                .font(.system(size: 14, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .frame(width: 30, height: 30)
-                .background(
-                    LinearGradient(
-                        colors: [Color(red: 1, green: 0.35, blue: 0.18), Color(red: 0.88, green: 0.08, blue: 0.16)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    in: Circle()
-                )
-                .overlay { Circle().stroke(.white.opacity(0.35), lineWidth: 0.5) }
+        if let account = model.weiboAccount {
+            AvatarView(url: account.avatarURL, name: account.displayName, size: 30, placeholderSymbol: "person.crop.circle")
+                .overlay { Circle().stroke(.quaternary, lineWidth: 0.5) }
         } else if model.isWeiboLoggedIn {
             Text("微")
                 .font(.system(size: 13, weight: .bold, design: .rounded))
@@ -2011,15 +1992,12 @@ private final class EmbeddedWebViewModel: ObservableObject {
     @Published var isAuthenticating = false
     @Published var isWeiboLoggedIn = false
     @Published var requiresWeiboAuthentication = false
-    @Published var weiboAvatarURL: URL? = WeiboSessionCookieStore.storedAvatarURL
-    @Published var weiboDisplayName: String? = WeiboSessionCookieStore.storedDisplayName
-    var weiboAccountInitial: String? {
-        weiboDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines).first.map(String.init)?.uppercased()
-    }
+    @Published private(set) var weiboAccount: WeiboAccountProfile?
     weak var webView: WKWebView?
     var retryLoad: (() -> Void)?
     private var returnURL: URL?
-    private var isFetchingAvatar = false
+    private var weiboSessionCookies: Set<StoredWebCookie> = []
+    private var weiboAccountTask: Task<Void, Never>?
     private var isLoggingOut = false
 
     func reload() {
@@ -2034,9 +2012,10 @@ private final class EmbeddedWebViewModel: ObservableObject {
     }
 
     func beginWeiboLogin() {
-        guard let webView else { return }
+        guard let webView, !isLoggingOut else { return }
         WeiboSessionCookieStore.allowPersistence()
-        isLoggingOut = false
+        clearWeiboAccount()
+        isWeiboLoggedIn = false
         if let current = webView.url, !isWeiboLoginURL(current) { rememberReturnURL(current) }
         isAuthenticating = true
         requiresWeiboAuthentication = false
@@ -2044,7 +2023,7 @@ private final class EmbeddedWebViewModel: ObservableObject {
         components.queryItems = [
             URLQueryItem(name: "entry", value: "wapsso"),
             URLQueryItem(name: "source", value: "wapssowb"),
-            URLQueryItem(name: "url", value: returnURL?.absoluteString ?? "https://m.weibo.cn/")
+            URLQueryItem(name: "url", value: WeiboAccountAPI.accountPage.absoluteString)
         ]
         webView.load(URLRequest(url: components.url!))
     }
@@ -2055,27 +2034,49 @@ private final class EmbeddedWebViewModel: ObservableObject {
         let destination = returnURL ?? URL(string: "https://s.weibo.com/top/summary")!
         returnURL = nil
         if let cookieStore = webView?.configuration.websiteDataStore.httpCookieStore {
-            refreshWeiboSession(from: cookieStore, persist: true)
+            refreshWeiboSession(from: cookieStore)
         }
         webView?.load(URLRequest(url: destination))
     }
 
-    func refreshWeiboSession(from cookieStore: WKHTTPCookieStore, persist: Bool = false) {
-        let isLoggingOutSnapshot = isLoggingOut
-        cookieStore.getAllCookies { [weak self] cookies in
-            let isLoggedIn = !isLoggingOutSnapshot &&
-                WeiboEmbeddedPagePolicy.containsAuthenticatedSession(in: cookies)
-            let shouldPersist = persist && WeiboEmbeddedPagePolicy.shouldPersistSession(
-                cookies: cookies,
-                isLoggingOut: isLoggingOutSnapshot
-            )
-            Task { @MainActor in
-                self?.isWeiboLoggedIn = isLoggedIn
-                if shouldPersist {
-                    WeiboSessionCookieStore.store(cookies: cookies)
-                }
+    func refreshWeiboSession(from cookieStore: WKHTTPCookieStore) {
+        let completesLogin = isAuthenticating && WeiboAccountAPI.isAccountPage(webView?.url)
+        guard !isLoggingOut, !isAuthenticating || completesLogin else { return }
+        weiboAccountTask?.cancel()
+        weiboAccountTask = Task { [weak self] in
+            let cookies = await cookieStore.allCookies()
+            guard let self, !Task.isCancelled else { return }
+            let sessionCookies = Set(WeiboEmbeddedPagePolicy.authenticationCookies(in: cookies).map(StoredWebCookie.init(cookie:)))
+            if sessionCookies != weiboSessionCookies {
+                weiboSessionCookies = sessionCookies
+                weiboAccount = nil
+            }
+            let hasSession = !sessionCookies.isEmpty
+            if isWeiboLoggedIn != hasSession { isWeiboLoggedIn = hasSession }
+            guard hasSession else { return }
+            WeiboSessionCookieStore.store(cookies: cookies)
+            guard weiboAccount == nil else { return }
+
+            // WebKit can issue several cookie notifications for a single login.
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled,
+                  let profile = await WeiboAccountAPI.currentProfile(cookies: cookies),
+                  !Task.isCancelled else { return }
+            weiboAccount = profile
+            if completesLogin, WeiboAccountAPI.isAccountPage(webView?.url) {
+                finishWeiboLogin()
             }
         }
+    }
+
+    func stopWeiboAccountRefresh() {
+        weiboAccountTask?.cancel()
+    }
+
+    private func clearWeiboAccount() {
+        stopWeiboAccountRefresh()
+        weiboSessionCookies.removeAll()
+        weiboAccount = nil
     }
 
     func logoutWeibo() {
@@ -2084,8 +2085,7 @@ private final class EmbeddedWebViewModel: ObservableObject {
         isLoggingOut = true
         isWeiboLoggedIn = false
         requiresWeiboAuthentication = false
-        weiboAvatarURL = nil
-        weiboDisplayName = nil
+        clearWeiboAccount()
         returnURL = nil
         WeiboSessionCookieStore.clear()
 
@@ -2106,92 +2106,6 @@ private final class EmbeddedWebViewModel: ObservableObject {
                 webView?.reload()
             }
         }
-    }
-
-    func captureAccountAvatar(from webView: WKWebView) {
-        let script = #"""
-        (() => {
-          const configured = window.$CONFIG?.avatar_large || window.$CONFIG?.avatar || null;
-          const displayName = window.$CONFIG?.screen_name || window.$CONFIG?.nick || null;
-          if (configured || displayName) return { avatar: configured, displayName };
-          const selectors = [
-            'header img[class*="avatar"]',
-            'nav img[class*="avatar"]',
-            '[class*="user"] img[class*="avatar"]',
-            'img[class*="Avatar"]'
-          ];
-          for (const selector of selectors) {
-            const image = document.querySelector(selector);
-            if (image?.src) return { avatar: image.src, displayName };
-          }
-          return null;
-        })();
-        """#
-        webView.evaluateJavaScript(script) { [weak self] result, _ in
-            guard let profile = result as? [String: Any] else { return }
-            Task { @MainActor in
-                if let name = profile["displayName"] as? String, !name.isEmpty {
-                    self?.weiboDisplayName = name
-                    self?.isWeiboLoggedIn = true
-                    WeiboSessionCookieStore.store(displayName: name)
-                }
-                if let raw = profile["avatar"] as? String,
-                   !raw.localizedCaseInsensitiveContains("default_avatar"),
-                   let url = URL(string: raw) {
-                    self?.weiboAvatarURL = url
-                    WeiboSessionCookieStore.store(avatarURL: url)
-                }
-            }
-        }
-    }
-
-    func fetchAccountAvatar(from cookieStore: WKHTTPCookieStore) {
-        guard weiboAvatarURL == nil, !isFetchingAvatar else { return }
-        isFetchingAvatar = true
-        Task {
-            let cookies: [HTTPCookie] = await withCheckedContinuation { continuation in
-                cookieStore.getAllCookies { continuation.resume(returning: $0) }
-            }
-            let configuration = URLSessionConfiguration.ephemeral
-            let cookieStorage = HTTPCookieStorage()
-            cookies.forEach(cookieStorage.setCookie)
-            configuration.httpCookieStorage = cookieStorage
-            configuration.httpShouldSetCookies = true
-            let session = URLSession(configuration: configuration)
-            defer { isFetchingAvatar = false }
-
-            var configRequest = URLRequest(url: URL(string: "https://m.weibo.cn/api/config")!)
-            configureWeiboAccountRequest(&configRequest)
-            guard let (configData, _) = try? await session.data(for: configRequest),
-                  let uid = WeiboAccountAPIParser.accountUID(from: configData) else { return }
-
-            var components = URLComponents(string: "https://m.weibo.cn/api/container/getIndex")!
-            components.queryItems = [
-                URLQueryItem(name: "type", value: "uid"),
-                URLQueryItem(name: "value", value: uid)
-            ]
-            guard let profileURL = components.url else { return }
-            var profileRequest = URLRequest(url: profileURL)
-            configureWeiboAccountRequest(&profileRequest)
-            guard let (profileData, _) = try? await session.data(for: profileRequest),
-                  let profile = WeiboAccountAPIParser.profile(from: profileData) else { return }
-
-            if let displayName = profile.displayName {
-                weiboDisplayName = displayName
-                WeiboSessionCookieStore.store(displayName: displayName)
-            }
-            weiboAvatarURL = profile.avatarURL
-            WeiboSessionCookieStore.store(avatarURL: profile.avatarURL)
-        }
-    }
-
-    private func configureWeiboAccountRequest(_ request: inout URLRequest) {
-        request.setValue(
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148",
-            forHTTPHeaderField: "User-Agent"
-        )
-        request.setValue("https://m.weibo.cn/", forHTTPHeaderField: "Referer")
-        request.setValue("XMLHttpRequest", forHTTPHeaderField: "X-Requested-With")
     }
 }
 
@@ -2215,7 +2129,7 @@ private struct EmbeddedWebView: UIViewRepresentable {
         // toolbar. Automatic UIKit adjustment adds the same top inset a second
         // time on some Weibo documents, leaving an empty strip above the feed.
         webView.scrollView.contentInsetAdjustmentBehavior = Self.isWeiboURL(url) ? .never : .automatic
-        context.coordinator.observe(webView, observesWeiboSession: Self.isWeiboURL(url))
+        context.coordinator.observeProgress(webView)
         model.webView = webView
         model.retryLoad = { [weak coordinator = context.coordinator, weak webView] in
             guard let webView else { return }
@@ -2443,18 +2357,12 @@ private struct EmbeddedWebView: UIViewRepresentable {
             self.model = model
         }
 
-        func observe(_ webView: WKWebView, observesWeiboSession: Bool) {
+        func observeProgress(_ webView: WKWebView) {
             progressObservation = webView.observe(\.estimatedProgress, options: [.initial, .new]) { [weak model] webView, _ in
                 Task { @MainActor in
                     let progress = webView.estimatedProgress
                     if model?.estimatedProgress != progress { model?.estimatedProgress = progress }
                 }
-            }
-            if observesWeiboSession {
-                let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
-                observedWeiboCookieStore = cookieStore
-                cookieStore.add(self)
-                model.refreshWeiboSession(from: cookieStore, persist: true)
             }
         }
 
@@ -2468,9 +2376,13 @@ private struct EmbeddedWebView: UIViewRepresentable {
                 startTimeout(for: webView)
                 if isWeiboHost(url.host) {
                     let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
-                    await WeiboSessionCookieStore.install(in: cookieStore)
+                    if observedWeiboCookieStore == nil {
+                        await WeiboSessionCookieStore.install(in: cookieStore)
+                        guard !Task.isCancelled else { return }
+                        observedWeiboCookieStore = cookieStore
+                        cookieStore.add(self)
+                    }
                     model.refreshWeiboSession(from: cookieStore)
-                    model.fetchAccountAvatar(from: cookieStore)
                 }
                 guard !Task.isCancelled else { return }
                 activeNavigation = webView.load(URLRequest(url: url, timeoutInterval: 20))
@@ -2482,9 +2394,7 @@ private struct EmbeddedWebView: UIViewRepresentable {
             loadTask?.cancel()
             timeoutTask?.cancel()
             if let observedWeiboCookieStore {
-                Task { @MainActor [weak model] in
-                    model?.refreshWeiboSession(from: observedWeiboCookieStore, persist: true)
-                }
+                model.stopWeiboAccountRefresh()
                 observedWeiboCookieStore.remove(self)
                 self.observedWeiboCookieStore = nil
             }
@@ -2495,8 +2405,9 @@ private struct EmbeddedWebView: UIViewRepresentable {
         }
 
         func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
-            Task { @MainActor [weak model] in
-                model?.refreshWeiboSession(from: cookieStore, persist: true)
+            Task { @MainActor [weak self] in
+                guard let self, observedWeiboCookieStore === cookieStore else { return }
+                model.refreshWeiboSession(from: cookieStore)
             }
         }
 
@@ -2537,11 +2448,8 @@ private struct EmbeddedWebView: UIViewRepresentable {
             timeoutTask?.cancel()
             Task { @MainActor in
                 model.isLoading = false
-                guard isWeiboHost(webView.url?.host) else { return }
-                model.captureAccountAvatar(from: webView)
-                let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
-                model.refreshWeiboSession(from: cookieStore, persist: true)
-                model.fetchAccountAvatar(from: cookieStore)
+                guard isWeiboHost(webView.url?.host), let cookieStore = observedWeiboCookieStore else { return }
+                model.refreshWeiboSession(from: cookieStore)
                 inspectWeiboPage(webView)
             }
         }
@@ -2619,7 +2527,7 @@ private struct EmbeddedWebView: UIViewRepresentable {
     }
 }
 
-private struct StoredWebCookie: Codable {
+private struct StoredWebCookie: Codable, Hashable {
     let domain: String
     let expirationDate: Double?
     let httpOnly: Bool?
@@ -2675,36 +2583,7 @@ private struct StoredWebCookie: Codable {
 enum WeiboSessionCookieStore {
     private static let defaultsKey = "weibo.session.cookies"
     private static let environmentKey = "WEIBO_COOKIES_JSON"
-    private static let avatarURLDefaultsKey = "weibo.session.avatarURL"
-    private static let displayNameDefaultsKey = "weibo.session.displayName"
-    private static let displayNameEnvironmentKey = "WEIBO_DISPLAY_NAME"
     private static let logoutSuppressedKey = "weibo.session.logoutSuppressed"
-
-    static var storedDisplayName: String? {
-        importFromEnvironmentIfPresent()
-        return UserDefaults.standard.string(forKey: displayNameDefaultsKey)
-    }
-
-    static var storedAvatarURL: URL? {
-        avatarURL(defaults: .standard)
-    }
-
-    static func avatarURL(defaults: UserDefaults = .standard) -> URL? {
-        guard let value = defaults.string(forKey: avatarURLDefaultsKey) else { return nil }
-        return URL(string: value)
-    }
-
-    static func store(avatarURL: URL, defaults: UserDefaults = .standard) {
-        guard !defaults.bool(forKey: logoutSuppressedKey),
-              let scheme = avatarURL.scheme?.lowercased(),
-              scheme == "https" || scheme == "http" else { return }
-        defaults.set(avatarURL.absoluteString, forKey: avatarURLDefaultsKey)
-    }
-
-    static func store(displayName: String, defaults: UserDefaults = .standard) {
-        guard !defaults.bool(forKey: logoutSuppressedKey) else { return }
-        defaults.set(displayName, forKey: displayNameDefaultsKey)
-    }
 
     static func store(cookies: [HTTPCookie], defaults: UserDefaults = .standard) {
         guard !defaults.bool(forKey: logoutSuppressedKey) else { return }
@@ -2736,10 +2615,6 @@ enum WeiboSessionCookieStore {
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) {
         guard !defaults.bool(forKey: logoutSuppressedKey) else { return }
-        if let displayName = environment[displayNameEnvironmentKey],
-           !displayName.isEmpty {
-            store(displayName: displayName, defaults: defaults)
-        }
         guard let raw = environment[environmentKey],
               let data = raw.data(using: .utf8),
               (try? JSONDecoder().decode([StoredWebCookie].self, from: data)) != nil else { return }
@@ -2748,8 +2623,6 @@ enum WeiboSessionCookieStore {
 
     static func clear(defaults: UserDefaults = .standard) {
         defaults.removeObject(forKey: defaultsKey)
-        defaults.removeObject(forKey: avatarURLDefaultsKey)
-        defaults.removeObject(forKey: displayNameDefaultsKey)
         defaults.set(true, forKey: logoutSuppressedKey)
     }
 
