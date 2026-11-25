@@ -84,6 +84,7 @@ private struct TodayCompanyStock: Sendable {
     enum QuoteSource: Hashable, Sendable {
         case dashboard
         case index(String)
+        case chart(String)
     }
 
     let name: String
@@ -103,14 +104,26 @@ private struct TodayCompanyStock: Sendable {
         "zuckerberg": .init(name: "Meta", symbol: "META"),
         "apple": .init(name: "苹果", symbol: "AAPL"),
         "amazon": .init(name: "亚马逊", symbol: "AMZN"),
-        "amd": .init(name: "AMD", symbol: "AMD"),
+        "amd": chartStock(name: "AMD", symbol: "AMD"),
+        "world-labs": chartStock(name: "AMD（母公司）", symbol: "AMD"),
+        "minimax": chartStock(name: "MiniMax", symbol: "0100.HK"),
+        "zai": chartStock(name: "智谱", symbol: "2513.HK"),
         "tencent": .init(name: "腾讯", symbol: "0700.HK"),
         "qwen": .init(name: "阿里巴巴", symbol: "9988.HK", source: .index("^HSI"))
     ]
 
+    private static let spaceXSources: Set<String> = ["spacex", "xai", "grok", "x", "gwynne-shotwell"]
+
+    private static func chartStock(name: String, symbol: String) -> Self {
+        Self(name: name, symbol: symbol, source: .chart(symbol))
+    }
+
     static func match(systemKey: String, sourceKeys: Set<String>) -> Self? {
         guard systemKey == "musk" else { return bySystem[systemKey] }
-        if sourceKeys == ["spacex"] { return Self(name: "SpaceX", symbol: "SPCX") }
+        if !sourceKeys.isEmpty, sourceKeys.isSubset(of: spaceXSources) {
+            let name = sourceKeys.isSubset(of: ["spacex", "gwynne-shotwell"]) ? "SpaceX" : "SpaceX（母公司）"
+            return Self(name: name, symbol: "SPCX")
+        }
         if sourceKeys == ["tesla"] { return Self(name: "特斯拉", symbol: "TSLA") }
         return nil
     }
@@ -625,6 +638,8 @@ private struct TodayBriefDeck: View {
             await marketStore.refresh(force: false)
         case .index(let symbol):
             await marketStore.loadIndexConstituents(symbol: symbol, maximumAge: 300)
+        case .chart(let symbol):
+            await marketStore.loadChart(symbol: symbol, range: .day)
         }
     }
 
@@ -1057,14 +1072,29 @@ private struct TodayBriefDeckLayers<Layer: View>: View, Animatable {
 }
 
 private struct TodayCompanyStockCard: View {
+    private struct Price {
+        let amount: Double
+        let currency: String?
+        let change: Double?
+        let context: String
+    }
+
     let stock: TodayCompanyStock
     let marketStore: MarketStore
 
-    private var quote: MarketQuote? {
+    private var price: Price? {
+        let quote: MarketQuote?
         switch stock.source {
-        case .dashboard: marketStore.quote(symbol: stock.symbol)
-        case .index(let symbol): marketStore.indexConstituents[symbol]?.items.first { $0.id == stock.symbol }?.quote
+        case .dashboard:
+            quote = marketStore.quote(symbol: stock.symbol)
+        case .index(let symbol):
+            quote = marketStore.indexConstituents[symbol]?.items.first { $0.id == stock.symbol }?.quote
+        case .chart(let symbol):
+            return chartPrice(symbol: symbol)
         }
+        guard let quote, quote.stale != true, quote.marketDisplayPrice.isFinite, quote.marketDisplayPrice > 0 else { return nil }
+        return Price(amount: quote.marketDisplayPrice, currency: quote.currency,
+                     change: quote.marketDisplayPercentValue, context: quoteContext(quote))
     }
 
     private var isLoading: Bool {
@@ -1072,6 +1102,8 @@ private struct TodayCompanyStockCard: View {
         case .dashboard: marketStore.dashboard == nil && marketStore.errorMessage == nil
         case .index(let symbol):
             marketStore.indexConstituents[symbol] == nil && marketStore.constituentErrors[symbol] == nil
+        case .chart(let symbol):
+            marketStore.chart(symbol: symbol, range: .day) == nil && marketStore.chartError(symbol: symbol, range: .day) == nil
         }
     }
 
@@ -1113,14 +1145,14 @@ private struct TodayCompanyStockCard: View {
 
     @ViewBuilder
     private func pricing(alignment: HorizontalAlignment) -> some View {
-        if let quote, quote.stale != true, quote.marketDisplayPrice.isFinite, quote.marketDisplayPrice > 0 {
+        if let price {
             VStack(alignment: alignment, spacing: 4) {
                 ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) { priceAndChange(quote) }
+                    HStack(alignment: .firstTextBaseline, spacing: 8) { priceAndChange(price) }
                         .fixedSize(horizontal: true, vertical: false)
-                    VStack(alignment: alignment, spacing: 3) { priceAndChange(quote) }
+                    VStack(alignment: alignment, spacing: 3) { priceAndChange(price) }
                 }
-                Text(quoteContext(quote))
+                Text(price.context)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -1132,11 +1164,10 @@ private struct TodayCompanyStockCard: View {
         }
     }
 
-    private func priceAndChange(_ quote: MarketQuote) -> some View {
-        let price = quote.marketDisplayPrice
-        let value = price.formatted(.number.precision(.fractionLength(marketPriceDigits(price, symbol: quote.symbol))))
-        let label = [value, quote.currency].compactMap { $0 }.joined(separator: " ")
-        let change = quote.marketDisplayPercentValue
+    private func priceAndChange(_ price: Price) -> some View {
+        let value = price.amount.formatted(.number.precision(.fractionLength(marketPriceDigits(price.amount, symbol: stock.symbol))))
+        let label = [value, price.currency].compactMap { $0 }.joined(separator: " ")
+        let change = price.change.flatMap { $0.isFinite ? $0 : nil }
         let tint: Color = switch change {
         case let .some(value) where value > 0: InvestmentDesign.gain
         case let .some(value) where value < 0: InvestmentDesign.loss
@@ -1144,8 +1175,28 @@ private struct TodayCompanyStockCard: View {
         }
         return Group {
             Text(label).font(.subheadline.weight(.semibold))
-            Text(quote.marketDisplayFormattedPercent).font(.caption.weight(.medium)).foregroundStyle(tint)
+            Text(change.map(marketFormattedChangePercent) ?? "涨跌暂缺")
+                .font(.caption.weight(.medium)).foregroundStyle(tint)
         }
+    }
+
+    private func chartPrice(symbol: String) -> Price? {
+        guard let snapshot = marketStore.chartSnapshot(symbol: symbol, range: .day),
+              let value = snapshot.chart.quote.price, value.isFinite, value > 0,
+              let timestamp = snapshot.chart.quote.providerTimestamp, timestamp > 0 else { return nil }
+        let chart = snapshot.chart
+        let session = MarketTradingSession(rawValue: chart.session)
+        // The chart quote uses the regular price field, even during extended hours.
+        let sessionLabel = session.isExtended ? "常规盘报价" : session.displayLabel
+        let status: String? = snapshot.isRestored ? "缓存"
+            : marketStore.chartError(symbol: symbol, range: .day) == nil ? nil : "未更新"
+        let currency: String? = switch chart.market {
+        case "HK": "HKD"
+        case "US": "USD"
+        default: nil
+        }
+        let context = [sessionLabel, status, marketShortTimestamp(timestamp)].compactMap { $0 }.joined(separator: " · ")
+        return Price(amount: value, currency: currency, change: chart.quote.changePercent, context: context)
     }
 
     private func quoteContext(_ quote: MarketQuote) -> String {
@@ -1162,6 +1213,8 @@ private struct TodayCompanyStockCard: View {
             marketStore.isShowingCachedSnapshot ? "缓存" : (marketStore.errorMessage == nil ? nil : "未更新")
         case .index(let symbol):
             marketStore.constituentErrors[symbol] == nil ? nil : "未更新"
+        case .chart:
+            nil
         }
         let delay = quote.hasDelayedSessionPrice ? "延迟" : nil
         return [session, loadStatus ?? delay, quote.marketAsOfTimestamp.map(marketShortTimestamp)]
