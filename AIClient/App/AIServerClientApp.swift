@@ -779,11 +779,13 @@ private struct EditorialRootView: View {
         .task(id: canPrefetchOtherTabs, priority: .utility) {
             guard canPrefetchOtherTabs, selectedTab != .investment else { return }
             let marketStore = pageStores.market
+            async let indexCharts: Void = marketStore.preloadListCharts(symbols: ResearchHomeContent.chartSymbols)
             await marketStore.preloadDashboard()
             guard !Task.isCancelled, selectedTab != .investment else { return }
             let stocks = ResearchHomeContent.stocks(in: marketStore.dashboard, region: .unitedStates)
             let symbols = ResearchHomeContent.afterHoursSymbols(for: stocks)
             await marketStore.preloadListCharts(symbols: marketStore.missingAfterHoursSymbols(symbols))
+            await indexCharts
         }
         .task(id: NotificationNavigationTaskID(
             requestID: personPushNavigation.request?.id,

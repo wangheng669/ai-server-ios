@@ -13,11 +13,13 @@ struct StockSessionQuotes {
         let title: String
         let price: Price?
         let highlighted: Bool
+        var emptyLabel = "暂无报价"
     }
 
     let columns: [Column]
 
-    init(quote: MarketQuote, chart: MarketChart?, extendedSession: MarketTradingSession, isCurrent: Bool) {
+    init(quote: MarketQuote, chart: MarketChart?, afterHoursEmptyLabel: String,
+         extendedSession: MarketTradingSession, isCurrent: Bool) {
         let session = quote.tradingSession
         let regular = Price(value: quote.price, percent: quote.percentValue,
                             isDelayed: session == .regular && quote.hasDelayedSessionPrice)
@@ -33,7 +35,8 @@ struct StockSessionQuotes {
         columns = [
             Column(title: session == .regular ? "常规盘" : "常规收盘", price: regular,
                    highlighted: isCurrent && session == .regular),
-            Column(title: "盘后", price: post, highlighted: isCurrent && session == .postmarket && post != nil),
+            Column(title: "盘后", price: post, highlighted: isCurrent && session == .postmarket && post != nil,
+                   emptyLabel: afterHoursEmptyLabel),
             Column(title: Self.extendedTitle(extendedSession, indicative: quote.hasIndicativeOvernightPrice),
                    price: extended, highlighted: isCurrent && extended != nil),
         ]
@@ -45,7 +48,7 @@ struct StockSessionQuotes {
     }
 
     static func sourceNote(indicative: Bool) -> String {
-        indicative ? "盘后末价取已确认分钟线 · 夜盘参考取买卖中间价" : "盘后末价取已确认分钟线"
+        indicative ? "盘后收盘取已确认分钟线 · 夜盘参考取买卖中间价" : "盘后收盘取已确认分钟线"
     }
 
     private static func activePrice(_ quote: MarketQuote, session: MarketTradingSession) -> Price? {
@@ -77,7 +80,7 @@ struct StockSessionPriceCell: View {
         let detail = [quote?.isDelayed == true ? "延迟" : nil, time].compactMap { $0 }.joined(separator: " · ")
         let price = quote.map {
             $0.value.formatted(.number.precision(.fractionLength(marketPriceDigits($0.value, symbol: symbol))))
-        } ?? "—"
+        } ?? column.emptyLabel
         let percent = quote.map {
             String(format: "%@%.2f%%", $0.percent >= 0 ? "+" : "−", abs($0.percent))
         }
@@ -87,7 +90,7 @@ struct StockSessionPriceCell: View {
                 Text(column.title).font(.caption.weight(.medium)).foregroundStyle(muted)
             }
             Text(price)
-                .font(showsTitle ? .title3.weight(.semibold) : .subheadline.weight(.semibold))
+                .font(quote == nil ? .caption2 : (showsTitle ? .title3.weight(.semibold) : .subheadline.weight(.semibold)))
                 .foregroundStyle(quote == nil ? muted : .primary)
             if let percent {
                 Text(percent).font(.caption2.weight(.medium)).foregroundStyle(tint)
@@ -108,7 +111,7 @@ struct StockSessionPriceCell: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel([column.title, quote == nil ? "暂无行情" : price, percent,
+        .accessibilityLabel([column.title, price, percent,
                              quote?.isDelayed == true ? "延迟" : nil, time].compactMap { $0 }.joined(separator: "，"))
     }
 }
@@ -134,7 +137,7 @@ extension MarketChart {
     }
 
     func stockAfterHoursEnd(for quote: MarketQuote) -> MarketChartPoint? {
-        guard market == "US", interval == "1m", self.quote.price == quote.price,
+        guard market == "US", interval == "1m", matchesAfterHoursAnchor(for: quote),
               let window = analysis.sessionWindows.last(where: { $0.session == "post" && $0.tradingDate == tradingDate }),
               let regular = analysis.sessionWindows.last(where: { $0.session == "regular" && $0.tradingDate == tradingDate }),
               candles.contains(where: { $0.session == "regular" && regular.contains($0.timestamp, convention: analysis.candleTimestamp) })
@@ -147,20 +150,33 @@ extension MarketChart {
 }
 
 extension MarketStore {
+    func stockSessionQuotes(for quote: MarketQuote, chartSymbol: String, extendedSession: MarketTradingSession,
+                            isCurrent: Bool) -> StockSessionQuotes {
+        let chart = chart(symbol: chartSymbol, range: .day)
+        let emptyLabel: String
+        switch quote.tradingSession {
+        case .regular:
+            emptyLabel = "未开始"
+        case .postmarket, .unknown, .alwaysOpen:
+            emptyLabel = "暂无报价"
+        case .overnight, .premarket, .closed:
+            if isLoadingChart(symbol: chartSymbol, range: .day) {
+                emptyLabel = "加载中"
+            } else if chartError(symbol: chartSymbol, range: .day) != nil {
+                emptyLabel = "加载失败"
+            } else {
+                emptyLabel = chartSnapshot(symbol: chartSymbol, range: .day) == nil ? "待加载" : "无确认价"
+            }
+        }
+        return StockSessionQuotes(quote: quote, chart: chart, afterHoursEmptyLabel: emptyLabel,
+                                  extendedSession: extendedSession, isCurrent: isCurrent)
+    }
+
     func missingAfterHoursSymbols(_ symbols: [String]) -> [String] {
         symbols.filter { symbol in
             guard let quote = quote(symbol: symbol) else { return false }
-            return dayChartForSessionQuotes(symbol: symbol)?.stockAfterHoursEnd(for: quote) == nil
+            return chart(symbol: symbol, range: .day)?.stockAfterHoursEnd(for: quote) == nil
         }
-    }
-
-    func dayChartForSessionQuotes(symbol: String) -> MarketChart? {
-        guard let snapshot = chartSnapshot(symbol: symbol, range: .day) else { return nil }
-        if snapshot.isRestored {
-            guard let quote = quote(symbol: symbol),
-                  snapshot.chart.matchesAfterHoursAnchor(for: quote) else { return nil }
-        }
-        return snapshot.chart
     }
 }
 
