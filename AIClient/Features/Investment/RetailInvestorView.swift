@@ -5,7 +5,6 @@ import SwiftUI
 struct RetailInvestorView: View {
     private let store: InvestorMoodStore
     @State private var playbackItem: InvestorMoodItem?
-    @Environment(\.rootTabIsActive) private var rootTabIsActive
     @Environment(\.dismiss) private var dismiss
 
     @MainActor
@@ -17,12 +16,12 @@ struct RetailInvestorView: View {
         NavigationStack {
             ScrollView {
                 investorMoodContent
-                    .background(InvestmentDesign.surface)
-                    .padding(.bottom, 24)
+                    .padding(.horizontal, InvestmentDesign.pageInset)
+                    .padding(.top, 20)
+                    .padding(.bottom, 64)
             }
-            .background(InvestmentDesign.surface)
-            .task(id: rootTabIsActive) {
-                guard rootTabIsActive else { return }
+            .background(InvestmentDesign.canvas)
+            .task {
                 await store.refreshInvestorMood(force: true)
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -40,125 +39,135 @@ struct RetailInvestorView: View {
     }
 
     private var investorMoodContent: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("散户正在说")
-                    .font(.system(size: 16, weight: .bold))
-                Spacer()
-                Text("视频由后台自动解读")
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(.tertiary)
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("散户观点")
+                    .font(.title2.bold())
+                    .accessibilityAddTraits(.isHeader)
+                Text("视频观点由 AI 自动解读")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 16)
-            if store.investorMood?.items.isEmpty != false {
-                placeholder(store.investorMoodErrorMessage ?? (store.isLoadingInvestorMood ? "正在读取最新样本" : "正在等待大曾子、王小雨等账号的最新有效样本"))
-            } else if let items = store.investorMood?.items {
-                investorMoodList(items)
-            }
-        }
-        .padding(.top, 12)
-        .padding(.bottom, 6)
-    }
+            .padding(.horizontal, 2)
 
-    private func investorMoodList(_ items: [InvestorMoodItem]) -> some View {
-        LazyVStack(spacing: 0) {
-            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                InvestorMoodVideoCard(
-                    item: item,
-                    onPlay: { playbackItem = item }
-                )
-                if index < items.count - 1 {
-                    Divider()
-                        .overlay(InvestmentDesign.divider)
+            if let items = store.investorMood?.items, !items.isEmpty {
+                LazyVStack(spacing: 10) {
+                    ForEach(items) { item in
+                        InvestorMoodVideoCard(item: item, onPlay: { playbackItem = item })
+                    }
                 }
+            } else {
+                emptyState
             }
         }
-        .padding(.horizontal, 16)
     }
 
-    private func placeholder(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 13))
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 12)
+    private var emptyState: some View {
+        Group {
+            if store.isLoadingInvestorMood {
+                ProgressView("正在读取最新样本")
+            } else {
+                Text(store.investorMoodErrorMessage ?? "正在等待最新有效样本")
+            }
+        }
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 16))
     }
 }
 
 private struct InvestorMoodVideoCard: View {
     let item: InvestorMoodItem
     let onPlay: () -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        Button(action: onPlay) {
-            HStack(alignment: .top, spacing: 11) {
-                thumbnail
-                    .frame(width: 78, height: 104)
-                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-                    .overlay(alignment: .bottomTrailing) {
-                        if item.createdAt != nil {
-                            Text(InvestorMoodFormat.compactRelativeTime(item.createdAt))
-                                .font(.system(size: 9.5, weight: .semibold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 3)
-                                .background(.black.opacity(0.68), in: Capsule())
-                                .padding(5)
-                        }
-                    }
+        let contentLayout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 14))
+        let shape = RoundedRectangle(cornerRadius: 16)
 
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 7) {
-                        Text(item.nickname)
-                            .font(.system(size: 14, weight: .semibold))
-                            .lineLimit(1)
-                        moodBadge
-                        Spacer(minLength: 0)
+        Button(action: onPlay) {
+            VStack(alignment: .leading, spacing: 12) {
+                header
+                contentLayout {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(summary)
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .lineSpacing(3)
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 4)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Label("播放原视频", systemImage: "play.fill")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
                     }
-                    Text(transcript)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(.primary)
-                        .lineLimit(3)
-                        .lineSpacing(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    thumbnail
+                        .frame(width: 76, height: 100)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .accessibilityHidden(true)
                 }
             }
-            .contentShape(Rectangle())
-            .padding(.vertical, 9)
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(InvestmentDesign.surface, in: shape)
+            .overlay {
+                shape.strokeBorder(InvestmentDesign.divider, lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
+            .contentShape(shape)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(item.nickname)，\(item.label)，\(InvestorMoodFormat.compactRelativeTime(item.createdAt))，\(transcript)")
-        .accessibilityHint("播放散户观点视频")
+        .accessibilityLabel("\(item.nickname)，\(item.label)，\(publication)")
+        .accessibilityValue(summary)
+        .accessibilityHint("播放原视频")
     }
 
-    @ViewBuilder
-    private var thumbnail: some View {
-        ZStack {
-            Color.black
-            AsyncImage(url: item.directCoverURL) { phase in
-                if let image = phase.image {
-                    image.resizable().scaledToFill()
-                } else if phase.error != nil {
-                    proxyCoverImage
-                } else {
-                    coverPlaceholder
-                }
+    private var header: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 8))
+
+        return layout {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.nickname)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Text(publication)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            Circle()
-                .fill(.black.opacity(0.58))
-                .frame(width: 32, height: 32)
-            Image(systemName: "play.fill")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(.white)
-                .offset(x: 1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            moodBadge
         }
-        .clipped()
     }
 
-    private var transcript: String {
-        item.transcript.nonEmpty ?? item.analysis.nonEmpty ?? item.description.nonEmpty ?? "当前视频暂无可用内容"
+    private var publication: String {
+        let time = InvestorMoodFormat.compactRelativeTime(item.createdAt)
+        return item.stale ? "\(time) · 旧样本" : time
     }
 
-    @ViewBuilder
+    private var summary: String {
+        item.analysis.nonEmpty ?? item.transcript.nonEmpty ?? item.description.nonEmpty ?? "当前视频暂无可用内容"
+    }
+
+    private var thumbnail: some View {
+        AsyncImage(url: item.directCoverURL) { phase in
+            if let image = phase.image {
+                image.resizable().scaledToFill()
+            } else if phase.error != nil {
+                proxyCoverImage
+            } else {
+                coverPlaceholder
+            }
+        }
+    }
+
     private var proxyCoverImage: some View {
         AsyncImage(url: item.coverPlaybackURL) { phase in
             if let image = phase.image {
@@ -170,22 +179,22 @@ private struct InvestorMoodVideoCard: View {
     }
 
     private var coverPlaceholder: some View {
-        Color.black
+        InvestmentDesign.secondarySurface
             .overlay {
-                Image(systemName: "video.fill")
-                    .font(.system(size: 24, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.72))
+                Image(systemName: "video")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
             }
     }
 
     private var moodBadge: some View {
         let tint = InvestorMoodFormat.moodColor(item.label)
-        return Text(item.stale ? "\(item.label) · 旧样本" : item.label)
-            .font(.system(size: 10.5, weight: .semibold))
+        return Text(item.label)
+            .font(.caption.weight(.semibold))
             .foregroundStyle(tint)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(tint.opacity(0.1), in: Capsule())
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -231,12 +240,13 @@ private struct InvestorMoodVideoPlayerSheet: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    Text(item.transcript.nonEmpty ?? "当前视频暂无可用字幕")
-                        .font(.body)
-                        .lineSpacing(5)
-                        .textSelection(.enabled)
+                    if let analysis = item.analysis.nonEmpty {
+                        readingSection(item.analysisSource.nonEmpty == nil ? "解读状态" : "AI 解读", text: analysis)
+                    }
+                    readingSection("视频字幕", text: item.transcript.nonEmpty ?? "当前视频暂无可用字幕")
                 }
                 .padding(16)
+                .padding(.bottom, 48)
             }
             .toolbar(.hidden, for: .navigationBar)
             .overlay(alignment: .bottomTrailing) {
@@ -248,6 +258,18 @@ private struct InvestorMoodVideoPlayerSheet: View {
             await startPlayback()
         }
         .onDisappear { player.pause() }
+    }
+
+    private func readingSection(_ title: String, text: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+            Text(text)
+                .font(.body)
+                .lineSpacing(5)
+                .textSelection(.enabled)
+        }
     }
 
     private var loadingCover: some View {
@@ -392,7 +414,10 @@ final class InvestorMoodStore {
 }
 
 private extension String {
-    var nonEmpty: String? { isEmpty ? nil : self }
+    var nonEmpty: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
 }
 
 private enum InvestorMoodFormat {
@@ -402,7 +427,7 @@ private enum InvestorMoodFormat {
     }
 
     static func compactRelativeTime(_ value: String?) -> String {
-        guard let value, let date = isoDate(value) else { return "刚刚" }
+        guard let value, let date = isoDate(value) else { return "时间未知" }
         let seconds = max(Int(Date().timeIntervalSince(date)), 0)
         switch seconds {
         case ..<60:
@@ -417,9 +442,14 @@ private enum InvestorMoodFormat {
     }
 
     static func moodColor(_ label: String) -> Color {
-        if label.contains("悲观") || label.contains("恐慌") || label.contains("看空") { return .green }
-        if label.contains("乐观") || label.contains("兴奋") || label.contains("看多") { return .red }
-        return InvestmentDesign.accent
+        switch label {
+        case "悲观", "恐慌":
+            return Color(red: 0.12, green: 0.39, blue: 0.27)
+        case "乐观", "亢奋":
+            return Color(red: 0.65, green: 0.20, blue: 0.24)
+        default:
+            return .secondary
+        }
     }
 
     private static func isoDate(_ value: String) -> Date? {
