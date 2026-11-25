@@ -3,6 +3,8 @@ import SwiftUI
 private enum ResearchTopic: String, Identifiable {
     case company = "公司", industry = "行业", macro = "宏观", viewpoints = "观点", sentiment = "市场情绪"
 
+    case industryQuotes = "全部行业"
+
     static let shortcuts: [Self] = [.company, .industry, .macro, .viewpoints]
 
     var id: Self { self }
@@ -11,6 +13,7 @@ private enum ResearchTopic: String, Identifiable {
         switch self {
         case .company: "公司研究"
         case .industry: "行业全景"
+        case .industryQuotes: "A 股行业排行"
         case .macro: "宏观指标"
         case .viewpoints: "机构观点"
         case .sentiment: "CNN 恐慌与贪婪指数"
@@ -21,6 +24,7 @@ private enum ResearchTopic: String, Identifiable {
         switch self {
         case .company: "building.2"
         case .industry: "square.grid.2x2"
+        case .industryQuotes: "chart.bar.xaxis"
         case .macro: "chart.line.uptrend.xyaxis"
         case .viewpoints: "text.bubble"
         case .sentiment: "gauge.with.dots.needle.50percent"
@@ -30,7 +34,6 @@ private enum ResearchTopic: String, Identifiable {
 
 enum ResearchHomeContent {
     static let primaryMarkets = [("标普500", "^GSPC"), ("沪深300", "000300.SS"), ("日经225", "^N225")]
-    static let sectors = [("半导体", "NVDA"), ("软件云", "MSFT"), ("能源", "SHEL"), ("消费", "AMZN")]
     static var chartSymbols: [String] { primaryMarkets.map(\.1) }
 
     static func stocks(in dashboard: MarketDashboard?, region: MarketRegion) -> [MarketQuote] {
@@ -90,6 +93,9 @@ struct ResearchHomeView: View {
     }
     private var isLoadingMarket: Bool { store.dashboard == nil && store.errorMessage == nil }
     private var shouldRefreshCharts: Bool { rootTabIsActive && scenePhase == .active && presentedTopic == nil }
+    private var shouldRefreshIndustryQuotes: Bool {
+        rootTabIsActive && scenePhase == .active && (presentedTopic == nil || presentedTopic == .industryQuotes)
+    }
 
     private var afterHoursSymbols: [String] {
         guard shouldRefreshCharts, stockRegion == .unitedStates else { return [] }
@@ -123,10 +129,8 @@ struct ResearchHomeView: View {
                     globalMarkets
                 }
                 researchTopics
-                if !isLoadingMarket {
-                    coreStocks
-                    industries
-                }
+                if !isLoadingMarket { coreStocks }
+                industries
                 utilities
             }
             .padding(.horizontal, ResearchStyle.inset)
@@ -136,7 +140,11 @@ struct ResearchHomeView: View {
         .background(ResearchStyle.surface)
         .accessibilityIdentifier("research-overview")
         .scrollIndicators(.hidden)
-        .refreshable { await store.refresh() }
+        .refreshable {
+            async let dashboard: Void = store.refresh()
+            async let industryQuotes: Void = store.refreshAShareIndustryQuotes(force: true)
+            _ = await (dashboard, industryQuotes)
+        }
         .appSheet(item: $presentedTopic) { topic in
             ResearchTopicSheet(title: topic.title) {
                 switch topic {
@@ -144,6 +152,8 @@ struct ResearchHomeView: View {
                     CompanyResearchView(store: companyStore)
                 case .industry:
                     IndustryPanoramaView()
+                case .industryQuotes:
+                    ResearchIndustryRanking(store: store)
                 case .macro:
                     ChinaMacroView()
                 case .viewpoints:
@@ -156,6 +166,14 @@ struct ResearchHomeView: View {
             .appPresentationCornerRadius(28)
             .appPresentationBackground(ResearchStyle.surface)
             .appPresentationScrollsWithoutExpanding()
+        }
+        .task(id: shouldRefreshIndustryQuotes) {
+            guard shouldRefreshIndustryQuotes else { return }
+            while !Task.isCancelled {
+                await store.refreshAShareIndustryQuotes()
+                do { try await Task.sleep(for: .seconds(60)) }
+                catch { return }
+            }
         }
         .task(id: afterHoursSymbols) {
             let symbols = afterHoursSymbols
@@ -216,10 +234,10 @@ struct ResearchHomeView: View {
 
     private var industries: some View {
         VStack(spacing: 8) {
-            sectionHeading("行业表现", trailing: "全部行业", status: "代表公司涨跌幅") {
-                presentedTopic = .industry
+            sectionHeading("A 股行业表现", trailing: "全部行业", status: "申万一级行业") {
+                presentedTopic = .industryQuotes
             }
-            ResearchIndustryPerformance(store: store, onOpen: onOpenMarketDetail)
+            ResearchIndustryPerformance(store: store)
         }
     }
 
@@ -572,111 +590,174 @@ private struct ResearchGlobalMarketSnapshot: View {
 }
 
 private struct ResearchIndustryPerformance: View {
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-
     let store: MarketStore
-    let onOpen: (String) -> Void
-
-    private struct Entry: Identifiable {
-        let title: String
-        let symbol: String
-        let quote: MarketQuote?
-        let lastTrade: MarketLastSessionTrade?
-        let isCached: Bool
-
-        var id: String { symbol }
-        var change: Double? {
-            guard let quote, !isCached, quote.stale != true, !quote.hasSuspiciousIndexMove,
-                  let value = quote.marketDisplayPercentValue, value.isFinite else { return nil }
-            return value
-        }
-
-        var status: String {
-            guard let quote else { return "当前报价暂缺" }
-            return isCached ? "缓存行情 · \(quote.researchStatus)" : quote.researchStatus
-        }
-    }
-
-    private var entries: [Entry] {
-        ResearchHomeContent.sectors.map { title, symbol in
-            let quote = store.quote(symbol: symbol)
-            let missingTrade = store.dashboard?.unavailableQuote(symbol: symbol).flatMap {
-                store.lastSessionTrade(symbol: symbol, asOf: $0.quality.asOfTimestamp)
-            }
-            return Entry(title: title, symbol: symbol, quote: quote,
-                         lastTrade: quote.flatMap { store.lastSessionTrade(for: $0) } ?? missingTrade,
-                         isCached: store.isShowingCachedSnapshot)
-        }
-    }
 
     var body: some View {
-        let entries = entries
-        let scale = max(1, entries.compactMap(\.change).map(abs).max() ?? 0)
-        let shape = RoundedRectangle(cornerRadius: 16)
+        if let snapshot = store.ashareIndustryQuotes {
+            let quotes = snapshot.rankedQuotes
+            let leaders = quotes.filter { ($0.changePercent ?? 0) > 0 }.prefix(2)
+            let laggards = quotes.reversed().filter { ($0.changePercent ?? 0) < 0 }.prefix(2)
+            let unchanged = quotes.filter { $0.changePercent == 0 }.prefix(4)
+            let scale = max(1, (Array(leaders) + laggards).compactMap(\.changePercent).map(abs).max() ?? 0)
+            let shape = RoundedRectangle(cornerRadius: 14)
 
-        VStack(spacing: 0) {
-            ForEach(entries) { entry in
-                if entry.id != entries.first?.id {
-                    ResearchStyle.divider.frame(height: 1).padding(.horizontal, 14)
+            VStack(alignment: .leading, spacing: 0) {
+                if !leaders.isEmpty { quoteGroup("领涨", quotes: leaders, scale: scale) }
+                if !laggards.isEmpty { quoteGroup("领跌", quotes: laggards, scale: scale) }
+                if leaders.isEmpty && laggards.isEmpty {
+                    if unchanged.isEmpty {
+                        Text("行业涨跌幅暂缺")
+                            .font(.footnote)
+                            .foregroundStyle(ResearchStyle.muted)
+                            .padding(12)
+                    } else {
+                        quoteGroup("平盘", quotes: unchanged, scale: scale)
+                    }
                 }
-                row(entry, scale: scale)
+                ResearchIndustryQuoteCaption(snapshot: snapshot)
+                    .padding(.vertical, 8)
             }
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay { shape.strokeBorder(ResearchStyle.divider).allowsHitTesting(false) }
+        } else {
+            ResearchIndustryQuoteStatus(store: store)
         }
-        .clipShape(shape)
-        .overlay { shape.strokeBorder(ResearchStyle.divider, lineWidth: 1).allowsHitTesting(false) }
     }
 
-    private func row(_ entry: Entry, scale: Double) -> some View {
-        let tint = entry.change == nil ? ResearchStyle.muted : ResearchStyle.tint(entry.quote)
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-            : AnyLayout(HStackLayout(alignment: .center, spacing: 10))
+    private func quoteGroup(_ title: String, quotes: ArraySlice<MarketAShareIndustryQuote>, scale: Double) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(ResearchStyle.muted)
+                .padding(.top, 8)
+            ForEach(quotes) { quote in
+                ResearchIndustryQuoteRow(quote: quote, scale: scale)
+            }
+        }
+    }
+}
 
-        return Button { onOpen(entry.symbol) } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                layout {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(entry.title)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
-                        Text(entry.symbol)
-                            .font(.caption.weight(.medium).monospaced())
-                            .foregroundStyle(ResearchStyle.muted)
-                        Text(entry.status)
-                            .font(.caption)
-                            .foregroundStyle(ResearchStyle.muted)
-                            .fixedSize(horizontal: false, vertical: true)
+private struct ResearchIndustryRanking: View {
+    let store: MarketStore
+    @State private var gainFirst = true
+
+    var body: some View {
+        ScrollView {
+            if let snapshot = store.ashareIndustryQuotes {
+                let ranked = snapshot.rankedQuotes
+                let rankedWithChange = ranked.prefix(snapshot.availableCount)
+                let quotes = gainFirst ? ranked : Array(rankedWithChange.reversed()) + ranked.dropFirst(snapshot.availableCount)
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ResearchIndustryQuoteCaption(snapshot: snapshot)
+                        .padding(.vertical, 12)
+                    Picker("排序", selection: $gainFirst) {
+                        Text("涨幅优先").tag(true)
+                        Text("跌幅优先").tag(false)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .pickerStyle(.segmented)
+                    .padding(.bottom, 8)
 
-                    if !dynamicTypeSize.isAccessibilitySize {
-                        if let change = entry.change {
-                            ResearchIndustryChangeBar(change: change, scale: scale, tint: tint)
-                                .frame(width: 62, height: 14)
-                        } else {
-                            Color.clear.frame(width: 62, height: 14)
-                        }
+                    ForEach(quotes) { quote in
+                        ResearchIndustryQuoteRow(quote: quote, showsPrice: true)
+                        ResearchStyle.divider.frame(height: 0.5)
                     }
-
-                    Text(entry.quote?.marketDisplayFormattedPercent ?? "—")
-                        .font(.subheadline.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(tint)
-                        .frame(minWidth: dynamicTypeSize.isAccessibilitySize ? nil : 76, alignment: .trailing)
-                        .accessibilityHidden(entry.quote == nil)
                 }
+                .padding(.horizontal, ResearchStyle.inset)
+            } else {
+                ResearchIndustryQuoteStatus(store: store)
+                    .padding(ResearchStyle.inset)
+            }
+        }
+        .refreshable { await store.refreshAShareIndustryQuotes(force: true) }
+        .accessibilityIdentifier("ashare-industry-ranking")
+    }
+}
 
-                if let lastTrade = entry.lastTrade {
-                    MarketLastSessionTradeNote(trade: lastTrade, symbol: entry.symbol)
+private struct ResearchIndustryQuoteCaption: View {
+    let snapshot: MarketAShareIndustryQuotes
+
+    var body: some View {
+        let format = Date.FormatStyle(date: .numeric, time: .shortened,
+                                      locale: Locale(identifier: "zh_CN"),
+                                      timeZone: TimeZone(identifier: "Asia/Shanghai") ?? .gmt)
+        VStack(alignment: .leading, spacing: 3) {
+            Text("\(snapshot.source) · 采集于 \(snapshot.collectionTime.formatted(format))（北京时间）")
+            if snapshot.availableCount < snapshot.quotes.count {
+                Text("涨跌幅暂缺 \(snapshot.quotes.count - snapshot.availableCount) 个行业")
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(ResearchStyle.muted)
+    }
+}
+
+private struct ResearchIndustryQuoteStatus: View {
+    let store: MarketStore
+
+    var body: some View {
+        if store.industryQuotesUnavailable {
+            Button {
+                Task { await store.refreshAShareIndustryQuotes(force: true) }
+            } label: {
+                Label(store.isRefreshingIndustryQuotes ? "正在重试" : "行业行情暂不可用 · 点击重试",
+                      systemImage: "arrow.clockwise")
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            }
+            .font(.footnote)
+            .foregroundStyle(ResearchStyle.accent)
+            .buttonStyle(.plain)
+            .disabled(store.isRefreshingIndustryQuotes)
+        } else {
+            ProgressView("正在加载行业行情")
+                .font(.footnote)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        }
+    }
+}
+
+private struct ResearchIndustryQuoteRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let quote: MarketAShareIndustryQuote
+    var scale: Double? = nil
+    var showsPrice = false
+
+    var body: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout(spacing: 10))
+        let change = quote.changePercent ?? 0
+        let tint = change > 0 ? InvestmentDesign.gain : change < 0 ? InvestmentDesign.loss : ResearchStyle.muted
+
+        layout {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(quote.name).font(.subheadline.weight(.semibold))
+                if showsPrice {
+                    Text(quote.code).font(.caption.monospaced()).foregroundStyle(ResearchStyle.muted)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-            .contentShape(Rectangle())
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let scale, !dynamicTypeSize.isAccessibilitySize {
+                ResearchIndustryChangeBar(change: change, scale: scale, tint: tint)
+                    .frame(width: 62, height: 14)
+            }
+            if showsPrice, let price = quote.price {
+                Text(price.formatted(.number.precision(.fractionLength(2))))
+                    .font(.footnote.monospacedDigit())
+                    .accessibilityLabel("指数点位")
+                    .accessibilityValue(price.formatted(.number.precision(.fractionLength(2))))
+            }
+            Text(quote.changePercent.map {
+                ($0 / 100).formatted(.percent.precision(.fractionLength(2)).sign(strategy: .always(includingZero: false)))
+            } ?? "涨跌幅暂缺")
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .foregroundStyle(tint)
+                .frame(minWidth: dynamicTypeSize.isAccessibilitySize ? nil : 74, alignment: .trailing)
         }
-        .buttonStyle(.plain)
+        .padding(.vertical, 7)
         .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("research-sector-\(entry.symbol)")
+        .accessibilityIdentifier("research-sector-\(quote.code)")
     }
 }
 

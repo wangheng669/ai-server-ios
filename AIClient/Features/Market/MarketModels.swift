@@ -5,6 +5,39 @@ struct MarketDashboardResponse: Decodable {
     let data: MarketDashboard
 }
 
+struct MarketAShareIndustryQuotesResponse: Decodable {
+    let data: MarketAShareIndustryQuotes
+}
+
+struct MarketAShareIndustryQuotes: Decodable {
+    let source: String
+    let fetchedAt: TimeInterval
+    let quotes: [MarketAShareIndustryQuote]
+
+    var collectionTime: Date { Date(timeIntervalSince1970: fetchedAt) }
+    var availableCount: Int { quotes.count(where: { $0.changePercent != nil }) }
+
+    var rankedQuotes: [MarketAShareIndustryQuote] {
+        quotes.sorted { first, second in
+            switch (first.changePercent, second.changePercent) {
+            case let (left?, right?) where left != right: left > right
+            case (_?, nil): true
+            case (nil, _?): false
+            default: first.code < second.code
+            }
+        }
+    }
+}
+
+struct MarketAShareIndustryQuote: Decodable, Identifiable {
+    let code: String
+    let name: String
+    let price: Double?
+    let changePercent: Double?
+
+    var id: String { code }
+}
+
 enum CommodityLogoKind: String, CaseIterable {
     case gold
     case crudeOil
