@@ -1,4 +1,5 @@
 import Foundation
+import libxml2
 
 struct APIClient {
     private static let defaultSession: URLSession = {
@@ -639,9 +640,8 @@ struct APIClient {
 
     func fetchNewYorkTimesArticle(url: URL) async throws -> NewYorkTimesArticle {
         let response = try await fetchArticlePreview(url: url, preferRemote: true)
-        if let article = NewYorkTimesArticleParser.extract(from: response.data.content, baseURL: url) { return article }
-        guard let article = NewYorkTimesArticle.storedText(response.data.textContent) else {
-            throw APIError.decoding(NYTimesArticleError.bodyMissing)
+        guard let article = NewYorkTimesArticleParser.extract(from: response.data.content, baseURL: url) else {
+            throw NewYorkTimesArticleError.bodyMissing
         }
         return article
     }
@@ -766,8 +766,47 @@ struct XVideoPlaybackEvent: Encodable {
 
 struct NewYorkTimesArticle: Equatable {
     let blocks: [NewYorkTimesArticleBlock]
+    let cover: NewYorkTimesArticlePhoto?
 
-    static func storedText(_ text: String) -> NewYorkTimesArticle? {
+    init?(storedPost post: Post) {
+        let excerpt = post.summary?.trimmingCharacters(in: .whitespacesAndNewlines)
+        for body in [post.content, post.contentZH].compactMap({ $0?.trimmingCharacters(in: .whitespacesAndNewlines) }) {
+            if body != excerpt, let article = Self.storedText(body) {
+                self = article
+                return
+            }
+        }
+        return nil
+    }
+
+    private init(blocks: [NewYorkTimesArticleBlock], cover: NewYorkTimesArticlePhoto? = nil) {
+        self.blocks = blocks
+        self.cover = cover
+    }
+
+    static func structured(blocks: [NewYorkTimesArticleBlock], cover: NewYorkTimesArticlePhoto?) -> Self? {
+        guard blocks.contains(where: { $0.paragraphText != nil }) else { return nil }
+        return Self(blocks: blocks, cover: cover)
+    }
+
+    // Keep the complete stored article if the webpage returns a shorter or different body.
+    func containsStoredBody(_ stored: Self) -> Bool {
+        let sourceText = blocks.flatMap { block in
+            switch block {
+            case .paragraph(let text), .linkedParagraph(let text, _): [text]
+            case .image(let photo): [photo.caption, photo.credit].compactMap { $0 }
+            }
+        }.joined().filter { !$0.isWhitespace }
+        var remaining = sourceText[...]
+        for paragraph in stored.blocks.compactMap(\.paragraphText) {
+            let text = paragraph.filter { !$0.isWhitespace }
+            guard let range = remaining.range(of: text) else { return false }
+            remaining = remaining[range.upperBound...]
+        }
+        return true
+    }
+
+    private static func storedText(_ text: String) -> NewYorkTimesArticle? {
         let normalized = text
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
@@ -818,28 +857,42 @@ struct NewYorkTimesArticle: Equatable {
         )
     }
 
-    static func isSameImageAsset(_ lhs: URL, _ rhs: URL?) -> Bool {
-        guard let rhs, let lhsKey = imageAssetKey(lhs), let rhsKey = imageAssetKey(rhs) else { return lhs == rhs }
-        return lhsKey == rhsKey
+}
+
+struct NewYorkTimesArticlePhoto: Equatable {
+    let url: URL
+    var caption: String? = nil
+    var credit: String? = nil
+
+    func matches(_ other: URL) -> Bool {
+        let source = ImageLoader.sourceImageURL(from: url)
+        let otherSource = ImageLoader.sourceImageURL(from: other)
+        if source == otherSource { return true }
+        guard source.host == otherSource.host,
+              source.host?.hasSuffix(".nyt.com") == true else { return false }
+        return Self.assetPath(for: source) == Self.assetPath(for: otherSource)
     }
 
-    private static func imageAssetKey(_ url: URL) -> String? {
-        let original = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-            .queryItems?
-            .first(where: { $0.name == "url" })?
-            .value
-            .flatMap(URL.init(string:)) ?? url
-        let components = original.path.split(separator: "/")
-        guard let imagesIndex = components.firstIndex(of: "images"), imagesIndex + 1 < components.endIndex else { return nil }
-        let assetPath = components[(imagesIndex + 1)..<components.endIndex].dropLast().map(String.init)
-        return ([original.host ?? ""] + assetPath).joined(separator: "/")
+    private static func assetPath(for url: URL) -> String {
+        url.deletingPathExtension().path.replacingOccurrences(
+            of: #"-(?:article[A-Za-z]+|master[0-9]+|thumb[A-Za-z]+|superJumbo|jumbo)$"#,
+            with: "",
+            options: .regularExpression
+        )
     }
 }
 
 enum NewYorkTimesArticleBlock: Equatable {
     case paragraph(String)
     case linkedParagraph(String, links: [NewYorkTimesArticleLink])
-    case image(url: URL, caption: String?, credit: String?)
+    case image(NewYorkTimesArticlePhoto)
+
+    var paragraphText: String? {
+        switch self {
+        case .paragraph(let text), .linkedParagraph(let text, _): text
+        case .image: nil
+        }
+    }
 }
 
 struct NewYorkTimesArticleLink: Equatable {
@@ -847,125 +900,164 @@ struct NewYorkTimesArticleLink: Equatable {
     let url: URL
 }
 
-enum NewYorkTimesArticleParser {
-    private static let paragraphOpeningRegex = try! NSRegularExpression(
-        pattern: #"<div\b[^>]*\bclass=["'][^"']*\barticle-paragraph\b[^"']*["'][^>]*>"#,
-        options: [.caseInsensitive]
-    )
-    private static let divTokenRegex = try! NSRegularExpression(
-        pattern: #"</?div\b[^>]*>"#,
-        options: [.caseInsensitive]
-    )
-    private static let anchorRegex = try! NSRegularExpression(
-        pattern: #"<a\b[^>]*>(.*?)</a\s*>"#,
-        options: [.caseInsensitive, .dotMatchesLineSeparators]
-    )
-
-    static func extract(from html: String, baseURL: URL? = nil) -> NewYorkTimesArticle? {
-        let range = NSRange(html.startIndex..<html.endIndex, in: html)
-        let blocks = paragraphOpeningRegex.matches(in: html, range: range).compactMap { match -> NewYorkTimesArticleBlock? in
-            guard let fragment = balancedContent(for: match, in: html) else { return nil }
-            if let url = imageURL(in: fragment) {
-                return .image(
-                    url: url,
-                    caption: attribute(named: "alt", in: fragment).flatMap(decodeHTML),
-                    credit: element(named: "cite", in: fragment).flatMap(decodeHTML)
-                )
-            }
-            guard let paragraph = decodeHTML(fragment), !paragraph.isEmpty else { return nil }
-            let links = links(in: fragment, baseURL: baseURL)
-            if !links.isEmpty { return .linkedParagraph(paragraph, links: links) }
-            return .paragraph(paragraph)
-        }
-        return blocks.isEmpty ? nil : NewYorkTimesArticle(blocks: blocks)
-    }
-
-    private static func links(in fragment: String, baseURL: URL?) -> [NewYorkTimesArticleLink] {
-        let nsFragment = fragment as NSString
-        let range = NSRange(location: 0, length: nsFragment.length)
-        return anchorRegex.matches(in: fragment, range: range).compactMap { match in
-            let anchor = nsFragment.substring(with: match.range)
-            guard let href = attribute(named: "href", in: anchor).flatMap(decodeHTML),
-                  let labelRange = Range(match.range(at: 1), in: fragment),
-                  let label = decodeHTML(String(fragment[labelRange])),
-                  !label.isEmpty else { return nil }
-            let resolvedURL: URL?
-            if let baseURL {
-                resolvedURL = URL(string: href, relativeTo: baseURL)?.absoluteURL
-            } else {
-                resolvedURL = URL(string: href).flatMap { $0.scheme == nil ? nil : $0 }
-            }
-            guard let url = resolvedURL else { return nil }
-            return NewYorkTimesArticleLink(label: label, url: url)
-        }
-    }
-
-    private static func balancedContent(for opening: NSTextCheckingResult, in html: String) -> String? {
-        let contentLocation = opening.range.location + opening.range.length
-        let searchRange = NSRange(location: contentLocation, length: (html as NSString).length - contentLocation)
-        var depth = 1
-        for token in divTokenRegex.matches(in: html, range: searchRange) {
-            let value = (html as NSString).substring(with: token.range).lowercased()
-            if value.hasPrefix("</div") { depth -= 1 } else { depth += 1 }
-            if depth == 0 {
-                return (html as NSString).substring(
-                    with: NSRange(location: contentLocation, length: token.range.location - contentLocation)
-                )
-            }
-        }
-        return nil
-    }
-
-    private static func imageURL(in fragment: String) -> URL? {
-        for attributeName in ["data-src", "src"] {
-            if let value = attribute(named: attributeName, in: fragment),
-               let decoded = decodeHTML(value),
-               let url = MediaURL.image(decoded) {
-                return url
-            }
-        }
-        return nil
-    }
-
-    private static func attribute(named name: String, in fragment: String) -> String? {
-        let escaped = NSRegularExpression.escapedPattern(for: name)
-        guard let regex = try? NSRegularExpression(
-            pattern: #"\b"# + escaped + #"\s*=\s*["']([^"']+)["']"#,
-            options: [.caseInsensitive]
-        ) else { return nil }
-        let range = NSRange(fragment.startIndex..<fragment.endIndex, in: fragment)
-        guard let match = regex.firstMatch(in: fragment, range: range),
-              let valueRange = Range(match.range(at: 1), in: fragment) else { return nil }
-        return String(fragment[valueRange])
-    }
-
-    private static func element(named name: String, in fragment: String) -> String? {
-        let escaped = NSRegularExpression.escapedPattern(for: name)
-        guard let regex = try? NSRegularExpression(
-            pattern: #"<"# + escaped + #"\b[^>]*>(.*?)</"# + escaped + #"\s*>"#,
-            options: [.caseInsensitive, .dotMatchesLineSeparators]
-        ) else { return nil }
-        let range = NSRange(fragment.startIndex..<fragment.endIndex, in: fragment)
-        guard let match = regex.firstMatch(in: fragment, range: range),
-              let valueRange = Range(match.range(at: 1), in: fragment) else { return nil }
-        return String(fragment[valueRange])
-    }
-
-    private static func decodeHTML(_ fragment: String) -> String? {
-        guard let data = ("<span>\(fragment)</span>").data(using: .utf8),
-              let attributed = try? NSAttributedString(
-                data: data,
-                options: [
-                    .documentType: NSAttributedString.DocumentType.html,
-                    .characterEncoding: String.Encoding.utf8.rawValue
-                ],
-                documentAttributes: nil
-              ) else { return nil }
-        return attributed.string.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
+enum NewYorkTimesArticleError: Error {
+    case bodyMissing
 }
 
-private enum NYTimesArticleError: Error { case bodyMissing }
+enum NewYorkTimesArticleParser {
+    private typealias Node = xmlNodePtr
+    private static let ignoredTags: Set<String> = ["aside", "button", "figcaption", "footer", "form", "nav", "noscript", "script", "style", "svg"]
+    private static let ignoredClasses: Set<String> = ["article-body-aside", "big_ad"]
+    private static let blockTags: Set<String> = ["blockquote", "div", "figure", "h2", "h3", "h4", "h5", "h6", "li", "p", "section"]
+
+    static func extract(from html: String, baseURL: URL) -> NewYorkTimesArticle? {
+        let length = html.utf8.count
+        guard length > 0, let byteCount = Int32(exactly: length) else { return nil }
+        let options = HTML_PARSE_NONET.rawValue | HTML_PARSE_NOERROR.rawValue | HTML_PARSE_NOWARNING.rawValue
+        guard let document = html.withCString({
+            htmlReadMemory($0, byteCount, nil, "UTF-8", Int32(options))
+        }) else { return nil }
+        defer { xmlFreeDoc(document) }
+
+        guard let article = firstElement(in: xmlDocGetRootElement(document), matching: { tag($0) == "article" && classes($0).contains("article-content") }),
+              let body = firstElement(in: article.pointee.children, matching: { classes($0).contains("article-body") }) else { return nil }
+
+        let cover = firstElement(in: article.pointee.children, matching: { classes($0).contains("article-span-photo") })
+            .flatMap { figure in
+                firstElement(in: figure.pointee.children, matching: { tag($0) == "img" })
+                    .flatMap { photo($0, figure: figure, baseURL: baseURL) }
+            }
+        var reader = Reader(baseURL: baseURL)
+        reader.visitSiblings(body.pointee.children)
+        reader.flushText()
+        return .structured(blocks: reader.blocks, cover: cover)
+    }
+
+    private struct Reader {
+        let baseURL: URL
+        var blocks: [NewYorkTimesArticleBlock] = []
+        private var text = ""
+        private var links: [NewYorkTimesArticleLink] = []
+
+        init(baseURL: URL) { self.baseURL = baseURL }
+
+        mutating func visitSiblings(_ first: Node?, figure: Node? = nil) {
+            var current = first
+            while let node = current {
+                visit(node, figure: figure)
+                current = node.pointee.next
+            }
+        }
+
+        private mutating func visit(_ node: Node, figure: Node?) {
+            if node.pointee.type == XML_TEXT_NODE, let value = node.pointee.content {
+                text += String(cString: value)
+                return
+            }
+            guard node.pointee.type == XML_ELEMENT_NODE else { return }
+            let name = tag(node)
+            guard !ignoredTags.contains(name), classes(node).isDisjoint(with: ignoredClasses) else { return }
+            switch name {
+            case "br":
+                text += "\n"
+            case "img":
+                guard let photo = photo(node, figure: figure, baseURL: baseURL) else { return }
+                flushText()
+                blocks.append(.image(photo))
+            case "a":
+                let label = normalizedText(textContent(node))
+                if !label.isEmpty, let url = resolvedURL(attribute("href", of: node), relativeTo: baseURL) {
+                    links.append(.init(label: label, url: url))
+                }
+                visitSiblings(node.pointee.children, figure: figure)
+            default:
+                let separatesText = blockTags.contains(name)
+                if separatesText { flushText() }
+                visitSiblings(node.pointee.children, figure: name == "figure" ? node : figure)
+                if separatesText { flushText() }
+            }
+        }
+
+        mutating func flushText() {
+            let paragraph = normalizedText(text)
+            if !paragraph.isEmpty {
+                blocks.append(links.isEmpty ? .paragraph(paragraph) : .linkedParagraph(paragraph, links: links))
+            }
+            text = ""
+            links.removeAll(keepingCapacity: true)
+        }
+    }
+
+    private static func photo(_ image: Node, figure: Node?, baseURL: URL) -> NewYorkTimesArticlePhoto? {
+        guard let source = resolvedURL(attribute("data-src", of: image), relativeTo: baseURL)
+                ?? resolvedURL(attribute("src", of: image), relativeTo: baseURL),
+              let url = MediaURL.image(source.absoluteString) else { return nil }
+        let caption = firstElement(in: figure?.pointee.children, matching: { tag($0) == "figcaption" })
+        let credit = firstElement(in: caption?.pointee.children, matching: { tag($0) == "cite" })
+        return NewYorkTimesArticlePhoto(
+            url: url,
+            caption: caption.flatMap { nonEmptyText(textContent($0, omitting: "cite")) }
+                ?? attribute("alt", of: image).flatMap(nonEmptyText),
+            credit: credit.flatMap { nonEmptyText(textContent($0)) }
+        )
+    }
+
+    private static func firstElement(in first: Node?, matching: (Node) -> Bool) -> Node? {
+        var current = first
+        while let node = current {
+            if node.pointee.type == XML_ELEMENT_NODE {
+                if matching(node) { return node }
+                if let found = firstElement(in: node.pointee.children, matching: matching) { return found }
+            }
+            current = node.pointee.next
+        }
+        return nil
+    }
+
+    private static func textContent(_ node: Node, omitting skippedTag: String? = nil) -> String {
+        if node.pointee.type == XML_TEXT_NODE, let value = node.pointee.content { return String(cString: value) }
+        guard node.pointee.type == XML_ELEMENT_NODE, tag(node) != skippedTag else { return "" }
+        var result = ""
+        var current = node.pointee.children
+        while let child = current {
+            result += textContent(child, omitting: skippedTag)
+            current = child.pointee.next
+        }
+        return result
+    }
+
+    private static func tag(_ node: Node) -> String {
+        String(cString: node.pointee.name)
+    }
+
+    private static func classes(_ node: Node) -> Set<String> {
+        Set((attribute("class", of: node) ?? "").split(whereSeparator: \.isWhitespace).map(String.init))
+    }
+
+    private static func attribute(_ name: String, of node: Node) -> String? {
+        guard let value = name.utf8CString.withUnsafeBufferPointer({ buffer in
+            buffer.baseAddress?.withMemoryRebound(to: UInt8.self, capacity: buffer.count) { xmlGetProp(node, $0) }
+        }) else { return nil }
+        defer { xmlFree(value) }
+        return String(cString: value)
+    }
+
+    private static func normalizedText(_ text: String) -> String {
+        text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
+    private static func nonEmptyText(_ text: String) -> String? {
+        let value = normalizedText(text)
+        return value.isEmpty ? nil : value
+    }
+
+    private static func resolvedURL(_ value: String?, relativeTo baseURL: URL) -> URL? {
+        guard let value, !value.isEmpty, !value.hasPrefix("#"),
+              let url = URL(string: value, relativeTo: baseURL)?.absoluteURL,
+              let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) else { return nil }
+        return url
+    }
+}
 
 struct ArticlePreviewResponse: Decodable {
     let data: Payload

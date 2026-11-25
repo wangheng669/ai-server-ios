@@ -246,7 +246,7 @@ struct NewsFeedView: View {
         }
         .appSheet(item: $selectedPost) { post in
             FeedPostSheetContent(post: post, model: model)
-                .readingSheetPresentation()
+                .readingSheetPresentation(allowsUserExpansion: post.isNewYorkTimes)
         }
         .onChange(of: rootTabIsActive, initial: true) { _, isActive in
             if isActive && scenePhase == .active {
@@ -1837,7 +1837,7 @@ struct FeedPostSheetContent: View {
             } else {
                 PostDetailView(
                     post: post,
-                    preloadedNewYorkTimesArticle: model?.preloadedNewYorkTimesArticle(for: post.id),
+                    preloadedNewYorkTimesPost: loadsStoredDetail ? model?.preloadedNewYorkTimesPost(for: post.id) : nil,
                     rssAvatarURL: rssDirectoryAvatarURL(for: post, feeds: model?.rssFeeds ?? []),
                     loadsStoredDetail: loadsStoredDetail,
                     autoplaysYouTube: autoplaysYouTube

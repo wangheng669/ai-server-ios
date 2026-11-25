@@ -235,13 +235,12 @@ final class NewsFeedViewModel: ObservableObject {
     private let fetchRSSFeedPosts: (Int, Int, Int) async throws -> [Post]
     private let fetchWeChatFeedPosts: (Int, Int, Int) async throws -> [Post]
     private let fetchPostDetail: (Int) async throws -> Post
-    private let fetchNewYorkTimesArticle: (URL) async throws -> NewYorkTimesArticle
     private var loadingXTranslationIDs: Set<Int> = []
     private var loadingXQuotedTranslationIDs: Set<Int> = []
     private var loadingXReplyContextIDs: Set<Int> = []
     private var loadingXLiveDetailIDs: Set<Int> = []
-    private var preloadedNewYorkTimesArticles: [Int: NewYorkTimesArticle] = [:]
-    private var newYorkTimesPrefetchTask: Task<Void, Never>?
+    private var preloadedNewYorkTimesPosts: [Int: Post] = [:]
+    private var loadingNewYorkTimesPostIDs: Set<Int> = []
     private var rssSelectionGeneration = UUID()
     private var weChatSelectionGeneration = UUID()
     private var selectedRSSPage = 1
@@ -269,7 +268,6 @@ final class NewsFeedViewModel: ObservableObject {
         fetchRSSFeedPosts: ((Int, Int, Int) async throws -> [Post])? = nil,
         fetchWeChatFeedPosts: ((Int, Int, Int) async throws -> [Post])? = nil,
         fetchPostDetail: ((Int) async throws -> Post)? = nil,
-        fetchNewYorkTimesArticle: ((URL) async throws -> NewYorkTimesArticle)? = nil,
         diskCache: FeedDiskCache = .shared
     ) {
         #if DEBUG
@@ -351,9 +349,6 @@ final class NewsFeedViewModel: ObservableObject {
         }
         self.fetchPostDetail = fetchPostDetail ?? { postID in
             try await client.fetchPost(id: postID)
-        }
-        self.fetchNewYorkTimesArticle = fetchNewYorkTimesArticle ?? { url in
-            try await client.fetchNewYorkTimesArticle(url: url)
         }
         if let fetchFlashPosts {
             self.fetchFlashPosts = fetchFlashPosts
@@ -454,7 +449,7 @@ final class NewsFeedViewModel: ObservableObject {
             canLoadMoreRSSSelection = !result.isEmpty
             errorMessage = nil
             schedulePresentationPrewarm(for: result)
-            scheduleSelectedRSSNewYorkTimesPrefetch(for: result, feedID: feedID)
+            scheduleNewYorkTimesPrefetch(for: result)
         } catch is CancellationError {
             return
         } catch {
@@ -482,7 +477,7 @@ final class NewsFeedViewModel: ObservableObject {
             canLoadMoreRSSSelection = !result.isEmpty
             errorMessage = nil
             schedulePresentationPrewarm(for: result)
-            scheduleSelectedRSSNewYorkTimesPrefetch(for: result, feedID: feedID)
+            scheduleNewYorkTimesPrefetch(for: result)
         } catch is CancellationError {
             return
         } catch {
@@ -647,38 +642,18 @@ final class NewsFeedViewModel: ObservableObject {
         await refresh()
     }
 
-    private func prefetchNewYorkTimesBodies(for posts: [Post]) async throws -> [Post] {
-        try await withThrowingTaskGroup(of: (Int, Post, NewYorkTimesArticle?).self, returning: [Post].self) { group in
-            for (index, post) in posts.enumerated() {
-                group.addTask { [fetchPostDetail, fetchNewYorkTimesArticle] in
-                    guard post.isNewYorkTimes else { return (index, post, nil) }
-
-                    // The list endpoint intentionally truncates content. Always
-                    // read the raw database row before publishing a tappable card.
-                    let detail = try await fetchPostDetail(post.id)
-                    let hasStoredArticle = (detail.contentZH ?? detail.content)
-                        .flatMap(NewYorkTimesArticle.storedText) != nil
-                    guard let link = detail.linkURL ?? post.linkURL else {
-                        guard hasStoredArticle else { throw APIError.invalidURL }
-                        return (index, detail, nil)
-                    }
-                    do {
-                        return (index, detail, try await fetchNewYorkTimesArticle(link))
-                    } catch {
-                        guard hasStoredArticle else { throw error }
-                        return (index, detail, nil)
-                    }
+    private func prefetchNewYorkTimesDetails(for ids: Set<Int>) async {
+        defer { loadingNewYorkTimesPostIDs.subtract(ids) }
+        await withTaskGroup(of: Post?.self) { group in
+            for id in ids {
+                group.addTask { [fetchPostDetail] in try? await fetchPostDetail(id) }
+            }
+            for await detail in group {
+                guard !Task.isCancelled else { return }
+                if let detail, NewYorkTimesArticle(storedPost: detail) != nil {
+                    preloadedNewYorkTimesPosts[detail.id] = detail
                 }
             }
-
-            var warmed = posts
-            for try await (index, post, article) in group {
-                warmed[index] = post
-                if let article {
-                    preloadedNewYorkTimesArticles[post.id] = article
-                }
-            }
-            return warmed
         }
     }
 
@@ -734,8 +709,8 @@ final class NewsFeedViewModel: ObservableObject {
         scheduleXPresentationPublish()
     }
 
-    func preloadedNewYorkTimesArticle(for postID: Int) -> NewYorkTimesArticle? {
-        preloadedNewYorkTimesArticles[postID]
+    func preloadedNewYorkTimesPost(for postID: Int) -> Post? {
+        preloadedNewYorkTimesPosts[postID]
     }
 
     func posts(for source: FeedSource) -> [Post] {
@@ -1032,7 +1007,7 @@ final class NewsFeedViewModel: ObservableObject {
             preparedPages.removeValue(forKey: next)
             persistCurrentSnapshot()
             if next == .newYorkTimes {
-                scheduleNewYorkTimesPrefetch(for: posts, cancelsPrevious: true)
+                scheduleNewYorkTimesPrefetch(for: posts)
             }
         }
 
@@ -1276,7 +1251,7 @@ final class NewsFeedViewModel: ObservableObject {
             persistCurrentSnapshot()
             if requestedSource != .x { schedulePresentationPrewarm(for: result) }
             if requestedSource == .newYorkTimes {
-                scheduleNewYorkTimesPrefetch(for: result, cancelsPrevious: true)
+                scheduleNewYorkTimesPrefetch(for: result)
             }
         } catch is CancellationError { } catch {
             await restoration
@@ -1333,7 +1308,7 @@ final class NewsFeedViewModel: ObservableObject {
             cache[source] = .init(posts: posts, page: page, canLoadMore: canLoadMore)
             persistCurrentSnapshot()
             if requestedSource == .newYorkTimes {
-                scheduleNewYorkTimesPrefetch(for: result, cancelsPrevious: false)
+                scheduleNewYorkTimesPrefetch(for: result)
             }
         } catch is CancellationError { } catch {
             guard !Task.isCancelled, requestGeneration == generation else { return }
@@ -1465,43 +1440,13 @@ final class NewsFeedViewModel: ObservableObject {
         }
     }
 
-    private func scheduleNewYorkTimesPrefetch(for posts: [Post], cancelsPrevious: Bool) {
-        if cancelsPrevious { newYorkTimesPrefetchTask?.cancel() }
-        newYorkTimesPrefetchTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                let warmed = try await self.prefetchNewYorkTimesBodies(for: posts)
-                guard !Task.isCancelled, self.source == .newYorkTimes else { return }
-                let warmedByID = Dictionary(uniqueKeysWithValues: warmed.map { ($0.id, $0) })
-                self.posts = self.posts.map { warmedByID[$0.id] ?? $0 }
-                self.cache[.newYorkTimes] = .init(
-                    posts: self.posts,
-                    page: self.page,
-                    canLoadMore: self.canLoadMore
-                )
-                self.persistCurrentSnapshot()
-            } catch is CancellationError {
-                return
-            } catch {
-                // The feed cards are already usable. Detail prefetch is best-effort.
-            }
-        }
-    }
-
-    private func scheduleSelectedRSSNewYorkTimesPrefetch(for posts: [Post], feedID: Int) {
-        guard posts.contains(where: \.isNewYorkTimes) else { return }
+    private func scheduleNewYorkTimesPrefetch(for posts: [Post]) {
+        let ids = Set(posts.lazy.filter(\.isNewYorkTimes).map(\.id))
+            .subtracting(loadingNewYorkTimesPostIDs)
+        guard !ids.isEmpty else { return }
+        loadingNewYorkTimesPostIDs.formUnion(ids)
         Task { [weak self] in
-            guard let self else { return }
-            do {
-                let warmed = try await self.prefetchNewYorkTimesBodies(for: posts)
-                guard !Task.isCancelled, self.selectedRSSFeedID == feedID else { return }
-                let warmedByID = Dictionary(uniqueKeysWithValues: warmed.map { ($0.id, $0) })
-                self.selectedRSSPosts = self.selectedRSSPosts.map { warmedByID[$0.id] ?? $0 }
-            } catch is CancellationError {
-                return
-            } catch {
-                // The selected RSS list remains usable without detail prefetch.
-            }
+            await self?.prefetchNewYorkTimesDetails(for: ids)
         }
     }
 
