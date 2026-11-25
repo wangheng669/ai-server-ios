@@ -83,44 +83,42 @@ struct FamousHoldingDetailView: View {
                 }
             }
             .scrollIndicators(.hidden)
+            .contentMargins(.bottom, 60, for: .scrollContent)
             .background(HoldingsPalette.card)
         }
         .background(HoldingsPalette.canvas.ignoresSafeArea())
+        .floatingSheetClose("关闭持仓详情", action: dismiss.callAsFunction)
         .toolbar(.hidden, for: .navigationBar)
         .task(id: manager.reportIdentity) { await store.loadDetail(for: manager) }
     }
 
     private func filterBar(_ manager: FamousHoldingsManager) -> some View {
-        HStack(spacing: 0) {
-            ScrollView(.horizontal) {
-                HStack(spacing: 8) {
-                    ForEach(HoldingDetailFilter.allCases) { item in
-                        let count = filterCount(item, manager: manager)
-                        Button { filter = item } label: {
-                            Text("\(item.rawValue) \(count.map { String($0) } ?? "—")")
-                                .font(.system(size: 12, weight: filter == item ? .semibold : .medium))
-                                .foregroundStyle(filter == item ? Color.white : Color.secondary)
-                                .padding(.horizontal, 13)
-                                .frame(height: 32)
-                                .background(
-                                    filter == item ? HoldingsPalette.blue : Color.secondary.opacity(0.09),
-                                    in: Capsule()
-                                )
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(item.rawValue)
-                        .accessibilityValue(count.map { "\($0) 条" } ?? "数量暂未返回")
-                        .accessibilityIdentifier("holding-filter-\(item.rawValue)")
-                        .accessibilityAddTraits(filter == item ? .isSelected : [])
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ForEach(HoldingDetailFilter.allCases) { item in
+                    let count = filterCount(item, manager: manager)
+                    Button { filter = item } label: {
+                        Text("\(item.rawValue) \(count.map { String($0) } ?? "—")")
+                            .font(.system(size: 12, weight: filter == item ? .semibold : .medium))
+                            .foregroundStyle(filter == item ? Color.white : Color.secondary)
+                            .padding(.horizontal, 13)
+                            .frame(height: 32)
+                            .background(
+                                filter == item ? HoldingsPalette.blue : Color.secondary.opacity(0.09),
+                                in: Capsule()
+                            )
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(item.rawValue)
+                    .accessibilityValue(count.map { "\($0) 条" } ?? "数量暂未返回")
+                    .accessibilityIdentifier("holding-filter-\(item.rawValue)")
+                    .accessibilityAddTraits(filter == item ? .isSelected : [])
                 }
-                .padding(.horizontal, 20)
             }
-            .accessibilityIdentifier("holding-detail-filters")
-            .scrollIndicators(.hidden)
-            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭持仓详情")
-                .padding(.trailing, 12)
+            .padding(.horizontal, 20)
         }
+        .accessibilityIdentifier("holding-detail-filters")
+        .scrollIndicators(.hidden)
         .padding(.vertical, 6)
     }
 

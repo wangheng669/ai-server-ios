@@ -28,27 +28,13 @@ struct MarketSentimentNotificationView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Text(report.title)
-                    .font(.headline)
-                    .accessibilityAddTraits(.isHeader)
-                Spacer(minLength: 0)
-                Button { dismiss() } label: {
-                    Image(systemName: "xmark")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 32, height: 32)
-                        .background(Color.secondary.opacity(0.09), in: Circle())
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("关闭报告")
-            }
-            .padding(.leading, 20)
-            .padding(.trailing, 10)
-            .padding(.vertical, 3)
-            .background(InvestmentDesign.surface)
+            Text(report.title)
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .background(InvestmentDesign.surface)
             Divider()
 
             ScrollView {
@@ -108,11 +94,12 @@ struct MarketSentimentNotificationView: View {
                     }
                 }
                 .padding(16)
-                .padding(.bottom, 8)
+                .padding(.bottom, 60)
             }
         }
         .tint(accent)
         .background(InvestmentDesign.canvas.ignoresSafeArea())
+        .floatingSheetClose("关闭报告", action: dismiss.callAsFunction)
         .inAppBrowserCover(item: $browser)
         .accessibilityIdentifier("native-report-market-sentiment")
     }

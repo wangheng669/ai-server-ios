@@ -79,8 +79,10 @@ struct NativeReportNotificationView: View {
                 .padding(.horizontal, 20).padding(.vertical, 24)
             }
             .scrollIndicators(.hidden)
+            .contentMargins(.bottom, 60, for: .scrollContent)
         }
         .background(HoldingsPalette.canvas.ignoresSafeArea())
+        .floatingSheetClose("关闭报告", action: dismiss.callAsFunction)
         .inAppBrowserCover(item: $browser)
         .accessibilityIdentifier("native-report-\(report.kind)")
     }
@@ -90,11 +92,6 @@ struct NativeReportNotificationView: View {
             Image(systemName: style.symbol).foregroundStyle(style.color)
             Text(style.label).font(.headline)
             Spacer()
-            Button { dismiss() } label: {
-                Image(systemName: "xmark").font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary).frame(width: 32, height: 32)
-                    .background(Color.secondary.opacity(0.1), in: Circle())
-            }.accessibilityLabel("关闭报告")
         }
         .padding(.horizontal, 20).padding(.vertical, 16)
         .background(HoldingsPalette.card)

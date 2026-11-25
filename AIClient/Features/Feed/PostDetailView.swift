@@ -122,20 +122,11 @@ struct PostDetailView: View {
             else if post.isRSS { rssDetail }
             else { standardDetail }
         }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if post.sourceName == "知乎" {
-                zhihuContentToolbar
-                    .padding(.horizontal, 12)
-                    .background(.background)
-            } else if post.sourceName != "Truth", !post.isYouTube, !post.isBilibili || hidesNavigationBar {
-                HStack {
-                    Spacer()
-                    DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭动态详情")
-                }
-                .padding(.horizontal, 12)
-                .background(.background)
-            }
-        }
+        .floatingSheetClose(
+            post.isBilibili ? "关闭视频详情" : "关闭动态详情",
+            isVisible: !post.isYouTube,
+            action: dismiss.callAsFunction
+        )
         .navigationDestination(item: $selectedXAuthor) { author in
             XAuthorPostsView(author: author)
         }
@@ -157,7 +148,9 @@ struct PostDetailView: View {
         .inAppBrowserCover(item: $presentedArticleLink)
         .imageGallery(item: $weiboImageSelection)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if post.isWeiboRSS {
+            if post.sourceName == "知乎" {
+                zhihuBottomBar
+            } else if post.isWeiboRSS {
                 weiboBottomBar
             }
         }
@@ -172,7 +165,6 @@ struct PostDetailView: View {
                     } label: {
                         Image(systemName: "ellipsis")
                     }
-                    DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭视频详情")
                 }
             }
         }
@@ -352,7 +344,7 @@ struct PostDetailView: View {
                     }
                     .padding(.horizontal, 18)
                     .padding(.top, 14)
-                    .padding(.bottom, 30)
+                    .padding(.bottom, 60)
                 }
             }
         }
@@ -382,7 +374,9 @@ struct PostDetailView: View {
                     }
                 }
             }
-            .padding(.horizontal, 16).padding(.vertical, 14)
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 60)
         }
     }
 
@@ -429,7 +423,7 @@ struct PostDetailView: View {
                 }
                 .padding(.horizontal, 22)
                 .padding(.top, 22)
-                .padding(.bottom, 36)
+                .padding(.bottom, 60)
             }
             .task(id: post.id) {
                 await Task.yield()
@@ -496,7 +490,7 @@ struct PostDetailView: View {
                 }
                 .padding(.horizontal, 18)
                 .padding(.top, 24)
-                .padding(.bottom, 36)
+                .padding(.bottom, 60)
             }
         }
         .background(Color(uiColor: .systemBackground))
@@ -701,6 +695,7 @@ struct PostDetailView: View {
                         weiboCommentsSection
                     }
                 }
+                .padding(.bottom, 60)
             }
         }
         .background(Color(uiColor: .systemBackground))
@@ -1026,7 +1021,7 @@ struct PostDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 16)
                 .padding(.top, 18)
-                .padding(.bottom, 24)
+                .padding(.bottom, 60)
             }
             .accessibilityIdentifier("xueqiu-post-detail-\(post.id)")
         }
@@ -1157,14 +1152,10 @@ struct PostDetailView: View {
 
     private var truthDetail: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                truthDetailAuthor
-                Spacer(minLength: 0)
-                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭动态详情")
-            }
-            .frame(maxWidth: 640)
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
+            truthDetailAuthor
+                .frame(maxWidth: 640, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
@@ -1191,7 +1182,8 @@ struct PostDetailView: View {
                 }
                 .frame(maxWidth: 640, alignment: .leading)
                 .padding(.horizontal, 20)
-                .padding(.vertical, 24)
+                .padding(.top, 24)
+                .padding(.bottom, 60)
                 .frame(maxWidth: .infinity)
             }
         }
@@ -1259,6 +1251,8 @@ struct PostDetailView: View {
                             .font(.system(size: 12.5))
                             .foregroundStyle(.secondary)
                     }
+                    Spacer(minLength: 0)
+                    zhihuAuthorActions
                 }
                 .padding(.top, 18)
 
@@ -1273,15 +1267,12 @@ struct PostDetailView: View {
             }
             .padding(.horizontal, 18)
             .padding(.top, 2)
-            .padding(.bottom, 28)
+            .padding(.bottom, 60)
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) { zhihuBottomBar }
     }
 
-    private var zhihuContentToolbar: some View {
+    private var zhihuAuthorActions: some View {
         HStack(spacing: 8) {
-            Spacer(minLength: 4)
-
             if let link = post.linkURL {
                 ShareLink(item: link) {
                     Image(systemName: "square.and.arrow.up")
@@ -1304,7 +1295,6 @@ struct PostDetailView: View {
             }
             .foregroundStyle(.primary)
             .accessibilityLabel("更多")
-            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭动态详情")
         }
         .frame(height: 44)
     }
@@ -1441,7 +1431,7 @@ struct PostDetailView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 18)
-                .padding(.bottom, 34)
+                .padding(.bottom, 60)
             }
         }
     }
@@ -1872,9 +1862,11 @@ struct PostDetailView: View {
         VStack(spacing: 0) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    xNavigationBar
                     VStack(alignment: .leading, spacing: 0) {
-                        xAuthorHeader
+                        HStack(spacing: 8) {
+                            xAuthorHeader
+                            xPostMenu
+                        }
                         VStack(alignment: .leading, spacing: 16) {
                             ForEach(Array(xDisplayedDetailParagraphs.enumerated()), id: \.offset) { _, paragraph in
                                 Text(xStyledParagraph(paragraph))
@@ -2018,30 +2010,20 @@ struct PostDetailView: View {
         .background(Color(uiColor: .systemBackground))
     }
 
-    private var xNavigationBar: some View {
-        HStack(spacing: 0) {
-            Color.clear.frame(width: 44)
-            Spacer()
-            Text("帖子")
-                .font(.system(size: 18, weight: .bold))
-            Spacer()
-            Menu {
-                Button("在 X 中查看", action: openXOriginal)
-                if let link = post.linkURL {
-                    ShareLink(item: link) { Label("分享帖子", systemImage: "square.and.arrow.up") }
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 19, weight: .medium))
-                    .frame(width: 44, height: 44)
+    private var xPostMenu: some View {
+        Menu {
+            Button("在 X 中查看", action: openXOriginal)
+            if let link = post.linkURL {
+                ShareLink(item: link) { Label("分享帖子", systemImage: "square.and.arrow.up") }
             }
-            .accessibilityLabel("帖子选项")
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 19, weight: .medium))
+                .frame(width: 44, height: 44)
         }
         .buttonStyle(.plain)
         .foregroundStyle(.primary)
-        .padding(.horizontal, 2)
-        .frame(height: 48)
-        .background(Color(uiColor: .systemBackground))
+        .accessibilityLabel("帖子选项")
     }
 
     private var xDisplayedDetailText: String {

@@ -372,10 +372,7 @@ private struct MarketQuotesSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 4) {
-                MarketRegionPicker(store: store, selection: $scope)
-                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭市场行情")
-            }
+            MarketRegionPicker(store: store, selection: $scope)
                 .padding(.horizontal, 12)
                 .padding(.top, 12)
                 .padding(.bottom, 4)
@@ -393,6 +390,7 @@ private struct MarketQuotesSheet: View {
             .tabViewStyle(.page(indexDisplayMode: .never))
         }
         .background(MarketStyle.surface)
+        .floatingSheetClose("关闭市场行情", action: dismiss.callAsFunction)
         .accessibilityIdentifier("market-quotes-sheet")
         .accessibilityAction(.escape) { dismiss() }
         .appSheet(item: $selectedDetail) { route in
@@ -535,7 +533,8 @@ private struct MarketQuotesPage: View {
                     }
                 }
             }
-            .padding(.vertical, 14)
+            .padding(.top, 14)
+            .padding(.bottom, 60)
         }
         .accessibilityIdentifier("market-quotes-page-\(scope.id)")
         .refreshable { await store.refresh() }
@@ -1433,12 +1432,13 @@ private struct MarketIndexDetailView: View {
                         .padding(.vertical, 6)
                 }
                 .padding(.horizontal, 10)
-                .padding(.bottom, 16)
+                .padding(.bottom, 60)
             }
             .scrollIndicators(.hidden)
             .accessibilityIdentifier("market-detail-scroll")
         }
         .background(MarketDetailPageStyle.canvas.ignoresSafeArea())
+        .floatingSheetClose("关闭行情详情", identifier: "market-detail-close", action: dismiss.callAsFunction)
         .accessibilityAction(.escape) { dismiss() }
         .toolbar(showsNavigationBar ? .visible : .hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
@@ -1507,8 +1507,6 @@ private struct MarketIndexDetailView: View {
                 .accessibilityLabel("在雪球打开\(quote?.presentationName ?? symbol)")
                 .accessibilityIdentifier("market-xueqiu-link")
             }
-            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭行情详情")
-                .accessibilityIdentifier("market-detail-close")
         }
         .padding(.leading, 15)
         .padding(.trailing, 10)
