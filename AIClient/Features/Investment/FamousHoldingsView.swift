@@ -119,7 +119,6 @@ private struct HoldingsPortfolio: View {
     let store: FamousHoldingsStore
     let summary: FamousHoldingsManager
     let disclaimer: String
-    @ScaledMetric(relativeTo: .largeTitle) private var amountSize: CGFloat = 38
     @State private var filter = HoldingPositionFilter.current
     @State private var query = ""
 
@@ -140,7 +139,7 @@ private struct HoldingsPortfolio: View {
                     }
                     .frame(minHeight: 44)
                 }
-                filingCard(manager)
+                HoldingsWeightOverview(manager: manager)
                 FilingAnalysis(manager: manager, detail: detail, disclaimer: disclaimer)
                     .padding(.top, 10)
                     .padding(.bottom, 22)
@@ -208,93 +207,143 @@ private struct HoldingsPortfolio: View {
         }
     }
 
-    private func filingCard(_ manager: FamousHoldingsManager) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                InvestorPortraitImage(manager: manager)
-                Text(manager.institutionName)
-                    .font(.title3.bold())
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
-                Spacer(minLength: 0)
-            }
+}
 
-            VStack(alignment: .leading, spacing: 5) {
-                Text("申报持仓市值")
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(.secondary)
-                let (amount, unit) = holdingUSDParts(manager.totalValueUsd)
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        filingAmount(amount)
-                        filingUnit(unit)
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        filingAmount(amount)
-                        filingUnit(unit)
-                    }
-                }
-                .accessibilityRepresentation {
-                    Text(exactHoldingUSD(manager.totalValueUsd))
-                }
-                if let previousDate = manager.analytics.previousReportDate,
-                   let previousTotal = manager.analytics.previousTotalValueUsd, previousTotal > 0 {
-                    let difference = manager.analytics.totalValueChangeUsd
-                    let change = manager.analytics.totalValueChangePct
-                    let changeText = difference == 0
-                        ? signedHoldingPercent(change)
-                        : "\(signedHoldingPercent(change))（\(difference < 0 ? "减少" : "增加") \(holdingUSD(abs(difference)))）"
-                    let value = Text(changeText).foregroundStyle(weightChangeColor(change))
-                    Text("较 \(quarterLabel(previousDate)) \(value)")
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("暂无可比较的上期市值")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .font(.footnote.weight(.medium).monospacedDigit())
+private struct HoldingsWeightOverview: View {
+    let manager: FamousHoldingsManager
+    @ScaledMetric(relativeTo: .title2) private var amountSize: CGFloat = 28
 
-            Divider()
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 14) {
-                    filingMetric("报告期末 · \(quarterLabel(manager.reportDate))", manager.reportDate)
-                    Spacer(minLength: 0)
-                    filingMetric("SEC 申报日", manager.filingDate)
-                }
-                VStack(alignment: .leading, spacing: 10) {
-                    filingMetric("报告期末 · \(quarterLabel(manager.reportDate))", manager.reportDate)
-                    filingMetric("SEC 申报日", manager.filingDate)
-                }
+    var body: some View {
+        let weights = manager.leadingWeights
+        VStack(alignment: .leading, spacing: 16) {
+            identity
+            metrics(weights: weights)
+            if !weights.isEmpty {
+                ranking(weights)
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .researchPanel(fill: ResearchDesign.fill)
+        .researchPanel()
     }
 
-    private func filingAmount(_ amount: String) -> some View {
-        Text(amount)
-            .font(.system(size: amountSize, weight: .bold).monospacedDigit())
-            .foregroundStyle(.primary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.60)
-    }
-
-    private func filingUnit(_ unit: String) -> some View {
-        Text(unit)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .fixedSize()
-    }
-
-    private func filingMetric(_ title: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title).font(.footnote).foregroundStyle(.secondary)
-            Text(value).font(.subheadline.weight(.semibold).monospacedDigit())
+    private var identity: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 12) {
+                managerIdentity
+                    .fixedSize(horizontal: true, vertical: false)
+                Spacer(minLength: 0)
+                period
+                    .fixedSize()
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                period
+                managerIdentity
+            }
         }
-        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var managerIdentity: some View {
+        HStack(alignment: .center, spacing: 10) {
+            InvestorPortraitImage(manager: manager)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(manager.displayName)
+                    .font(.title3.bold())
+                    .accessibilityAddTraits(.isHeader)
+                Text("\(manager.institutionName) · \(manager.positionsCount) 项持仓")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var period: some View {
+        Text(quarterLabel(manager.reportDate))
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+    }
+
+    private func metrics(weights: [FamousHoldingWeight]) -> some View {
+        let concentration = weights.reduce(0) { $0 + $1.weightPct }
+        return ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 12) {
+                reportedValue.fixedSize(horizontal: true, vertical: false)
+                if !weights.isEmpty {
+                    Spacer(minLength: 0)
+                    concentrationValue(count: weights.count, concentration: concentration)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                reportedValue
+                if !weights.isEmpty {
+                    concentrationValue(count: weights.count, concentration: concentration)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(ResearchDesign.selection, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var reportedValue: some View {
+        let (amount, unit) = holdingUSDParts(manager.totalValueUsd)
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("申报市值")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(amount).font(.system(size: amountSize, weight: .bold).monospacedDigit())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+                Text(unit).font(.caption.weight(.semibold)).fixedSize()
+            }
+            .foregroundStyle(ResearchDesign.accent)
+            .accessibilityRepresentation { Text(exactHoldingUSD(manager.totalValueUsd)) }
+        }
         .accessibilityElement(children: .combine)
+    }
+
+    private func concentrationValue(count: Int, concentration: Double) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("前 \(count) 项合计")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Text(holdingPercent(concentration))
+                .font(.system(size: amountSize, weight: .bold).monospacedDigit())
+                .foregroundStyle(ResearchDesign.accent)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func ranking(_ weights: [FamousHoldingWeight]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("前 \(weights.count) 项持仓权重")
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+            ForEach(weights) { position in
+                VStack(spacing: 5) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(position.name)
+                                .font(.subheadline.weight(.semibold))
+                                .fixedSize(horizontal: false, vertical: true)
+                            if let symbol = position.symbol {
+                                Text(symbol)
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer(minLength: 0)
+                        Text(holdingPercent(position.weightPct))
+                            .font(.subheadline.weight(.semibold).monospacedDigit())
+                            .fixedSize()
+                    }
+                    HoldingWeightBar(weight: position.weightPct, tint: ResearchDesign.accent, height: 6)
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
     }
 }
 
@@ -371,11 +420,6 @@ private struct FilingAnalysis: View {
             Text("申报头寸构成")
                 .font(.headline)
                 .accessibilityAddTraits(.isHeader)
-            let top = positions.prefix(10)
-            let concentration = top.reduce(0) { $0 + $1.valueUsd } / total * 100
-            Text("前 \(top.count) 项占申报市值 \(holdingPercent(concentration))")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
             ForEach(HoldingDisclosureType.allCases.filter { amounts[$0] != nil }) { type in
                 let weight = amounts[type, default: 0] / total * 100
                 VStack(alignment: .leading, spacing: 5) {
@@ -397,6 +441,7 @@ private struct FilingAnalysis: View {
 struct HoldingWeightBar: View {
     let weight: Double
     let tint: Color
+    var height: CGFloat = 4
 
     var body: some View {
         GeometryReader { proxy in
@@ -408,7 +453,7 @@ struct HoldingWeightBar: View {
                         .frame(width: proxy.size.width * min(max(weight / 100, 0), 1))
                 }
         }
-        .frame(height: 4)
+        .frame(height: height)
         .accessibilityHidden(true)
     }
 }
@@ -427,6 +472,17 @@ private struct FilingSource: View {
                 }
             } else {
                 Text("数据来源 · SEC 13F 申报").font(.footnote.weight(.semibold))
+            }
+            Text("报告期末 \(manager.reportDate) · 申报日 \(manager.filingDate)")
+            if let previousDate = manager.analytics.previousReportDate,
+               let previousTotal = manager.analytics.previousTotalValueUsd, previousTotal > 0 {
+                let change = manager.analytics.totalValueChangePct
+                let amount = manager.analytics.totalValueChangeUsd
+                let amountText = amount == 0 ? "" : "（\(amount < 0 ? "减少" : "增加") \(holdingUSD(abs(amount)))）"
+                let value = Text(signedHoldingPercent(change) + amountText).foregroundStyle(weightChangeColor(change))
+                Text("申报市值较 \(quarterLabel(previousDate)) \(value)")
+            } else {
+                Text("暂无可比较的上期市值")
             }
             Text("原始申报 \(manager.holdingsCount) 条 · 合并后 \(manager.positionsCount) 项")
             Text(disclaimer)
@@ -495,7 +551,7 @@ func weightChangeColor(_ change: Double) -> Color {
 func quarterLabel(_ date: String) -> String {
     let parts = date.split(separator: "-").compactMap { Int($0) }
     guard parts.count == 3, (1...12).contains(parts[1]) else { return date }
-    return "\(parts[0]) Q\((parts[1] - 1) / 3 + 1)"
+    return "\(parts[0]) 年第 \((parts[1] - 1) / 3 + 1) 季度"
 }
 
 func holdingPercent(_ value: Double) -> String {

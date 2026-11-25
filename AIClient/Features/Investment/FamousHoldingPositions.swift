@@ -35,7 +35,9 @@ enum HoldingPositionFilter: CaseIterable, Identifiable {
         guard action != nil || !term.isEmpty else { return positions }
         return positions.filter { position in
             (action == nil || position.action == action)
-                && (term.isEmpty || position.originalName.localizedStandardContains(term)
+                && (term.isEmpty || position.name.localizedStandardContains(term)
+                    || (position.symbol?.localizedStandardContains(term) ?? false)
+                    || position.originalName.localizedStandardContains(term)
                     || position.titleOfClass.localizedStandardContains(term)
                     || position.cusip.localizedStandardContains(term))
         }
@@ -110,7 +112,7 @@ struct HoldingPositionControls: View {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
-            TextField("搜索申报名称或 CUSIP", text: $query)
+            TextField("搜索公司、代码或 CUSIP", text: $query)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
                 .submitLabel(.search)
@@ -181,7 +183,6 @@ struct HoldingPositionRow: View {
                 }
                 .font(.footnote.weight(.medium).monospacedDigit())
             }
-            HoldingWeightBar(weight: weight, tint: HoldingsPalette.blue)
         }
         .accessibilityElement(children: .combine)
     }
@@ -193,24 +194,25 @@ struct HoldingPositionIdentity: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(position.originalName)
+            Text(position.name)
                 .font(.subheadline.weight(.semibold))
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text(position.titleOfClass)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            let identifiers = [position.symbol, position.titleOfClass, showsCUSIP ? position.cusip : nil]
+                .compactMap { $0 }
+                .filter { !$0.isEmpty }
+                .joined(separator: " · ")
+            if !identifiers.isEmpty {
+                Text(identifiers)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            }
 
             let type = HoldingDisclosureType(position: position)
             if type != .shares {
                 Text(type.rawValue)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(HoldingsPalette.blue)
-            }
-            if showsCUSIP {
-                Text(position.cusip)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
             }
         }
     }

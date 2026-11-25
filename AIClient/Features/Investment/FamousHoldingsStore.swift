@@ -106,8 +106,8 @@ final class FamousHoldingsStore {
 }
 
 private enum FamousHoldingsCache {
-    private static let payloadKey = "market.famous-holdings.cache.v4"
-    private static let savedAtKey = "market.famous-holdings.cache.saved-at.v4"
+    private static let payloadKey = "market.famous-holdings.cache.v5"
+    private static let savedAtKey = "market.famous-holdings.cache.saved-at.v5"
     private static let maxAge: TimeInterval = 7 * 24 * 60 * 60
 
     static func load() -> FamousHoldings? {
