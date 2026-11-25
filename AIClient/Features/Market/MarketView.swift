@@ -1384,6 +1384,13 @@ private enum MarketDetailPageStyle {
     static let cornerRadius: CGFloat = 14
 }
 
+private enum StockDetailStyle {
+    static let ink = Color(red: 0.08, green: 0.14, blue: 0.22)
+    static let plot = Color(red: 0.96, green: 0.97, blue: 0.99)
+    static let rule = Color(red: 0.88, green: 0.90, blue: 0.93)
+    static let inset: CGFloat = 18
+}
+
 private struct MarketInstrumentDetailView: View {
     let route: MarketDetailRoute
     let store: MarketStore
@@ -1391,7 +1398,6 @@ private struct MarketInstrumentDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var selectedPeriod: MarketChartPeriod
-    @State private var displayedChart: MarketDetailChartRender?
     @State private var presentedValuation: CompanyValuationHistoryRoute?
 
     init(route: MarketDetailRoute, store: MarketStore, onSelectSymbol: @escaping (String) -> Void) {
@@ -1410,12 +1416,7 @@ private struct MarketInstrumentDetailView: View {
     private var historicalSymbol: String { quote?.historicalSymbol ?? symbol }
     private var chartSymbol: String { quote?.symbol ?? symbol }
     private var selectedRangeChart: MarketChart? {
-        if selectedPeriod == .intraday {
-            return store.chartSnapshot(symbol: chartSymbol, range: .day)?.artifacts.intradayDisplay?.chart
-        }
-        guard displayedChart?.period == selectedPeriod,
-              displayedChart?.symbol == chartSymbol else { return nil }
-        return displayedChart?.artifacts.chart
+        store.chartSnapshot(symbol: chartSymbol, range: selectedRange)?.artifacts.displays[selectedPeriod]?.chart
     }
     private var selectedPeriodReturn: Double? {
         guard selectedRange != .day else { return nil }
@@ -1460,11 +1461,10 @@ private struct MarketInstrumentDetailView: View {
             if isStock { stockToolbar }
             else { detailToolbar }
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: isStock ? 20 : 10) {
+                LazyVStack(alignment: .leading, spacing: isStock ? 24 : 10) {
                     VStack(alignment: .leading, spacing: 0) {
                         if isStock {
                             stockOverview
-                            InvestmentDesign.divider.frame(height: 1).padding(.top, 16)
                         } else {
                             detailHeader
                             Divider().padding(.horizontal, 14)
@@ -1473,7 +1473,6 @@ private struct MarketInstrumentDetailView: View {
                             selectedPeriod: $selectedPeriod,
                             symbol: chartSymbol,
                             store: store,
-                            renderedChart: $displayedChart,
                             usesStockLayout: isStock
                         )
                         .id(chartSymbol)
@@ -1481,6 +1480,9 @@ private struct MarketInstrumentDetailView: View {
                     .background(isStock ? Color.clear : MarketDetailPageStyle.card,
                                 in: RoundedRectangle(cornerRadius: MarketDetailPageStyle.cornerRadius))
 
+                    if isStock, showsStockSessionQuotes, let quote {
+                        stockSessionHeader(quote)
+                    }
                     keyData
                     if showsCompanyProfile { companyProfile }
                     if isIndex {
@@ -1504,7 +1506,7 @@ private struct MarketInstrumentDetailView: View {
                     }
                 }
                 .frame(maxWidth: isStock ? 640 : .infinity)
-                .padding(.horizontal, isStock ? 20 : 10)
+                .padding(.horizontal, isStock ? StockDetailStyle.inset : 10)
                 .padding(.bottom, isStock ? 28 : 60)
                 .frame(maxWidth: .infinity)
             }
@@ -1521,15 +1523,16 @@ private struct MarketInstrumentDetailView: View {
                 .appPresentationDetents([.large])
                 .appPresentationCornerRadius(28)
         }
+        .task(id: isStock ? chartSymbol : nil) {
+            guard isStock else { return }
+            await store.preloadStockCharts(symbol: chartSymbol, ranges: [.day, .week, .year, .fiveYears, .maximum])
+        }
         .task(id: historicalSymbol) {
-            async let chart: Void = store.loadChart(symbol: chartSymbol, range: selectedRange)
-            async let yearChart: Void = store.loadChart(symbol: chartSymbol, range: .year)
             if isIndex {
                 await store.loadIndexConstituents(symbol: historicalSymbol)
             } else if isStock || (quote != nil && !isCommodity && symbol != "^VIX") {
                 await store.loadCompanyLogo(symbol: symbol, name: instrumentName)
             }
-            _ = await (chart, yearChart)
             guard !Task.isCancelled else { return }
             #if DEBUG
             if let preview = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--market-pe-history-preview=") }) {
@@ -1537,6 +1540,10 @@ private struct MarketInstrumentDetailView: View {
                 presentedValuation = valuationRoute(kind: value == "ttm" ? .ttm : .staticPE)
             }
             #endif
+        }
+        .task(id: isStock ? nil : chartSymbol) {
+            guard !isStock else { return }
+            await store.loadChart(symbol: chartSymbol, range: .year)
         }
         .task(id: isStock ? symbol : nil, priority: .utility) {
             guard isStock else { return }
@@ -1551,17 +1558,18 @@ private struct MarketInstrumentDetailView: View {
     }
 
     private var stockToolbar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             stockLogo
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(instrumentName)
-                    .font(.title2.weight(.semibold))
+                    .font(.headline)
+                    .foregroundStyle(StockDetailStyle.ink)
                     .lineLimit(2)
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityIdentifier("market-detail-title")
                 Text(instrumentSubtitle)
-                    .font(.footnote.monospacedDigit())
+                    .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
@@ -1570,29 +1578,29 @@ private struct MarketInstrumentDetailView: View {
                 .accessibilityIdentifier("market-detail-close")
         }
         .frame(maxWidth: 640, alignment: .leading)
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
+        .padding(.horizontal, StockDetailStyle.inset)
+        .padding(.vertical, 6)
         .frame(maxWidth: .infinity)
         .background(InvestmentDesign.surface)
-        .overlay(alignment: .bottom) { InvestmentDesign.divider.frame(height: 1) }
+        .overlay(alignment: .bottom) { Rectangle().fill(StockDetailStyle.rule).frame(height: 1) }
     }
 
     @ViewBuilder
     private var stockLogo: some View {
         if let quote {
-            MarketInstrumentLogo(quote: quote, path: companyLogoPath, size: 42)
+            MarketInstrumentLogo(quote: quote, path: companyLogoPath, size: 32)
         } else {
             let monogram = Text(String(symbol.prefix(3)))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(InvestmentDesign.accent)
             Group {
                 if let url = marketCompanyLogoURL(companyLogoPath) {
-                    MarketCachedLogoImage(url: url, size: 42, fallback: AnyView(monogram))
+                    MarketCachedLogoImage(url: url, size: 32, fallback: AnyView(monogram))
                 } else {
                     monogram
                 }
             }
-            .frame(width: 42, height: 42)
+            .frame(width: 32, height: 32)
             .background(InvestmentDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 12))
         }
     }
@@ -1600,12 +1608,10 @@ private struct MarketInstrumentDetailView: View {
     private var stockOverview: some View {
         let current = store.stockQuotes.currentQuote(for: symbol, marketStore: store)
         let close = store.stockQuotes.confirmedClose(for: symbol, marketStore: store)
-        return VStack(alignment: .leading, spacing: 14) {
+        return VStack(alignment: .leading, spacing: 8) {
             if let price = current ?? close {
                 stockPriceHero(price)
-                if showsStockSessionQuotes, let quote {
-                    stockSessionHeader(quote)
-                } else if current != nil, let close {
+                if !showsStockSessionQuotes, current != nil, let close {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(close.label).font(.caption).foregroundStyle(.secondary)
                         Text(close.formattedAmount(symbol: symbol))
@@ -1624,11 +1630,11 @@ private struct MarketInstrumentDetailView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 18)
+        .padding(.top, 16)
     }
 
     private func stockPriceHero(_ price: MarketStockPrice) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 3) {
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     stockPriceAmount(price)
@@ -1640,7 +1646,7 @@ private struct MarketInstrumentDetailView: View {
                 }
             }
             Text(price.label)
-                .font(.caption)
+                .font(.footnote)
                 .foregroundStyle(.secondary)
                 .accessibilityIdentifier("market-detail-price-status")
         }
@@ -1651,8 +1657,9 @@ private struct MarketInstrumentDetailView: View {
     private func stockPriceAmount(_ price: MarketStockPrice) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 5) {
             Text(number(price.amount, digits: marketPriceDigits(price.amount, symbol: symbol)))
-                .font(.system(.largeTitle, weight: .semibold))
-                .tracking(-0.7)
+                .font(.system(.largeTitle, weight: .bold))
+                .tracking(-1.2)
+                .foregroundStyle(StockDetailStyle.ink)
                 .accessibilityIdentifier("market-detail-price")
             if let currency = price.currency, !currency.isEmpty {
                 Text(currency).font(.caption.weight(.medium)).foregroundStyle(.secondary)
@@ -1667,9 +1674,6 @@ private struct MarketInstrumentDetailView: View {
             Text(marketFormattedChangePercent(change))
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(price.changeColor)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(price.changeColor.opacity(0.09), in: Capsule())
                 .fixedSize()
                 .accessibilityIdentifier("market-detail-change")
         }
@@ -1811,8 +1815,6 @@ private struct MarketInstrumentDetailView: View {
                     stockSessionColumns(sessions, quote: quote)
                 }
             }
-            .padding(4)
-            .background(InvestmentDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 14))
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("market-detail-stock-sessions")
 
@@ -1914,9 +1916,13 @@ private struct MarketInstrumentDetailView: View {
                 .accessibilityValue(detailVolatilityText)
                 .accessibilityIdentifier("market-detail-metric-年化波动率")
         }
-        .padding(isStock ? 16 : 14)
-        .background(isStock ? InvestmentDesign.secondarySurface : MarketDetailPageStyle.card,
-                    in: RoundedRectangle(cornerRadius: isStock ? 18 : MarketDetailPageStyle.cornerRadius))
+        .padding(.horizontal, isStock ? 0 : 14)
+        .padding(.vertical, 14)
+        .background(isStock ? Color.clear : MarketDetailPageStyle.card,
+                    in: RoundedRectangle(cornerRadius: MarketDetailPageStyle.cornerRadius))
+        .overlay(alignment: .top) {
+            if isStock { Rectangle().fill(StockDetailStyle.rule).frame(height: 1) }
+        }
     }
 
     private var yearChart: MarketChart? {
@@ -1947,8 +1953,13 @@ private struct MarketInstrumentDetailView: View {
                 companyMetric("基础数据", value: source)
             }
         }
-        .padding(14)
-        .background(MarketDetailPageStyle.card, in: RoundedRectangle(cornerRadius: MarketDetailPageStyle.cornerRadius))
+        .padding(.horizontal, isStock ? 0 : 14)
+        .padding(.vertical, 14)
+        .background(isStock ? .clear : MarketDetailPageStyle.card,
+                    in: RoundedRectangle(cornerRadius: MarketDetailPageStyle.cornerRadius))
+        .overlay(alignment: .top) {
+            if isStock { Rectangle().fill(StockDetailStyle.rule).frame(height: 1) }
+        }
     }
 
     private var formattedNetIncome: String {
@@ -2612,43 +2623,33 @@ private extension MarketMovingAverageSeries {
     }
 }
 
-private struct MarketDetailChartRenderKey: Equatable {
-    let symbol: String
-    let period: MarketChartPeriod
-    let snapshotID: UUID?
-}
-
-private struct MarketDetailChartRender {
-    let symbol: String
-    let period: MarketChartPeriod
-    let artifacts: MarketChartDisplayArtifacts
-}
-
 private struct MarketDetailChart: View {
     @Binding var selectedPeriod: MarketChartPeriod
     let symbol: String
     let store: MarketStore
-    @Binding var renderedChart: MarketDetailChartRender?
     let usesStockLayout: Bool
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var selectedPointIndex: Int?
     @State private var showsChartData = false
     @State private var showsMinutePeriods = false
-    @State private var unsupportedPeriod: MarketChartPeriod?
+    @State private var previousPeriod: MarketChartPeriod?
+
     private var selectedRange: MarketRange { selectedPeriod.sourceRange }
-    private var sourceSnapshot: MarketChartSnapshot? { store.chartSnapshot(symbol: symbol, range: selectedRange) }
-    private var currentRender: MarketDetailChartRender? {
-        if selectedPeriod == .intraday, let artifacts = sourceSnapshot?.artifacts.intradayDisplay {
-            return MarketDetailChartRender(symbol: symbol, period: .intraday, artifacts: artifacts)
-        }
-        guard renderedChart?.period == selectedPeriod,
-              renderedChart?.symbol == symbol else { return nil }
-        return renderedChart
+    private var displayedPeriod: MarketChartPeriod {
+        guard usesStockLayout, snapshot(for: selectedPeriod) == nil,
+              let previousPeriod,
+              snapshot(for: previousPeriod)?.artifacts.displays[previousPeriod]?.presentation.points.isEmpty == false
+        else { return selectedPeriod }
+        return previousPeriod
     }
-    private var chart: MarketChart? { currentRender?.artifacts.chart }
-    private var presentation: MarketChartPresentation? {
-        currentRender?.artifacts.presentation
+    private var sourceSnapshot: MarketChartSnapshot? { snapshot(for: displayedPeriod) }
+    private var currentRender: MarketChartDisplayArtifacts? { sourceSnapshot?.artifacts.displays[displayedPeriod] }
+    private var chart: MarketChart? { currentRender?.chart }
+    private var presentation: MarketChartPresentation? { currentRender?.presentation }
+
+    private func snapshot(for period: MarketChartPeriod) -> MarketChartSnapshot? {
+        store.chartSnapshot(symbol: symbol, range: period.sourceRange)
     }
     private var points: [MarketChartPoint] { presentation?.points ?? [] }
     private var values: [Double] { presentation?.values ?? [] }
@@ -2661,62 +2662,9 @@ private struct MarketDetailChart: View {
     }
 
     var body: some View {
-        let source = sourceSnapshot
-        let renderKey = MarketDetailChartRenderKey(symbol: symbol, period: selectedPeriod, snapshotID: source?.id)
-        VStack(alignment: .leading, spacing: usesStockLayout ? 9 : 7) {
-            if usesStockLayout {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("价格走势")
-                        .font(.headline)
-                        .accessibilityAddTraits(.isHeader)
-                    Spacer(minLength: 8)
-                    if selectedRange != .day, let change = chart?.periodReturn?.percent, change.isFinite {
-                        Text("区间 \(marketFormattedChangePercent(change))")
-                            .font(.caption.weight(.semibold))
-                            .monospacedDigit()
-                            .foregroundStyle(marketChangeTint(change))
-                    }
-                }
-            }
+        VStack(alignment: .leading, spacing: usesStockLayout ? 8 : 7) {
             periodPicker
-            HStack(alignment: .firstTextBaseline) {
-                Text(selectedPointIndex == nil
-                     ? chartWindowLabel
-                     : inspectedPointIndex.map { pointTime(points[$0].timestamp) } ?? "")
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("market-chart-readout")
-                Spacer(minLength: 8)
-                if selectedPointIndex != nil, let inspectedPointIndex {
-                    Text(formattedPrice(points[inspectedPointIndex].close))
-                        .fontWeight(.semibold)
-                }
-            }
-            .font(.caption)
-            .monospacedDigit()
-            .frame(minHeight: 20)
-            chartPlot
-            HStack {
-                ForEach(Array(timelineLabels.enumerated()), id: \.offset) { index, label in
-                    Text(label).lineLimit(1).minimumScaleFactor(0.8)
-                        .accessibilityIdentifier("market-chart-time-\(index)")
-                    if index < timelineLabels.count - 1 { Spacer() }
-                }
-            }
-            .font(.system(size: 11))
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity)
-            .padding(.trailing, 48)
-            if let presentation, presentation.hasVolume {
-                VolumeBars(
-                    points: presentation.points,
-                    xFractions: presentation.xFractions,
-                    volumeCeiling: presentation.volumeCeiling,
-                    fractionGap: presentation.volumeFractionGap
-                )
-                .frame(height: 28)
-                .padding(.trailing, 48)
-                .accessibilityLabel("成交量")
-            }
+            plotPanel
             chartLegend
             if presentation?.lineSegments.contains(where: \.isMissing) == true {
                 Text("虚线表示数据缺口，期间走势未知")
@@ -2724,9 +2672,9 @@ private struct MarketDetailChart: View {
                     .foregroundStyle(.secondary)
             }
             if sourceSnapshot?.isRestored == true, currentRender != nil {
-                if store.chartError(symbol: symbol, range: selectedRange) != nil {
+                if store.chartError(symbol: symbol, range: displayedPeriod.sourceRange) != nil {
                     Button {
-                        Task { await reloadChart() }
+                        Task { await store.loadChart(symbol: symbol, range: displayedPeriod.sourceRange, force: true) }
                     } label: {
                         Label("上次图表 · 更新失败，重试", systemImage: "arrow.clockwise")
                     }
@@ -2748,7 +2696,7 @@ private struct MarketDetailChart: View {
                     if let inspectedPointIndex {
                         chartReadout(point: points[inspectedPointIndex], index: inspectedPointIndex)
                     }
-                    if selectedRange == .day, let quote = store.quote(symbol: symbol), quote.hasActiveExtendedSessionQuote {
+                    if displayedPeriod.sourceRange == .day, let quote = store.quote(symbol: symbol), quote.hasActiveExtendedSessionQuote {
                         Text("上方为\(quote.tradingSession.displayLabel)报价；曲线按所示交易日展示")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -2766,35 +2714,7 @@ private struct MarketDetailChart: View {
         }
         .padding(.horizontal, usesStockLayout ? 0 : 14)
         .padding(.vertical, usesStockLayout ? 14 : 8)
-        .onChange(of: selectedPeriod) { _, _ in
-            selectedPointIndex = nil
-        }
-        .task(id: renderKey) {
-            guard !Task.isCancelled else { return }
-            guard let source else {
-                renderedChart = nil
-                unsupportedPeriod = nil
-                return
-            }
-            if renderKey.period == .intraday {
-                renderedChart = nil
-                unsupportedPeriod = source.artifacts.intradayDisplay == nil ? .intraday : nil
-                return
-            }
-            let artifacts = try? await marketChartDisplayArtifacts(for: source.chart, period: renderKey.period)
-            guard !Task.isCancelled, selectedPeriod == renderKey.period, sourceSnapshot?.id == source.id else { return }
-            guard let artifacts else {
-                renderedChart = nil
-                unsupportedPeriod = renderKey.period
-                return
-            }
-            unsupportedPeriod = nil
-            renderedChart = MarketDetailChartRender(
-                symbol: renderKey.symbol, period: renderKey.period, artifacts: artifacts
-            )
-        }
-        .task(id: selectedPeriod) {
-            selectedPointIndex = nil
+        .task(id: selectedRange) {
             await loadChart(force: false)
             guard selectedPeriod.isIntraday else { return }
             while !Task.isCancelled {
@@ -2808,6 +2728,87 @@ private struct MarketDetailChart: View {
         .accessibilityLabel("\(selectedPeriod.rawValue)行情图表")
     }
 
+    private var plotPanel: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            chartContext
+            chartPlot
+            if !points.isEmpty {
+                timeline
+            }
+            if let presentation, presentation.hasVolume {
+                VolumeBars(
+                    points: presentation.points,
+                    xFractions: presentation.xFractions,
+                    volumeCeiling: presentation.volumeCeiling,
+                    fractionGap: presentation.volumeFractionGap
+                )
+                .frame(height: 26)
+                .padding(.trailing, 48)
+                .accessibilityLabel("成交量")
+            }
+        }
+        .padding(usesStockLayout ? 11 : 0)
+        .background(usesStockLayout ? StockDetailStyle.plot : .clear, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var chartContext: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            if displayedPeriod != selectedPeriod {
+                Text(displayedPeriod.chartTitle)
+                    .fontWeight(.semibold)
+                Spacer(minLength: 0)
+                if store.chartError(symbol: symbol, range: selectedRange) != nil {
+                    Button("\(selectedPeriod.rawValue)加载失败 · 重试") { Task { await reloadChart() } }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(MarketDetailPageStyle.accent)
+                } else {
+                    Text("正在读取\(selectedPeriod.rawValue)")
+                }
+            } else {
+                Text(selectedPointIndex == nil
+                     ? chartWindowLabel
+                     : inspectedPointIndex.map { pointTime(points[$0].timestamp) } ?? "")
+                    .accessibilityIdentifier("market-chart-readout")
+                Spacer(minLength: 0)
+                if selectedPointIndex != nil, let inspectedPointIndex {
+                    Text(formattedPrice(points[inspectedPointIndex].close))
+                        .fontWeight(.semibold)
+                } else if usesStockLayout, selectedRange != .day, let change = chart?.periodReturn?.percent, change.isFinite {
+                    Text(marketFormattedChangePercent(change))
+                        .fontWeight(.semibold)
+                        .foregroundStyle(marketChangeTint(change))
+                        .accessibilityLabel("区间涨跌幅 \(marketFormattedChangePercent(change))")
+                }
+            }
+        }
+        .foregroundStyle(.secondary)
+        .font(.caption)
+        .monospacedDigit()
+        .frame(minHeight: 20)
+    }
+
+    private var timeline: some View {
+        HStack {
+            ForEach(Array(timelineLabels.enumerated()), id: \.offset) { index, label in
+                Text(label).lineLimit(1).minimumScaleFactor(0.8)
+                    .accessibilityIdentifier("market-chart-time-\(index)")
+                if index < timelineLabels.count - 1 { Spacer() }
+            }
+        }
+        .font(.caption2)
+        .monospacedDigit()
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity)
+        .padding(.trailing, 48)
+    }
+
+    private func selectPeriod(_ period: MarketChartPeriod) {
+        previousPeriod = points.isEmpty ? nil : displayedPeriod
+        selectedPointIndex = nil
+        selectedPeriod = period
+        showsMinutePeriods = false
+    }
+
     private var periodPicker: some View {
         VStack(alignment: .leading, spacing: 4) {
             Group {
@@ -2819,9 +2820,9 @@ private struct MarketDetailChart: View {
                     periodControls
                 }
             }
-            .padding(.horizontal, 3)
-            .background(usesStockLayout ? InvestmentDesign.secondarySurface : MarketDetailPageStyle.canvas,
-                        in: RoundedRectangle(cornerRadius: usesStockLayout ? 12 : 9))
+            .padding(.horizontal, usesStockLayout ? 0 : 3)
+            .background(usesStockLayout ? .clear : MarketDetailPageStyle.canvas,
+                        in: RoundedRectangle(cornerRadius: 9))
             if showsMinutePeriods {
                 ScrollView(.horizontal) {
                     HStack(spacing: 4) {
@@ -2842,13 +2843,34 @@ private struct MarketDetailChart: View {
         HStack(spacing: 2) {
             periodButton(.intraday)
             periodButton(.fiveDays)
-            Button { showsMinutePeriods.toggle() } label: { minutePeriodLabel }
-            .accessibilityIdentifier("market-chart-minute-menu")
-            .accessibilityLabel(selectedPeriod.isMinute ? "\(selectedPeriod.rawValue)钟周期" : "分钟周期")
-            .accessibilityAddTraits(selectedPeriod.isMinute ? .isSelected : [])
+            if !usesStockLayout {
+                Button { showsMinutePeriods.toggle() } label: { minutePeriodLabel }
+                    .accessibilityIdentifier("market-chart-minute-menu")
+                    .accessibilityLabel(selectedPeriod.isMinute ? "\(selectedPeriod.rawValue)钟周期" : "分钟周期")
+                    .accessibilityAddTraits(selectedPeriod.isMinute ? .isSelected : [])
+            }
             periodButton(.daily)
             periodButton(.weekly)
             periodButton(.monthly)
+            if usesStockLayout {
+                Menu {
+                    ForEach(MarketChartPeriod.allCases.filter(\.isMinute)) { period in
+                        Button { selectPeriod(period) } label: {
+                            if selectedPeriod == period {
+                                Label(period.rawValue, systemImage: "checkmark")
+                            } else {
+                                Text(period.rawValue)
+                            }
+                        }
+                        .accessibilityIdentifier(periodIdentifier(period))
+                    }
+                } label: {
+                    minutePeriodLabel
+                }
+                .accessibilityIdentifier("market-chart-minute-menu")
+                .accessibilityLabel(selectedPeriod.isMinute ? "\(selectedPeriod.rawValue)钟周期" : "分钟周期")
+                .accessibilityAddTraits(selectedPeriod.isMinute ? .isSelected : [])
+            }
         }
     }
 
@@ -2858,19 +2880,16 @@ private struct MarketDetailChart: View {
             Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
         }
         .font(.footnote.weight(selectedPeriod.isMinute ? .semibold : .medium))
-        .foregroundStyle(selectedPeriod.isMinute ? MarketDetailPageStyle.accent : .secondary)
+        .foregroundStyle(periodSelectionTint(isSelected: selectedPeriod.isMinute))
         .frame(maxWidth: .infinity, minHeight: 44)
         .background(periodSelectionBackground(isSelected: selectedPeriod.isMinute))
     }
 
     private func periodButton(_ period: MarketChartPeriod) -> some View {
-        Button {
-            selectedPeriod = period
-            showsMinutePeriods = false
-        } label: {
+        Button { selectPeriod(period) } label: {
             Text(period.rawValue)
                 .font(.footnote.weight(selectedPeriod == period ? .semibold : .medium))
-                .foregroundStyle(selectedPeriod == period ? MarketDetailPageStyle.accent : .secondary)
+                .foregroundStyle(periodSelectionTint(isSelected: selectedPeriod == period))
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .background(periodSelectionBackground(isSelected: selectedPeriod == period))
                 .contentShape(Rectangle())
@@ -2881,10 +2900,15 @@ private struct MarketDetailChart: View {
         .accessibilityAddTraits(selectedPeriod == period ? .isSelected : [])
     }
 
+    private func periodSelectionTint(isSelected: Bool) -> Color {
+        guard isSelected else { return .secondary }
+        return usesStockLayout ? .white : MarketDetailPageStyle.accent
+    }
+
     private func periodSelectionBackground(isSelected: Bool) -> some View {
         RoundedRectangle(cornerRadius: 8)
-            .fill(isSelected ? MarketDetailPageStyle.accent.opacity(0.11) : .clear)
-            .padding(.vertical, 4)
+            .fill(isSelected ? (usesStockLayout ? StockDetailStyle.ink : MarketDetailPageStyle.accent.opacity(0.11)) : .clear)
+            .padding(.vertical, usesStockLayout ? 6 : 4)
     }
 
     private func periodIdentifier(_ period: MarketChartPeriod) -> String {
@@ -2893,7 +2917,9 @@ private struct MarketDetailChart: View {
 
     private var chartPlot: some View {
         ZStack {
-            ChartGrid(low: presentation?.low, high: presentation?.high, digits: presentation?.axisDigits ?? 2)
+            if !points.isEmpty || !usesStockLayout {
+                ChartGrid(low: presentation?.low, high: presentation?.high, digits: presentation?.axisDigits ?? 2)
+            }
             Group {
                 if values.isEmpty {
                     if isLoadingChart {
@@ -2924,7 +2950,8 @@ private struct MarketDetailChart: View {
                         MarketSessionBreakMarker(sessionBreak: sessionBreak, points: points, xFractions: plotFractions)
                     }
                 }
-                if !values.isEmpty, let previousClose = chart?.quote.previousClose {
+                if !values.isEmpty, (!usesStockLayout || displayedPeriod.sourceRange == .day),
+                   let previousClose = chart?.quote.previousClose {
                     ChartReferenceLine(value: previousClose, low: presentation?.low, high: presentation?.high)
                 }
                 if selectedPointIndex != nil, let inspectedPointIndex {
@@ -2940,7 +2967,7 @@ private struct MarketDetailChart: View {
             }
             .padding(.trailing, 48)
         }
-        .frame(height: 212)
+        .frame(height: usesStockLayout ? 218 : 212)
         .overlay {
             GeometryReader { proxy in
                 Color.clear
@@ -2976,7 +3003,7 @@ private struct MarketDetailChart: View {
                 readoutValue("低", point.low)
                 readoutValue("收", point.close)
             }
-            if let movingAverages = currentRender?.artifacts.movingAverages, !movingAverages.isEmpty {
+            if let movingAverages = currentRender?.movingAverages, !movingAverages.isEmpty {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 10) {
                     ForEach(movingAverages, id: \.period) { series in
                         let value = series.values.indices.contains(index) ? series.values[index] : nil
@@ -3026,29 +3053,37 @@ private struct MarketDetailChart: View {
     }
 
     private func pointTime(_ timestamp: Int64) -> String {
-        MarketViewDateFormatters.chart(period: selectedPeriod, timezone: chart?.timezone)
+        MarketViewDateFormatters.chart(period: displayedPeriod, timezone: chart?.timezone)
             .string(from: Date(timeIntervalSince1970: Double(timestamp) / 1_000))
     }
 
     private var chartWindowLabel: String {
         guard let chart else { return "交易所时间" }
-        guard !selectedPeriod.isIntraday,
-              let first = points.first else {
+        guard let first = points.first, let last = points.last else {
+            return "交易所时间"
+        }
+        if usesStockLayout, displayedPeriod.sourceRange == .week {
+            let formatter = MarketViewDateFormatters.chart(period: .daily, timezone: chart.timezone)
+            let start = formatter.string(from: Date(timeIntervalSince1970: Double(first.timestamp) / 1_000))
+            let end = formatter.string(from: Date(timeIntervalSince1970: Double(last.timestamp) / 1_000))
+            return "\(start) – \(end) · 交易所时间"
+        }
+        if displayedPeriod.isIntraday {
             return "\(chart.tradingDate) · 交易所时间"
         }
         let formatter = MarketViewDateFormatters.chart(period: .weekly, timezone: chart.timezone)
         let startTimestamp = chart.periodReturn?.startTimestamp ?? first.timestamp
         let start = formatter.string(from: Date(timeIntervalSince1970: Double(startTimestamp) / 1_000))
         let dates = "\(start) – \(chart.tradingDate)"
-        switch selectedPeriod {
-        case .weekly: return "近5年 · \(dates)"
-        case .monthly: return "全部可用历史 · \(dates)"
+        switch displayedPeriod {
+        case .weekly where !usesStockLayout: return "近5年 · \(dates)"
+        case .monthly where !usesStockLayout: return "全部可用历史 · \(dates)"
         default: return dates
         }
     }
 
     private var chartDisplayTitle: String {
-        selectedPeriod.chartTitle
+        displayedPeriod.chartTitle
     }
 
     private var chartAccessibilityValue: String {
@@ -3057,7 +3092,7 @@ private struct MarketDetailChart: View {
         let formatter = MarketViewDateFormatters.chartCoverage(timezone: chart?.timezone)
         let start = formatter.string(from: Date(timeIntervalSince1970: Double(first.timestamp) / 1_000))
         let end = formatter.string(from: Date(timeIntervalSince1970: Double(last.timestamp) / 1_000))
-        let drawnCount = currentRender?.artifacts.drawnPointCount ?? 0
+        let drawnCount = currentRender?.drawnPointCount ?? 0
         return "\(summary)，起点\(start)，终点\(end)，绘制\(drawnCount)个数据点"
     }
 
@@ -3081,7 +3116,7 @@ private struct MarketDetailChart: View {
         .foregroundStyle(.secondary)
     }
     private var chartColor: Color {
-        if selectedRange != .day, let periodReturn = chart?.periodReturn?.percent {
+        if displayedPeriod.sourceRange != .day, let periodReturn = chart?.periodReturn?.percent {
             return periodReturn >= 0 ? MarketStyle.gain : MarketStyle.loss
         }
         let change = chart?.quote.changePercent ?? {
@@ -3100,7 +3135,7 @@ private struct MarketDetailChart: View {
         store.isLoadingChart(symbol: symbol, range: selectedRange)
     }
     private var displayedChartError: String? {
-        if unsupportedPeriod == selectedPeriod { return "当前行情数据无法生成\(selectedPeriod.rawValue)图表" }
+        if sourceSnapshot != nil, currentRender == nil { return "当前行情数据无法生成\(selectedPeriod.rawValue)图表" }
         return store.chartError(symbol: symbol, range: selectedRange)
     }
     private func reloadChart() async {
@@ -3114,11 +3149,11 @@ private struct MarketDetailChart: View {
         guard let quality = chart?.quality else { return nil }
         switch quality.status {
         case .complete:
-            if selectedPeriod == .daily, chart?.tradingDate != sourceSnapshot?.chart.tradingDate {
+            if displayedPeriod == .daily, chart?.tradingDate != sourceSnapshot?.chart.tradingDate {
                 return "最新交易日的日线待确认"
             }
             guard !quality.isFinal || points.last?.state == "provisional" else { return nil }
-            return selectedPeriod.isIntraday ? "当前分钟更新中" : "当前周期尚未收盘"
+            return displayedPeriod.isIntraday ? "当前分钟更新中" : "当前周期尚未收盘"
         case .repairing:
             return "数据补齐中 · 已有 \(quality.actual)/\(quality.expected) 个真实数据点"
         case .partial:

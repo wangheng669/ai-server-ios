@@ -177,11 +177,18 @@ final class MarketStore {
         }
     }
 
+    func preloadStockCharts(symbol: String, ranges: [MarketRange]) async {
+        await runWithLimitedConcurrency(ranges, maximumConcurrentRequests: ranges.count) { range in
+            await self.loadChart(symbol: symbol, range: range)
+        }
+    }
+
     func loadChart(symbol: String, range: MarketRange, force: Bool = false) async {
         guard !Task.isCancelled else { return }
         let key = ChartKey(symbol: symbol, range: range)
         if !force, let snapshot = chartSnapshots[key], !snapshot.isRestored,
-           marketChartCanUseCache(snapshot.chart, loadedAt: snapshot.loadedAt) { return }
+           (marketChartCanUseCache(snapshot.chart, loadedAt: snapshot.loadedAt)
+            || chartRetryTasks[key] != nil) { return }
         if let task = chartLoadTasks[key] {
             await task.value
             return
@@ -206,17 +213,18 @@ final class MarketStore {
             if chartSnapshots[key] == nil,
                let entry = await DisplaySnapshotCache.charts.load(MarketChart.self, key: cacheKey, maximumAge: 7 * 24 * 60 * 60),
                entry.value.symbol == key.symbol, entry.value.interval == key.range.apiInterval {
-                let artifacts = try await marketChartArtifacts(for: entry.value)
+                let artifacts = try await marketChartArtifacts(for: entry.value, range: key.range)
                 try Task.checkCancellation()
-                chartSnapshots[key] = MarketChartSnapshot(chart: entry.value, artifacts: artifacts,
-                                                          loadedAt: entry.savedAt, isRestored: true)
+                rememberChart(MarketChartSnapshot(chart: entry.value, artifacts: artifacts,
+                                                  loadedAt: entry.savedAt, isRestored: true), for: key)
             }
 
             let value = try await response
-            let artifacts = try await marketChartArtifacts(for: value)
+            let artifacts = try await marketChartArtifacts(for: value, range: key.range)
             guard !Task.isCancelled else { return }
             let loadedAt = Date()
-            chartSnapshots[key] = MarketChartSnapshot(chart: value, artifacts: artifacts, loadedAt: loadedAt, isRestored: false)
+            rememberChart(MarketChartSnapshot(chart: value, artifacts: artifacts,
+                                              loadedAt: loadedAt, isRestored: false), for: key)
             if marketChartNeedsRetry(value) {
                 scheduleChartRetry(symbol: key.symbol, range: key.range, key: key)
             } else {
@@ -224,7 +232,7 @@ final class MarketStore {
                 chartRetryTasks[key] = nil
                 chartRetryAttempts[key] = nil
             }
-            if artifacts.presentation.points.isEmpty {
+            if !artifacts.hasDisplayPoints {
                 await DisplaySnapshotCache.charts.remove(key: cacheKey)
             } else {
                 await DisplaySnapshotCache.charts.save(value, key: cacheKey, at: loadedAt, minimumInterval: 90)
@@ -233,6 +241,16 @@ final class MarketStore {
             return
         } catch {
             chartErrors[key] = error.localizedDescription
+        }
+    }
+
+    private func rememberChart(_ snapshot: MarketChartSnapshot, for key: ChartKey) {
+        chartSnapshots[key] = snapshot
+        guard key.range == .fiveYears || key.range == .maximum else { return }
+        // Opening multiple details should not retain every long history in memory.
+        let otherHistories = chartSnapshots.filter { $0.key.range == key.range && $0.key != key }
+        for entry in otherHistories.sorted(by: { $0.value.loadedAt > $1.value.loadedAt }).dropFirst(7) {
+            chartSnapshots.removeValue(forKey: entry.key)
         }
     }
 
@@ -263,10 +281,6 @@ final class MarketStore {
 
     func chart(symbol: String, range: MarketRange) -> MarketChart? {
         chartSnapshot(symbol: symbol, range: range)?.chart
-    }
-
-    func chartPresentation(symbol: String, range: MarketRange) -> MarketChartPresentation? {
-        chartSnapshot(symbol: symbol, range: range)?.artifacts.presentation
     }
 
     func chartError(symbol: String, range: MarketRange) -> String? {
@@ -669,7 +683,6 @@ struct ChartKey: Hashable {
 }
 
 struct MarketChartSnapshot {
-    let id = UUID()
     let chart: MarketChart
     let artifacts: MarketChartArtifacts
     let loadedAt: Date
