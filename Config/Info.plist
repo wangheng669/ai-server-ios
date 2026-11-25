@@ -33,9 +33,17 @@
 	<array>
 		<dict>
 			<key>UIApplicationShortcutItemType</key>
-			<string>com.wangheng.aiserverclient.notification-settings</string>
+			<string>com.wangheng.aiserverclient.pause-notifications</string>
 			<key>UIApplicationShortcutItemTitle</key>
-			<string>通知显示设置</string>
+			<string>暂停通知</string>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>bell.slash</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.wangheng.aiserverclient.resume-notifications</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>恢复通知</string>
 			<key>UIApplicationShortcutItemIconSymbolName</key>
 			<string>bell</string>
 		</dict>

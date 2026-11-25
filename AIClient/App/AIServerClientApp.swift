@@ -74,7 +74,9 @@ final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate, UNUserNo
         #if DEBUG
         if ProcessInfo.processInfo.environment["AI_FEED_UI_FIXTURE"] != nil { return true }
         #endif
-        Task { await PersonPushNotificationManager.shared.restoreRegistration() }
+        let push = PersonPushNotificationManager.shared
+        ReadingReminderManager.shared.applyNotificationPause(push.notificationsPaused)
+        Task { await push.restoreRegistration() }
         return true
     }
 
@@ -99,9 +101,10 @@ final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate, UNUserNo
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
         await MainActor.run {
+            guard !PersonPushNotificationManager.shared.notificationsPaused else { return [] }
             PersonPushNavigationStore.shared.prepare(notification.request.content)
+            return [.banner, .list, .sound]
         }
-        return [.banner, .list, .sound]
     }
 
     func userNotificationCenter(
@@ -126,23 +129,19 @@ final class AIServerClientAppDelegate: NSObject, UIApplicationDelegate, UNUserNo
 }
 
 final class FocusSceneDelegate: NSObject, UIWindowSceneDelegate {
-    private static let notificationSettingsShortcut = "com.wangheng.aiserverclient.notification-settings"
-    private static let notificationSettingsURL = URL(string: UIApplication.openNotificationSettingsURLString)
-    private var shouldOpenNotificationSettings = false
+    private enum NotificationShortcut: String {
+        case pause = "com.wangheng.aiserverclient.pause-notifications"
+        case resume = "com.wangheng.aiserverclient.resume-notifications"
+    }
 
     func scene(
         _ scene: UIScene,
         willConnectTo session: UISceneSession,
         options connectionOptions: UIScene.ConnectionOptions
     ) {
-        shouldOpenNotificationSettings = connectionOptions.shortcutItem?.type == Self.notificationSettingsShortcut
-    }
-
-    func sceneDidBecomeActive(_ scene: UIScene) {
-        guard shouldOpenNotificationSettings else { return }
-        shouldOpenNotificationSettings = false
-        guard let url = Self.notificationSettingsURL else { return }
-        UIApplication.shared.open(url)
+        if let shortcutItem = connectionOptions.shortcutItem {
+            handleNotificationShortcut(shortcutItem)
+        }
     }
 
     func windowScene(
@@ -150,17 +149,16 @@ final class FocusSceneDelegate: NSObject, UIWindowSceneDelegate {
         performActionFor shortcutItem: UIApplicationShortcutItem,
         completionHandler: @escaping (Bool) -> Void
     ) {
-        guard shortcutItem.type == Self.notificationSettingsShortcut,
-              let url = Self.notificationSettingsURL else {
-            completionHandler(false)
-            return
-        }
-        if windowScene.activationState == .foregroundActive {
-            UIApplication.shared.open(url, completionHandler: completionHandler)
-        } else {
-            shouldOpenNotificationSettings = true
-            completionHandler(true)
-        }
+        completionHandler(handleNotificationShortcut(shortcutItem))
+    }
+
+    @discardableResult
+    private func handleNotificationShortcut(_ item: UIApplicationShortcutItem) -> Bool {
+        guard let shortcut = NotificationShortcut(rawValue: item.type) else { return false }
+        let paused = shortcut == .pause
+        PersonPushNotificationManager.shared.setNotificationsPaused(paused)
+        ReadingReminderManager.shared.applyNotificationPause(paused)
+        return true
     }
 }
 
@@ -523,6 +521,31 @@ struct AIServerClientApp: App {
                 #endif
             }
             .scrollBounceBehavior(.basedOnSize, axes: [.vertical, .horizontal])
+            .overlay(alignment: .top) {
+                NotificationPauseFeedbackView()
+            }
+        }
+    }
+}
+
+private struct NotificationPauseFeedbackView: View {
+    @ObservedObject private var push = PersonPushNotificationManager.shared
+
+    var body: some View {
+        if let feedback = push.pauseFeedback {
+            let message = feedback.paused ? "通知已暂停" : "已解除通知暂停"
+            Label(message, systemImage: feedback.paused ? "bell.slash.fill" : "bell.fill")
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(.regularMaterial, in: Capsule())
+                .padding(.top, 8)
+                .allowsHitTesting(false)
+                .task(id: feedback.id) {
+                    try? await Task.sleep(for: .seconds(2))
+                    guard !Task.isCancelled else { return }
+                    push.dismissPauseFeedback(feedback.id)
+                }
         }
     }
 }

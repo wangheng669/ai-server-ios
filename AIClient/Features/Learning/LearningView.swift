@@ -53,7 +53,7 @@ struct LearningView: View {
         #endif
         return nil
     }()
-    @State private var readingReminder = ReadingReminderManager()
+    @State private var readingReminder = ReadingReminderManager.shared
 
     @MainActor
     init(
@@ -2433,43 +2433,63 @@ private struct BookMetadataLine: View {
 
 @MainActor
 @Observable
-private final class ReadingReminderManager {
+final class ReadingReminderManager {
+    static let shared = ReadingReminderManager()
+
     private static let notificationID = "learning.daily-reading-reminder"
     private static let enabledKey = "learning.daily-reading-reminder.enabled"
 
     private(set) var isEnabled = UserDefaults.standard.object(forKey: enabledKey) == nil
         ? true
         : UserDefaults.standard.bool(forKey: enabledKey)
-    private(set) var isUpdating = false
     private(set) var errorMessage: String?
+    private var updateTask: Task<Void, Never>?
+    var isUpdating: Bool { updateTask != nil }
+
+    func applyNotificationPause(_ paused: Bool) {
+        if paused {
+            removePendingReminder()
+        } else {
+            Task {
+                await updateTask?.value
+                guard UserDefaults.standard.bool(forKey: Self.enabledKey),
+                      !PersonPushNotificationManager.shared.notificationsPaused else { return }
+                await restore()
+            }
+        }
+    }
 
     func restore() async {
-        guard isEnabled, !isUpdating else { return }
-        isUpdating = true
-        defer { isUpdating = false }
-        await schedule()
+        guard isEnabled else { return }
+        await updateSchedule()
     }
 
     func setEnabled(_ enabled: Bool) async {
         guard !isUpdating else { return }
-        isUpdating = true
         errorMessage = nil
-        defer { isUpdating = false }
         if enabled {
-            await schedule()
+            await updateSchedule()
         } else {
-            UNUserNotificationCenter.current().removePendingNotificationRequests(
-                withIdentifiers: [Self.notificationID]
-            )
-            isEnabled = false
-            UserDefaults.standard.set(false, forKey: Self.enabledKey)
+            removePendingReminder()
+            saveEnabled(false)
         }
+    }
+
+    private func updateSchedule() async {
+        guard updateTask == nil else { return }
+        let task = Task {
+            defer { updateTask = nil }
+            await schedule()
+        }
+        updateTask = task
+        await task.value
     }
 
     private func schedule() async {
         let center = UNUserNotificationCenter.current()
         var settings = await center.notificationSettings()
-        if settings.authorizationStatus == .notDetermined {
+        if !PersonPushNotificationManager.shared.notificationsPaused,
+           settings.authorizationStatus == .notDetermined {
             do {
                 _ = try await center.requestAuthorization(options: [.alert, .sound])
                 settings = await center.notificationSettings()
@@ -2478,10 +2498,13 @@ private final class ReadingReminderManager {
                 return
             }
         }
+        if PersonPushNotificationManager.shared.notificationsPaused {
+            saveEnabled(true)
+            return
+        }
         guard settings.authorizationStatus == .authorized ||
                 settings.authorizationStatus == .provisional else {
-            isEnabled = false
-            UserDefaults.standard.set(false, forKey: Self.enabledKey)
+            saveEnabled(false)
             errorMessage = "请先在系统设置中允许通知"
             return
         }
@@ -2500,11 +2523,24 @@ private final class ReadingReminderManager {
         )
         do {
             try await center.add(request)
-            isEnabled = true
-            UserDefaults.standard.set(true, forKey: Self.enabledKey)
+            saveEnabled(true)
+            if PersonPushNotificationManager.shared.notificationsPaused {
+                removePendingReminder()
+            }
         } catch {
             errorMessage = "读书提醒设置失败"
         }
+    }
+
+    private func removePendingReminder() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: [Self.notificationID]
+        )
+    }
+
+    private func saveEnabled(_ enabled: Bool) {
+        isEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.enabledKey)
     }
 }
 

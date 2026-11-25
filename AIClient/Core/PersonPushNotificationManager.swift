@@ -7,12 +7,20 @@ import UserNotifications
 final class PersonPushNotificationManager: ObservableObject {
     static let shared = PersonPushNotificationManager()
 
+    struct PauseFeedback: Identifiable {
+        let id = UUID()
+        let paused: Bool
+    }
+
     @Published private(set) var enabledPersonIDs: Set<String>
     @Published private(set) var isUpdating = false
     @Published private(set) var errorMessage: String?
+    @Published private(set) var notificationsPaused: Bool
+    @Published private(set) var pauseFeedback: PauseFeedback?
 
     private let defaults: UserDefaults
     private let session: URLSession
+    private let notificationsPausedKey = "notifications.paused"
     private let enabledPersonIDsKey = "personPush.enabledPersonIDs"
     private let registrationTokensKey = "personPush.registrationTokens"
     private let tokenKey = "personPush.deviceToken"
@@ -23,6 +31,7 @@ final class PersonPushNotificationManager: ObservableObject {
     init(defaults: UserDefaults = .standard, session: URLSession = .shared) {
         self.defaults = defaults
         self.session = session
+        notificationsPaused = defaults.bool(forKey: notificationsPausedKey)
         enabledPersonIDs = Set(defaults.stringArray(forKey: enabledPersonIDsKey) ?? [])
         registrationTokens = defaults.dictionary(forKey: registrationTokensKey) as? [String: [String]] ?? [:]
     }
@@ -31,20 +40,43 @@ final class PersonPushNotificationManager: ObservableObject {
         enabledPersonIDs.contains(personID)
     }
 
+    func setNotificationsPaused(_ paused: Bool) {
+        notificationsPaused = paused
+        defaults.set(paused, forKey: notificationsPausedKey)
+        if paused {
+            UIApplication.shared.unregisterForRemoteNotifications()
+        } else {
+            Task { await restoreRegistration() }
+        }
+        pauseFeedback = PauseFeedback(paused: paused)
+    }
+
+    func dismissPauseFeedback(_ id: UUID) {
+        guard pauseFeedback?.id == id else { return }
+        pauseFeedback = nil
+    }
+
     func restoreRegistration() async {
+        guard !notificationsPaused else {
+            if UIApplication.shared.isRegisteredForRemoteNotifications {
+                UIApplication.shared.unregisterForRemoteNotifications()
+            }
+            return
+        }
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
+        guard !notificationsPaused else { return }
         switch settings.authorizationStatus {
         case .notDetermined:
             do {
                 if try await center.requestAuthorization(options: [.alert, .badge, .sound]) {
-                    UIApplication.shared.registerForRemoteNotifications()
+                    registerForRemoteNotificationsIfEnabled()
                 }
             } catch {
                 errorMessage = "通知权限申请失败，请稍后再试"
             }
         case .authorized, .provisional, .ephemeral:
-            UIApplication.shared.registerForRemoteNotifications()
+            registerForRemoteNotificationsIfEnabled()
         case .denied:
             for personID in enabledPersonIDs { rememberCurrentTokenIfNeeded(for: personID) }
             updateLocalState(enabledPersonIDs: [])
@@ -83,7 +115,7 @@ final class PersonPushNotificationManager: ObservableObject {
                         return
                     }
                 }
-                UIApplication.shared.registerForRemoteNotifications()
+                registerForRemoteNotificationsIfEnabled()
             } catch {
                 errorMessage = "通知权限申请失败，请稍后再试"
                 updateLocalState(personID: personID, enabled: false)
@@ -100,6 +132,7 @@ final class PersonPushNotificationManager: ObservableObject {
     }
 
     func didRegister(deviceToken: Data) async {
+        guard !notificationsPaused else { return }
         let token = deviceToken.map { String(format: "%02x", $0) }.joined()
         for personID in enabledPersonIDs { rememberCurrentTokenIfNeeded(for: personID) }
         defaults.set(token, forKey: tokenKey)
@@ -110,7 +143,7 @@ final class PersonPushNotificationManager: ObservableObject {
             failed = true
         }
         for personID in enabledPersonIDs {
-            guard defaults.string(forKey: tokenKey) == token else { return }
+            guard !notificationsPaused, defaults.string(forKey: tokenKey) == token else { return }
             guard enabledPersonIDs.contains(personID) else { continue }
             do {
                 try await updateServerSubscription(
@@ -122,7 +155,7 @@ final class PersonPushNotificationManager: ObservableObject {
                 if enabledPersonIDs.contains(personID) { failed = true }
             }
         }
-        guard defaults.string(forKey: tokenKey) == token else { return }
+        guard !notificationsPaused, defaults.string(forKey: tokenKey) == token else { return }
         if failed {
             errorMessage = "通知设备注册失败，请稍后重新开启"
         } else {
@@ -131,7 +164,13 @@ final class PersonPushNotificationManager: ObservableObject {
     }
 
     func didFailToRegister() {
+        guard !notificationsPaused else { return }
         errorMessage = "无法向 Apple 注册这台设备的通知"
+    }
+
+    private func registerForRemoteNotificationsIfEnabled() {
+        guard !notificationsPaused else { return }
+        UIApplication.shared.registerForRemoteNotifications()
     }
 
     private func updateLocalState(personID: String, enabled: Bool) {
