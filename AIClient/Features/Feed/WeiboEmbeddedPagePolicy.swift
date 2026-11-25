@@ -1,44 +1,64 @@
 import Foundation
 
-struct WeiboAccountProfile: Equatable {
-    let displayName: String?
+struct WeiboAccountProfile: Decodable {
+    let displayName: String
     let avatarURL: URL
+
+    enum CodingKeys: String, CodingKey {
+        case displayName = "screen_name"
+        case avatarURL = "profile_image_url"
+    }
 }
 
-enum WeiboAccountAPIParser {
-    static func accountUID(from data: Data) -> String? {
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              isSuccessful(root),
-              let payload = root["data"] as? [String: Any],
-              payload["login"] as? Bool == true else { return nil }
-        if let uid = payload["uid"] as? String, !uid.isEmpty { return uid }
-        if let uid = payload["uid"] as? NSNumber { return uid.stringValue }
-        return nil
+enum WeiboAccountAPI {
+    static let accountPage = URL(string: "https://m.weibo.cn/me")!
+    private static let profileURL = URL(string: "https://m.weibo.cn/api/users/show")!
+
+    private struct Response: Decodable {
+        let ok: Int
+        let data: WeiboAccountProfile?
     }
 
-    static func profile(from data: Data) -> WeiboAccountProfile? {
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              isSuccessful(root),
-              let payload = root["data"] as? [String: Any],
-              let userInfo = payload["userInfo"] as? [String: Any] else { return nil }
-
-        let displayName = (userInfo["screen_name"] as? String).flatMap { value in
-            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : trimmed
-        }
-        for field in ["avatar_hd", "avatar_large", "profile_image_url"] {
-            guard let value = userInfo[field] as? String,
-                  !value.localizedCaseInsensitiveContains("default_avatar"),
-                  let url = URL(string: value),
-                  let scheme = url.scheme?.lowercased(),
-                  scheme == "https" || scheme == "http" else { continue }
-            return WeiboAccountProfile(displayName: displayName, avatarURL: url)
-        }
-        return nil
+    static func isAccountPage(_ url: URL?) -> Bool {
+        url?.scheme == accountPage.scheme && url?.host == accountPage.host && url?.path == accountPage.path
     }
 
-    private static func isSuccessful(_ object: [String: Any]) -> Bool {
-        (object["ok"] as? NSNumber)?.intValue == 1
+    static func currentProfile(cookies: [HTTPCookie]) async -> WeiboAccountProfile? {
+        let configuration = URLSessionConfiguration.ephemeral
+        let cookieStorage = configuration.httpCookieStorage
+        cookieStorage?.setCookies(cookies, for: profileURL, mainDocumentURL: accountPage)
+        let session = URLSession(configuration: configuration, delegate: ProfileRequestDelegate(), delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+
+        var request = URLRequest(url: profileURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
+        request.setValue("application/json, text/plain, */*", forHTTPHeaderField: "Accept")
+        request.setValue(accountPage.absoluteString, forHTTPHeaderField: "Referer")
+        request.setValue("XMLHttpRequest", forHTTPHeaderField: "X-Requested-With")
+        request.setValue("1", forHTTPHeaderField: "MWeibo-Pwa")
+        if let token = cookieStorage?.cookies(for: profileURL)?.first(where: { $0.name == "XSRF-TOKEN" }) {
+            request.setValue(token.value.removingPercentEncoding, forHTTPHeaderField: "X-XSRF-TOKEN")
+        }
+
+        guard let (data, response) = try? await session.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let result = try? JSONDecoder().decode(Response.self, from: data),
+              result.ok > 0,
+              let profile = result.data,
+              profile.avatarURL.scheme == "https",
+              profile.avatarURL.host != nil else { return nil }
+        return profile
+    }
+
+    private final class ProfileRequestDelegate: NSObject, URLSessionTaskDelegate {
+        func urlSession(
+            _ session: URLSession,
+            task: URLSessionTask,
+            willPerformHTTPRedirection response: HTTPURLResponse,
+            newRequest request: URLRequest,
+            completionHandler: @escaping (URLRequest?) -> Void
+        ) {
+            completionHandler(nil)
+        }
     }
 }
 
@@ -67,14 +87,13 @@ enum WeiboEmbeddedPagePolicy {
         return normalized.contains("这里还没有内容")
     }
 
-    static func containsAuthenticatedSession(in cookies: [HTTPCookie]) -> Bool {
-        cookies.contains { cookie in
-            authenticationCookieNames.contains(cookie.name) && isWeiboCookieDomain(cookie.domain)
+    static func authenticationCookies(in cookies: [HTTPCookie]) -> [HTTPCookie] {
+        cookies.filter { cookie in
+            authenticationCookieNames.contains(cookie.name)
+                && !cookie.value.isEmpty
+                && (cookie.expiresDate ?? .distantFuture) > .now
+                && isWeiboCookieDomain(cookie.domain)
         }
-    }
-
-    static func shouldPersistSession(cookies: [HTTPCookie], isLoggingOut: Bool) -> Bool {
-        !isLoggingOut && containsAuthenticatedSession(in: cookies)
     }
 
     private static func isWeiboHost(_ host: String?) -> Bool {
