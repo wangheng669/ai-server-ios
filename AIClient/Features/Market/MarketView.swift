@@ -152,7 +152,7 @@ struct MarketView: View {
         .appSheet(isPresented: $showsInvestors) {
             FamousHoldingsView(store: holdingsStore)
                 .overlay(alignment: .bottomTrailing) {
-                    DetailSheetControls(closeLabel: "关闭名人持仓", onClose: { showsInvestors = false })
+                    DetailSheetControls(closeLabel: "关闭机构持仓", onClose: { showsInvestors = false })
                         .padding(12)
                 }
             .appPresentationDetents([.large])

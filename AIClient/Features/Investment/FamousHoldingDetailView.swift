@@ -1,24 +1,39 @@
 import SwiftUI
 
-private enum HoldingDetailFilter: String, CaseIterable, Identifiable {
-    case current = "当前持仓"
-    case new = "新建仓"
-    case increased = "增持"
-    case decreased = "减持"
-    case unchanged = "未变动"
-    case exited = "清仓"
+enum HoldingDetailFilter: CaseIterable, Identifiable {
+    case current, new, increased, decreased, exited, unchanged
 
     var id: Self { self }
 
-    func matches(_ action: FamousHoldingAction) -> Bool {
+    var action: FamousHoldingAction? {
         switch self {
-        case .current: action != .exited
-        case .new: action == .new
-        case .increased: action == .increased
-        case .decreased: action == .decreased
-        case .unchanged: action == .unchanged
-        case .exited: action == .exited
+        case .current: nil
+        case .new: .new
+        case .increased: .increased
+        case .decreased: .decreased
+        case .exited: .exited
+        case .unchanged: .unchanged
         }
+    }
+
+    var title: String { action?.title ?? "当前持仓" }
+
+    func count(in manager: FamousHoldingsManager) -> Int {
+        switch self {
+        case .current: manager.positionsCount
+        case .new: manager.summary.new
+        case .increased: manager.summary.increased
+        case .decreased: manager.summary.decreased
+        case .exited: manager.summary.exited
+        case .unchanged: manager.summary.unchanged
+        }
+    }
+
+    func positions(in manager: FamousHoldingsManager) -> [FamousHoldingChange] {
+        if self == .exited { return manager.exitedPositions ?? [] }
+        let positions = manager.positions ?? []
+        guard let action else { return positions }
+        return positions.filter { $0.action == action }
     }
 }
 
@@ -26,191 +41,250 @@ struct FamousHoldingDetailView: View {
     @Environment(\.dismiss) private var dismiss
     let manager: FamousHoldingsManager
     let store: FamousHoldingsStore
-    @State private var filter = HoldingDetailFilter.current
+    let disclaimer: String
+    @State private var filter: HoldingDetailFilter
+    @State private var query = ""
 
-    private func changes(_ detail: FamousHoldingsManager) -> [FamousHoldingChange] {
-        let records: [FamousHoldingChange]
-        if filter == .exited {
-            records = detail.exitedPositions ?? []
-        } else {
-            let positions = detail.positions ?? []
-            records = filter == .current ? positions : positions.filter { filter.matches($0.action) }
-        }
-        return records.sorted {
-            filter == .exited
-                ? ($0.previousValueUsd ?? $0.valueUsd) > ($1.previousValueUsd ?? $1.valueUsd)
-                : $0.valueUsd > $1.valueUsd
-        }
+    init(manager: FamousHoldingsManager, store: FamousHoldingsStore, filter: HoldingDetailFilter, disclaimer: String) {
+        self.manager = manager
+        self.store = store
+        self.disclaimer = disclaimer
+        _filter = State(initialValue: filter)
     }
 
     var body: some View {
         let detail = store.detail(for: manager)
-        let resolvedManager = detail ?? manager
-        let visibleChanges = detail.map(changes) ?? []
-        VStack(spacing: 0) {
-            filterBar(resolvedManager)
-            if detail != nil { listHeader(count: visibleChanges.count) }
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("\(resolvedManager.displayName)的持仓")
-                            .font(.title2.bold())
-                        Text("\(quarterLabel(resolvedManager.reportDate)) · \(resolvedManager.positionsCount) 只 · \(compactUSD(resolvedManager.totalValueUsd))")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(20)
-                    if detail != nil {
-                        ForEach(Array(visibleChanges.enumerated()), id: \.element.id) { index, change in
-                            holdingRow(change)
-                            if index < visibleChanges.count - 1 {
-                                Divider().overlay(HoldingsPalette.divider).padding(.leading, 72)
-                            }
-                        }
-                    } else if let message = store.detailError(for: manager) {
-                        ContentUnavailableView {
-                            Label("完整持仓暂不可用", systemImage: "list.bullet.rectangle")
-                        } description: {
-                            Text(message)
-                        } actions: {
-                            Button("重新加载") { Task { await store.loadDetail(for: manager) } }
-                        }
-                    } else {
-                        ContentLoadingPlaceholder(title: "正在读取完整持仓")
-                    }
-                    footer(resolvedManager)
-                }
+        let resolved = detail ?? manager
+        VStack(alignment: .leading, spacing: 0) {
+            header(resolved)
+            if resolved.canCompare {
+                filters(resolved)
             }
-            .scrollIndicators(.hidden)
-            .contentMargins(.bottom, 60, for: .scrollContent)
-            .background(HoldingsPalette.card)
+            if let detail {
+                searchField
+                positionsList(detail)
+            } else if let error = store.detailError(for: manager) {
+                ContentUnavailableView {
+                    Label("持仓明细暂不可用", systemImage: "list.bullet.rectangle")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("重新加载") { Task { await store.loadDetail(for: manager) } }
+                }
+                .frame(maxHeight: .infinity)
+            } else {
+                ContentLoadingPlaceholder(title: "正在读取完整持仓")
+                    .frame(maxHeight: .infinity, alignment: .top)
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(HoldingsPalette.canvas.ignoresSafeArea())
-        .floatingSheetClose("关闭持仓详情", action: dismiss.callAsFunction)
-        .toolbar(.hidden, for: .navigationBar)
+        .floatingSheetClose("关闭持仓明细", action: dismiss.callAsFunction)
         .task(id: manager.reportIdentity) { await store.loadDetail(for: manager) }
     }
 
-    private func filterBar(_ manager: FamousHoldingsManager) -> some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(HoldingDetailFilter.allCases) { item in
-                    let count = filterCount(item, manager: manager)
-                    Button { filter = item } label: {
-                        Text("\(item.rawValue) \(count.map { String($0) } ?? "—")")
-                            .font(.system(size: 12, weight: filter == item ? .semibold : .medium))
-                            .foregroundStyle(filter == item ? Color.white : Color.secondary)
-                            .padding(.horizontal, 13)
-                            .frame(height: 32)
-                            .background(
-                                filter == item ? HoldingsPalette.blue : Color.secondary.opacity(0.09),
-                                in: Capsule()
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(item.rawValue)
-                    .accessibilityValue(count.map { "\($0) 条" } ?? "数量暂未返回")
-                    .accessibilityIdentifier("holding-filter-\(item.rawValue)")
-                    .accessibilityAddTraits(filter == item ? .isSelected : [])
-                }
-            }
-            .padding(.horizontal, 20)
+    private func header(_ manager: FamousHoldingsManager) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(manager.institutionName)
+                .font(.title2.bold())
+                .accessibilityAddTraits(.isHeader)
+            Text("\(quarterLabel(manager.reportDate)) · 截至 \(manager.reportDate)")
+            Text("\(manager.positionsCount) 项持仓 · \(holdingUSD(manager.totalValueUsd))")
+                .monospacedDigit()
         }
-        .accessibilityIdentifier("holding-detail-filters")
-        .scrollIndicators(.hidden)
-        .padding(.vertical, 6)
-    }
-
-    private func listHeader(count: Int) -> some View {
-        HStack {
-            Text(filter == .exited ? "清仓记录" : filter.rawValue)
-                .font(.system(size: 15, weight: .semibold))
-            Text("\(count) 条")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text(filter == .exited ? "按上期市值从高到低" : "按持仓市值从高到低")
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(.tertiary)
-        }
+        .font(.subheadline)
+        .foregroundStyle(.primary)
         .padding(.horizontal, 20)
-        .frame(height: 42)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(HoldingsPalette.card)
-        .overlay(alignment: .top) { Divider().overlay(HoldingsPalette.divider) }
-        .overlay(alignment: .bottom) { Divider().overlay(HoldingsPalette.divider) }
     }
 
-    private func holdingRow(_ change: FamousHoldingChange) -> some View {
-        let color = actionColor(change.action)
-        return HStack(spacing: 12) {
-            HoldingsCompanyLogo(path: change.companyLogo, symbol: change.symbol, color: color, size: 40)
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 7) {
-                    Text(change.symbol ?? "—")
-                        .font(.system(size: 15, weight: .semibold))
-                    Text(actionLabel(change))
-                        .font(.system(size: 9.5, weight: .semibold))
-                        .foregroundStyle(color)
-                        .padding(.horizontal, 6)
-                        .frame(height: 18)
-                        .background(color.opacity(0.11), in: Capsule())
+    private func filters(_ manager: FamousHoldingsManager) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    ForEach(HoldingDetailFilter.allCases) { item in
+                        Button {
+                            filter = item
+                        } label: {
+                            Text("\(item.title) \(item.count(in: manager))")
+                                .font(.footnote.weight(.semibold).monospacedDigit())
+                                .foregroundStyle(filter == item ? Color.white : Color.primary)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                                .background(
+                                    filter == item ? HoldingsPalette.blue : InvestmentDesign.secondarySurface,
+                                    in: Capsule()
+                                )
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .id(item)
+                        .accessibilityAddTraits(filter == item ? .isSelected : [])
+                        .accessibilityIdentifier("holding-filter-\(item.title)")
+                    }
                 }
-                Text(change.name)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                .padding(.horizontal, 20)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            VStack(alignment: .trailing, spacing: 5) {
-                Text(filter == .exited ? percent(change.previousWeightPct) : percent(change.weightPct))
-                    .font(.system(size: 15, weight: .semibold))
-                    .monospacedDigit()
-                Text(filter == .exited
-                     ? "上期 \(compactUSD(change.previousValueUsd ?? change.valueUsd))"
-                     : compactUSD(change.valueUsd))
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+            .onChange(of: filter, initial: true) {
+                proxy.scrollTo(filter, anchor: .center)
             }
         }
+        .scrollIndicators(.hidden)
+        .background(HoldingsPalette.card)
+        .accessibilityIdentifier("holding-detail-filters")
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            TextField("搜索申报名称或 CUSIP", text: $query)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                        .padding(4)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("清除搜索")
+            }
+        }
+        .font(.subheadline)
+        .padding(.horizontal, 12)
+        .frame(minHeight: 44)
+        .background(InvestmentDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 10))
         .padding(.horizontal, 20)
-        .frame(minHeight: 72)
+        .padding(.vertical, 8)
+        .background(HoldingsPalette.card)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private func positionsList(_ detail: FamousHoldingsManager) -> some View {
+        let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let activeFilter = detail.canCompare ? filter : .current
+        let rows = activeFilter.positions(in: detail).filter {
+            term.isEmpty || $0.originalName.localizedStandardContains(term)
+                || $0.titleOfClass.localizedStandardContains(term) || $0.cusip.localizedStandardContains(term)
+        }
+        return ScrollView {
+            LazyVStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("\(rows.count) 项").font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text(activeFilter == .exited ? "按上期申报市值排序" : "按申报市值排序")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 4)
+                if rows.isEmpty {
+                    ContentUnavailableView(
+                        term.isEmpty ? "该分类没有持仓" : "未找到匹配的证券",
+                        systemImage: "magnifyingglass"
+                    )
+                }
+                ForEach(rows) { row in
+                    HoldingsPanel {
+                        HoldingPositionRow(position: row, isDetail: true, showsChanges: detail.canCompare)
+                    }
+                }
+                FilingSource(manager: detail, disclaimer: disclaimer)
+                    .padding(.horizontal, 4)
+            }
+            .frame(maxWidth: 660)
+            .padding(.horizontal, InvestmentDesign.pageInset)
+            .padding(.top, 12)
+            .padding(.bottom, 82)
+            .frame(maxWidth: .infinity)
+        }
+        .scrollDismissesKeyboard(.interactively)
+    }
+}
+
+struct HoldingPositionRow: View {
+    let position: FamousHoldingChange
+    var isDetail = false
+    let showsChanges: Bool
+
+    private var isExited: Bool { position.action == .exited }
+    private var weight: Double { isExited ? position.previousWeightPct : position.weightPct }
+    private var value: Double { isExited ? position.previousValueUsd : position.valueUsd }
+
+    private var metrics: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            Text(holdingPercent(weight))
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .accessibilityLabel("\(isExited ? "上期权重" : "权重") \(holdingPercent(weight))")
+            Text("\(isExited ? "上期 " : "")\(holdingUSD(value))")
+                .font(.footnote.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("\(isExited ? "上期" : "")申报市值 \(exactHoldingUSD(value))")
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if showsChanges {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(position.action.title)
+                        .foregroundStyle(actionColor(position.action))
+                    Spacer(minLength: 6)
+                    Text("权重 \(holdingPercentagePoints(position.weightChangePct))")
+                        .foregroundStyle(weightChangeColor(position.weightChangePct))
+                }
+                .font(.footnote.weight(.medium).monospacedDigit())
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 10) {
+                    HoldingPositionIdentity(position: position, showsCUSIP: isDetail)
+                    Spacer(minLength: 0)
+                    metrics
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    HoldingPositionIdentity(position: position, showsCUSIP: isDetail)
+                    metrics
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+            }
+            HoldingWeightBar(weight: weight, tint: HoldingsPalette.blue)
+        }
         .accessibilityElement(children: .combine)
     }
+}
 
-    private func actionLabel(_ change: FamousHoldingChange) -> String {
-        if change.action == .unchanged { return change.action.title }
-        let arrow = change.weightChangePct >= 0 ? "↑" : "↓"
-        return "\(arrow) \(change.action.title) \(percent(abs(change.weightChangePct)))"
-    }
+struct HoldingPositionIdentity: View {
+    let position: FamousHoldingChange
+    var showsCUSIP = false
 
-    private func filterCount(_ item: HoldingDetailFilter, manager: FamousHoldingsManager) -> Int? {
-        switch item {
-        case .current: manager.positionsCount
-        case .new: manager.summary.new
-        case .increased: manager.summary.increased
-        case .decreased: manager.summary.decreased
-        case .exited: manager.summary.exited
-        case .unchanged: manager.summary.unchanged ?? manager.positions?.count(where: { $0.action == .unchanged })
-        }
-    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(position.originalName)
+                .font(.subheadline.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
 
-    private func footer(_ resolvedManager: FamousHoldingsManager) -> some View {
-        HStack {
-            Text("数据来源：SEC 13F 申报")
-            Spacer()
-            if let holdingsCount = resolvedManager.holdingsCount, holdingsCount != resolvedManager.positionsCount {
-                Text("USD · 原始 \(holdingsCount) 条 · 合并 \(resolvedManager.positionsCount) 只")
-            } else {
-                Text("货币单位：USD")
+            Text(position.titleOfClass)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            let type = HoldingDisclosureType(position: position)
+            if type != .shares {
+                Text(type.rawValue)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(HoldingsPalette.blue)
+            }
+            if showsCUSIP {
+                Text(position.cusip)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
             }
         }
-        .font(.caption2)
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 18)
-        .padding(.vertical, 20)
     }
-
 }
