@@ -170,6 +170,7 @@ struct NewsFeedView: View {
     @State private var truthWebsiteURL: URL?
     @State private var isFeedChromeHidden = false
     @State private var isFeedAtTop = true
+    @State private var xTimelineScrollTarget: Int?
     @State private var sourceChromeStates: [FeedSource: Bool] = [:]
     @StateObject private var scrollPositionStore = FeedScrollPositionStore()
     @State private var hasLoadedFeedOnce = false
@@ -1203,6 +1204,7 @@ struct NewsFeedView: View {
                                     XFeedDeviceTranslations(model: model, post: post, displayed: displayed)
                                 }
                             }
+                            .id(post.id)
                             .accessibilityIdentifier("feed-post-\(post.id)")
                             .alignmentGuide(.listRowSeparatorLeading) { _ in NewsCardView.xHorizontalInset }
                             .alignmentGuide(.listRowSeparatorTrailing) { dimensions in
@@ -1265,13 +1267,20 @@ struct NewsFeedView: View {
                     if !active { model.setXTimelineScrolling(false) }
                 }
                 .onDisappear { model.setXTimelineScrolling(false) }
+                .onChange(of: xTimelineScrollTarget) { _, target in
+                    guard let target else { return }
+                    xTimelineScrollTarget = nil
+                    guard isActive, posts.first?.id == target else { return }
+                    withAnimation(reduceMotion ? nil : .snappy(duration: 0.35)) {
+                        proxy.scrollTo(target, anchor: .top)
+                    }
+                }
                 .overlay(alignment: .top) {
                     if isActive, !model.pendingRealtimePosts.isEmpty {
                         xNewPostsPill {
-                            withAnimation(.snappy(duration: 0.35)) {
-                                model.acceptPendingRealtimePosts()
-                                if let first = model.posts.first { proxy.scrollTo(first.id, anchor: .top) }
-                            }
+                            model.acceptPendingRealtimePosts()
+                            // Let the List register the new first row before scrolling to it.
+                            xTimelineScrollTarget = model.posts.first?.id
                         }
                         .padding(.top, 10)
                         .transition(.move(edge: .top).combined(with: .opacity))
@@ -1638,6 +1647,7 @@ struct NewsFeedView: View {
             .padding(.horizontal, 14)
             .frame(height: 44)
             .background(Color.blue, in: Capsule())
+            .contentShape(Capsule())
             .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
         }
         .buttonStyle(.plain)
