@@ -873,7 +873,6 @@ struct InvestorMoodItem: Decodable, Identifiable {
     let nickname: String
     let awemeId: String
     let description: String
-    let url: String
     let coverUrl: String
     let videoUrl: String
     let createdAt: String?
@@ -889,7 +888,7 @@ struct InvestorMoodItem: Decodable, Identifiable {
     let ageHours: Double?
 
     private enum CodingKeys: String, CodingKey {
-        case nickname, awemeId, description, url, coverUrl, createdAt, label, reasons
+        case nickname, awemeId, description, coverUrl, createdAt, label, reasons
         case transcript, transcriptStatus, analysis, evidence, analysisSource, model, stale, ageHours
         case videoUrl, videoURL, playUrl, playURL
         case videoUrlSnake = "video_url"
@@ -901,7 +900,6 @@ struct InvestorMoodItem: Decodable, Identifiable {
         nickname = try values.decode(String.self, forKey: .nickname)
         awemeId = try values.decode(String.self, forKey: .awemeId)
         description = try values.decodeIfPresent(String.self, forKey: .description) ?? ""
-        url = try values.decodeIfPresent(String.self, forKey: .url) ?? ""
         coverUrl = try values.decodeIfPresent(String.self, forKey: .coverUrl) ?? ""
         videoUrl = [
             try values.decodeIfPresent(String.self, forKey: .videoUrl),
@@ -926,12 +924,9 @@ struct InvestorMoodItem: Decodable, Identifiable {
         ageHours = try values.decodeIfPresent(Double.self, forKey: .ageHours)
     }
 
-    var originalVideoURL: URL? {
-        guard let source = URL(string: url.trimmingCharacters(in: .whitespacesAndNewlines)),
-              source.scheme?.lowercased() == "https",
-              let host = source.host?.lowercased(),
-              host == "douyin.com" || host.hasSuffix(".douyin.com") else { return nil }
-        return source
+    var douyinAppVideoURL: URL? {
+        guard !awemeId.isEmpty, awemeId.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
+        return URL(string: "snssdk1128://aweme/detail/\(awemeId)")
     }
 
     var playbackURL: URL? {

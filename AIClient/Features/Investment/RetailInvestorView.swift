@@ -139,6 +139,7 @@ private struct InvestorMoodVideoCard: View {
     let item: InvestorMoodItem
     let onPlay: () -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var showsDouyinOpenFailure = false
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: TodayBriefStyle.cardCornerRadius)
@@ -168,6 +169,11 @@ private struct InvestorMoodVideoCard: View {
         }
         .shadow(color: TodayBriefStyle.accent.opacity(0.06), radius: 6, x: 0, y: 2)
         .accessibilityIdentifier("retail-investor-card-\(item.id)")
+        .alert("无法打开抖音 App", isPresented: $showsDouyinOpenFailure) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text("请确认抖音 App 已安装且可用。")
+        }
     }
 
     private var header: some View {
@@ -242,10 +248,13 @@ private struct InvestorMoodVideoCard: View {
     }
 
     private var originalVideoButton: some View {
-        let url = item.originalVideoURL
+        let url = item.douyinAppVideoURL
         return Button {
             guard let url else { return }
-            UIApplication.shared.open(url)
+            Task {
+                let opened = await UIApplication.shared.open(url, options: [:])
+                showsDouyinOpenFailure = !opened
+            }
         } label: {
             HStack(spacing: 8) {
                 Image("TikTokMark")
@@ -253,7 +262,7 @@ private struct InvestorMoodVideoCard: View {
                     .scaledToFit()
                     .frame(width: 20, height: 20)
                     .accessibilityHidden(true)
-                Text(url == nil ? "暂无原视频链接" : "抖音原视频")
+                Text(url == nil ? "原视频暂不可用" : "抖音原视频")
                     .font(.subheadline.weight(.semibold))
             }
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
@@ -261,7 +270,7 @@ private struct InvestorMoodVideoCard: View {
         }
         .buttonStyle(.plain)
         .disabled(url == nil)
-        .accessibilityHint(url == nil ? "" : "打开当前卡片对应的抖音视频")
+        .accessibilityHint(url == nil ? "" : "在抖音 App 打开当前视频")
         .accessibilityIdentifier("retail-investor-open-douyin")
     }
 
