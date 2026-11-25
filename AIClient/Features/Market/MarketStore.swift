@@ -29,6 +29,7 @@ final class MarketStore {
 
     private let service: MarketService
     private let realtime: MarketRealtimeClient
+    let stockQuotes: MarketStockQuoteStore
     @ObservationIgnored private var cacheLoadTask: Task<Void, Never>?
     private var latestRealtimeUpdates: [String: MarketQuoteUpdate] = [:]
     private var loadingTrendFallbacks: Set<String> = []
@@ -46,7 +47,9 @@ final class MarketStore {
     @ObservationIgnored private var dashboardQuotesBySymbol: [String: MarketQuote] = [:]
     @ObservationIgnored private var constituentsBySymbol: [String: MarketIndexConstituent] = [:]
     init(baseURL: URL = ServerConfiguration.currentURL, session: URLSession? = nil) {
-        service = MarketService(baseURL: baseURL, session: session)
+        let service = MarketService(baseURL: baseURL, session: session)
+        self.service = service
+        stockQuotes = MarketStockQuoteStore(service: service)
         realtime = MarketRealtimeClient(baseURL: baseURL)
     }
 
