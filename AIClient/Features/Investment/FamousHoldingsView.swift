@@ -431,6 +431,9 @@ private struct FilingSource: View {
             Text("原始申报 \(manager.holdingsCount) 条 · 合并后 \(manager.positionsCount) 项")
             Text(disclaimer)
             Text("期权按标的证券价值计入申报市值。清仓表示上期有申报、本期未出现。")
+            if manager.key == "ackman" {
+                Text("头像为 [Senate Democrats 照片](https://commons.wikimedia.org/w/index.php?oldid=946520121)的裁切版 · [CC BY 2.0](https://creativecommons.org/licenses/by/2.0/)")
+            }
         }
         .font(.footnote)
         .foregroundStyle(.secondary)
@@ -459,6 +462,7 @@ private struct InvestorPortraitImage: View {
 
     private var assetName: String? {
         switch manager.key {
+        case "ackman": "InvestorPortraitAckman"
         case "ark": "InvestorPortraitARK"
         case "berkshire": "InvestorPortraitBerkshire"
         case "duanyongping": "InvestorPortraitDuanYongping"
