@@ -154,6 +154,7 @@ struct CityNewsView: View {
             .scrollIndicators(.hidden)
         }
         .background(CityDesign.canvas.ignoresSafeArea())
+        .floatingSheetClose("关闭城市观察", action: dismiss.callAsFunction)
         .tint(CityDesign.accent)
         .sensoryFeedback(.selection, trigger: selectedID)
         .sensoryFeedback(.impact(weight: .light), trigger: journey.current.id)
@@ -174,13 +175,10 @@ struct CityNewsView: View {
     }
 
     private var topBar: some View {
-        HStack {
-            Text("城市观察")
-                .font(.title2.bold())
-                .accessibilityAddTraits(.isHeader)
-            Spacer(minLength: 0)
-            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭城市观察")
-        }
+        Text("城市观察")
+            .font(.title2.bold())
+            .accessibilityAddTraits(.isHeader)
+            .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.leading, 20)
         .padding(.trailing, 12)
         .padding(.vertical, 8)
@@ -549,9 +547,7 @@ private struct CityFullScreenMap: View {
             CityAdministrativeMap(scope: scope, selectedRegionID: selection) { selection = $0.id }
                 .padding(18)
         }
-        .overlay(alignment: .topTrailing) {
-            DetailSheetControls(closeLabel: "完成", onClose: dismiss.callAsFunction).padding(12)
-        }
+        .floatingSheetClose("关闭全屏地图", action: dismiss.callAsFunction)
     }
 }
 

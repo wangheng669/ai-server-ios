@@ -119,21 +119,12 @@ struct YouTubeVideoDetailView: View {
                     if !video.videoID.isEmpty {
                         subtitleSection
                     }
-                    Color.clear.frame(height: 32)
+                    Color.clear.frame(height: presentedAsSheet ? 64 : 32)
                 }
             }
         }
         .background(Color(uiColor: .systemBackground))
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if presentedAsSheet {
-                HStack {
-                    Spacer()
-                    DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭视频详情")
-                }
-                .padding(.horizontal, 12)
-                .background(.background)
-            }
-        }
+        .floatingSheetClose("关闭视频详情", isVisible: presentedAsSheet, action: dismiss.callAsFunction)
         .navigationTitle(presentedAsSheet ? "" : "视频详情")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
@@ -382,19 +373,19 @@ struct YouTubeVideoDetailView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .overlay(alignment: .topTrailing) {
+            .ignoresSafeArea()
+            .overlay(alignment: .bottomTrailing) {
                 Button { exitFullscreen() } label: {
                     Image(systemName: "xmark")
                         .font(.headline)
                         .foregroundStyle(.white)
-                        .frame(width: 42, height: 42)
+                        .frame(width: 44, height: 44)
                         .background(.black.opacity(0.55), in: Circle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("退出全屏播放")
                 .padding(18)
             }
-        .ignoresSafeArea()
         .onAppear { AppOrientationController.shared.setVideoFullscreen(true) }
         .onDisappear { AppOrientationController.shared.setVideoFullscreen(false) }
     }

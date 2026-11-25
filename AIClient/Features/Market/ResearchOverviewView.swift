@@ -590,20 +590,19 @@ private struct ResearchTopicSheet<Content: View>: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text(title)
-                    .font(.headline)
-                    .accessibilityAddTraits(.isHeader)
-                Spacer(minLength: 0)
-                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭\(title)")
-            }
-            .padding(.horizontal, ResearchStyle.inset)
-            .padding(.top, 12)
-            .overlay(alignment: .bottom) { ResearchStyle.divider.frame(height: 1) }
+            Text(title)
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, ResearchStyle.inset)
+                .padding(.vertical, 10)
+                .overlay(alignment: .bottom) { ResearchStyle.divider.frame(height: 1) }
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .contentMargins(.bottom, 60, for: .scrollContent)
         }
         .background(ResearchStyle.surface)
+        .floatingSheetClose("关闭\(title)", action: dismiss.callAsFunction)
     }
 }
 

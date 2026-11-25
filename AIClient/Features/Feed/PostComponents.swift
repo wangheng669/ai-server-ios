@@ -72,8 +72,9 @@ struct DetailSheetCloseButton: View {
         Button(action: action) {
             ZStack {
                 Circle()
-                    .fill(Color(uiColor: .tertiarySystemFill))
-                    .frame(width: 32, height: 32)
+                    .fill(.regularMaterial)
+                    .overlay { Circle().strokeBorder(.primary.opacity(0.1), lineWidth: 1) }
+                    .frame(width: 36, height: 36)
                 Image(systemName: "xmark")
                     .symbolRenderingMode(.monochrome)
                     .font(.system(size: 15, weight: .semibold))
@@ -117,6 +118,21 @@ extension DetailSheetControls where Actions == EmptyView {
 }
 
 extension View {
+    func floatingSheetClose(
+        _ label: String,
+        identifier: String = "detail-sheet-close",
+        isVisible: Bool = true,
+        action: @escaping () -> Void
+    ) -> some View {
+        overlay(alignment: .bottomTrailing) {
+            if isVisible {
+                DetailSheetCloseButton(action: action, accessibilityLabel: label)
+                    .accessibilityIdentifier(identifier)
+                    .padding(16)
+            }
+        }
+    }
+
     func readingSheetPresentation() -> some View {
         appPresentationDetents([.large])
             .appPresentationCornerRadius(28)
@@ -2868,19 +2884,24 @@ private struct FullscreenVideoPlayerView: View {
                 .accessibilityLabel(isMuted ? "打开声音" : "静音")
 
                 Spacer()
-
-                Button(action: dismiss.callAsFunction) {
-                    Image(systemName: "xmark")
-                        .frame(width: 40, height: 40)
-                        .background(.black.opacity(0.62), in: Circle())
-                }
-                .accessibilityLabel("退出全屏")
             }
             .font(.system(size: 16, weight: .semibold))
             .foregroundStyle(.white)
             .padding(.horizontal, 16)
             .padding(.top, 8)
             .frame(maxHeight: .infinity, alignment: .top)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            Button(action: dismiss.callAsFunction) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(.black.opacity(0.62), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("退出全屏")
+            .padding(16)
         }
         .onAppear {
             player.isMuted = isMuted
@@ -3317,32 +3338,28 @@ struct ImageGalleryView: View {
                 .tabViewStyle(.page(indexDisplayMode: .never))
             }
 
-            ZStack {
-                if urls.count > 1 {
-                    Text("\(selectedIndex + 1) / \(urls.count)")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .frame(height: 36)
-                        .background(.black.opacity(0.56), in: Capsule())
-                        .accessibilityLabel("第 \(selectedIndex + 1) 张，共 \(urls.count) 张")
-                }
-
-                HStack {
-                    Spacer()
-                    Button(action: requestDismiss) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 42, height: 42)
-                            .background(.black.opacity(0.56), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("关闭图片")
-                }
+            if urls.count > 1 {
+                Text("\(selectedIndex + 1) / \(urls.count)")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .frame(height: 36)
+                    .background(.black.opacity(0.56), in: Capsule())
+                    .accessibilityLabel("第 \(selectedIndex + 1) 张，共 \(urls.count) 张")
+                    .padding(.top, 10)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 10)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            Button(action: requestDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(.black.opacity(0.56), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("关闭图片")
+            .padding(16)
         }
         .statusBarHidden()
         .interactiveDismissDisabled()

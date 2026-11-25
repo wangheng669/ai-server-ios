@@ -311,7 +311,6 @@ private struct TodayOriginalsPanel: View {
                     }
                 }
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                .padding(.trailing, 44)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityFocused($headingFocused)
                 if sources.count > 1, let selectedSource {
@@ -371,6 +370,7 @@ private struct TodayOriginalsPanel: View {
                     sourceStatus
                 }
                 .padding(TodayBriefStyle.horizontalInset)
+                .padding(.bottom, 44)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { contentHeight = $0 }
             }
@@ -636,20 +636,11 @@ private struct TodayBriefDeck: View {
 
     private func directory(selection: Int) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("本期目录").font(.headline).accessibilityAddTraits(.isHeader)
-                Spacer()
-                Button { showsDirectory = false } label: {
-                    Image(systemName: "xmark")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("关闭目录")
-            }
-            .padding(.leading, 10)
+            Text("本期目录")
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+                .padding(.leading, 10)
+                .padding(.vertical, 8)
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 2) {
@@ -688,12 +679,14 @@ private struct TodayBriefDeck: View {
                         }
                     }
                 }
+                .contentMargins(.bottom, 52, for: .scrollContent)
                 .onAppear { proxy.scrollTo(brief.cards[selection].id, anchor: .center) }
             }
             .scrollIndicators(.hidden)
             .frame(height: min(CGFloat(brief.cards.count) * 56, 272))
         }
         .padding([.horizontal, .bottom], 10)
+        .floatingSheetClose("关闭目录") { showsDirectory = false }
         .accessibilityIdentifier("today-card-directory")
     }
 
@@ -812,19 +805,8 @@ private struct TodayBriefDeck: View {
             }
             .clipShape(shape)
             .modifier(CardSurface(shape: shape, width: width, shadowOpacity: 0.07))
-            .overlay(alignment: .topTrailing) {
-                Button { setOriginals(false) } label: {
-                    Image(systemName: "xmark")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .padding(.top, 9)
-                .padding(.trailing, TodayBriefStyle.horizontalInset)
-                .accessibilityLabel("关闭阅读")
-                .accessibilityIdentifier("today-close-originals")
+            .floatingSheetClose("关闭阅读", identifier: "today-close-originals") {
+                setOriginals(false)
             }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("today-originals-panel")

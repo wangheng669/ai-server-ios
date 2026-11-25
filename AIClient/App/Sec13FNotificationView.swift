@@ -106,11 +106,6 @@ struct Sec13FNotificationView: View {
                     } label: { Label("\(selectedIndex + 1)/\(snapshot.items.count)", systemImage: "chevron.down").font(.caption) }
                     .accessibilityLabel("选择披露机构")
                 }
-                Button(action: dismiss.callAsFunction) {
-                    Image(systemName: "xmark").font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary).frame(width: 30, height: 30)
-                        .background(Color.secondary.opacity(0.09), in: Circle())
-                }.accessibilityLabel("关闭持仓更新")
             }.padding(.horizontal, 22).padding(.top, 22).padding(.bottom, 22)
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -122,10 +117,11 @@ struct Sec13FNotificationView: View {
                             Text("\(error.institutionName)：\(error.error)").font(.caption).foregroundStyle(.secondary).padding(.top, 6)
                         }
                     }
-                }.padding(.horizontal, 22).padding(.bottom, 28)
+                }.padding(.horizontal, 22).padding(.bottom, 60)
             }.scrollIndicators(.hidden)
         }
         .background(HoldingsPalette.card.ignoresSafeArea())
+        .floatingSheetClose("关闭持仓更新", action: dismiss.callAsFunction)
         .accessibilityIdentifier("sec13f-notification-detail")
         .sheet(item: $detail) { route in
             Sec13FHoldingsListView(manager: route.manager, initialFilter: route.filter)

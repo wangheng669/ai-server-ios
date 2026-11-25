@@ -1104,29 +1104,25 @@ private struct KnowledgeSectionPanel<Content: View>: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text(title)
-                    .font(.title2.bold())
-                    .accessibilityAddTraits(.isHeader)
-                Spacer(minLength: 0)
-                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭\(title)")
-                    .accessibilityIdentifier("detail-sheet-close")
-            }
-            .padding(.leading, 20)
-            .padding(.trailing, 12)
-            .padding(.vertical, 8)
-            .background(KnowledgePagePalette.surface)
+            Text(title)
+                .font(.title2.bold())
+                .accessibilityAddTraits(.isHeader)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 8)
+                .background(KnowledgePagePalette.surface)
 
             Divider()
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0, content: content)
                     .padding(.top, 14)
-                    .padding(.bottom, 20)
+                    .padding(.bottom, 60)
             }
             .scrollIndicators(.hidden)
         }
         .background(KnowledgePagePalette.surface.ignoresSafeArea())
+        .floatingSheetClose("关闭\(title)", action: dismiss.callAsFunction)
         .readingSheetPresentation()
     }
 }

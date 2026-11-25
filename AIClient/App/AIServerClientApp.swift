@@ -211,11 +211,13 @@ struct PushNotificationDetailsView: View {
                     NativeReportNotificationView(report: report, links: details.links ?? [])
                 } else {
                     content(details)
-                        .safeAreaInset(edge: .top, spacing: 0) { closeBar }
+                        .contentMargins(.bottom, 48, for: .scrollContent)
+                        .floatingSheetClose("关闭通知详情", action: dismiss.callAsFunction)
                 }
             case nil:
                 preview
-                    .safeAreaInset(edge: .top, spacing: 0) { closeBar }
+                    .contentMargins(.bottom, 48, for: .scrollContent)
+                    .floatingSheetClose("关闭通知详情", action: dismiss.callAsFunction)
             }
         }
         .presentationDetents(needsLargeSheet ? [.large] : [.medium, .large])
@@ -225,15 +227,6 @@ struct PushNotificationDetailsView: View {
         .onDisappear { destination.initialLoad?.cancel() }
         .imageGallery(item: $gallerySelection)
         .inAppBrowserCover(item: $browser)
-    }
-
-    private var closeBar: some View {
-        HStack {
-            Spacer()
-            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭通知详情")
-        }
-        .padding(.horizontal, 12)
-        .background(.background)
     }
 
     private var preview: some View {
