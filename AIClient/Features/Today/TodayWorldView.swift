@@ -360,6 +360,8 @@ struct TodayWorldView: View {
     @State private var showsStatus = false
     @State private var showsTools = false
     @State private var statusHeight: CGFloat = 0
+    @State private var cardSelection: (date: String, index: Int)?
+    @State private var groupJump: TodayBriefGroupJump?
 
     init(store: TodayWorldStore, marketStore: MarketStore) {
         _store = StateObject(wrappedValue: store)
@@ -436,7 +438,9 @@ struct TodayWorldView: View {
                             ),
                             isLoadingSources: store.isLoading || store.isLoadingSources,
                             isHeaderPanelOpen: showsTools,
-                            retryReport: { await store.loadReport(force: true) }
+                            retryReport: { await store.loadReport(force: true) },
+                            groupJump: groupJump,
+                            selectedIndex: selectedCardIndex(for: brief.date)
                         )
                         .id(brief.date)
                     } else {
@@ -448,7 +452,17 @@ struct TodayWorldView: View {
         }
         .scrollIndicators(.hidden)
         .scrollBounceBehavior(.basedOnSize)
+        .safeAreaInset(edge: .bottom, spacing: 4) {
+            if let brief = store.brief, brief.sectionShortcuts.count > 1 {
+                TodayBriefGroupBar(brief: brief, selectedIndex: selectedCardIndex(for: brief.date).wrappedValue) { title in
+                    groupJump = TodayBriefGroupJump(title: title)
+                }
+            }
+        }
         .padding(.bottom, bottomChromeHeight + 8)
+        .onChange(of: store.brief?.date) { _, date in
+            if cardSelection?.date != date { cardSelection = nil }
+        }
         .onChange(of: showsTools) { _, open in
             if open { showsStatus = false }
         }
@@ -457,6 +471,16 @@ struct TodayWorldView: View {
                 showsTools = false
                 showsStatus = false
             }
+        }
+    }
+
+    private func selectedCardIndex(for date: String) -> Binding<Int> {
+        Binding {
+            guard let cardSelection, cardSelection.date == date else { return 0 }
+            return cardSelection.index
+        } set: { index in
+            guard store.brief?.date == date else { return }
+            cardSelection = (date, index)
         }
     }
 

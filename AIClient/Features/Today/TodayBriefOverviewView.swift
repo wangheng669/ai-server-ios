@@ -127,6 +127,12 @@ struct TodayCompanyStock: Identifiable, Sendable {
 }
 
 struct TodayBriefProjection: Sendable {
+    struct SectionShortcut: Identifiable, Sendable {
+        let title: String
+        let firstCardIndex: Int
+        var id: String { title }
+    }
+
     private struct FollowUpKey: Equatable {
         let systems: Set<String>
         let posts: Set<Int>
@@ -195,11 +201,17 @@ struct TodayBriefProjection: Sendable {
     let date: String
     let isPartial: Bool
     fileprivate let cards: [Card]
+    let sectionShortcuts: [SectionShortcut]
     fileprivate let stockSymbols: [String]
     let sourceIDs: [Int]
     private(set) var sources: [Int: TodaySourcePresentation] = [:]
     private(set) var previews: [URL: UIImage] = [:]
     private(set) var hasPreparedPreviews = false
+
+    func sectionTitle(at index: Int) -> String? {
+        guard !cards.isEmpty else { return nil }
+        return cards[min(index, cards.count - 1)].section
+    }
 
     var avatarURLs: [URL] {
         cards.flatMap { card in
@@ -296,9 +308,23 @@ struct TodayBriefProjection: Sendable {
             )
         }
         cards = highlights + companyCards + standaloneWatches
+        var seenSections = Set<String>()
+        sectionShortcuts = cards.enumerated().compactMap { index, card in
+            guard seenSections.insert(card.section).inserted else { return nil }
+            return SectionShortcut(title: card.section, firstCardIndex: index)
+        }
         var seenSymbols = Set<String>()
         stockSymbols = cards.compactMap { $0.stock?.symbol }.filter { seenSymbols.insert($0).inserted }
         sourceIDs = Set(cards.flatMap(\.postIDs)).sorted()
+    }
+}
+
+struct TodayBriefGroupJump: Equatable {
+    let title: String
+    private let id = UUID()
+
+    init(title: String) {
+        self.title = title
     }
 }
 
@@ -309,6 +335,8 @@ struct TodayBriefOverviewView: View {
     let isLoadingSources: Bool
     let isHeaderPanelOpen: Bool
     let retryReport: () async -> Void
+    let groupJump: TodayBriefGroupJump?
+    @Binding var selectedIndex: Int
 
     var body: some View {
         Group {
@@ -321,11 +349,77 @@ struct TodayBriefOverviewView: View {
             } else {
                 TodayBriefDeck(
                     brief: brief, marketStore: marketStore, viewport: viewport, isLoadingSources: isLoadingSources,
-                    isHeaderPanelOpen: isHeaderPanelOpen, retryReport: retryReport
+                    isHeaderPanelOpen: isHeaderPanelOpen, retryReport: retryReport, groupJump: groupJump,
+                    selectedIndex: $selectedIndex
                 )
             }
         }
         .accessibilityIdentifier("today-overview")
+    }
+}
+
+struct TodayBriefGroupBar: View {
+    let brief: TodayBriefProjection
+    let selectedIndex: Int
+    let selectGroup: (String) -> Void
+
+    private var selectedTitle: String? { brief.sectionTitle(at: selectedIndex) }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            buttons
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) { buttons }
+                    .scrollIndicators(.hidden)
+                    .onChange(of: selectedTitle, initial: true) { _, title in
+                        if let title { proxy.scrollTo(title, anchor: .center) }
+                    }
+            }
+        }
+        .padding(.horizontal, 4)
+        .background(TodayBriefStyle.surface, in: RoundedRectangle(cornerRadius: 14))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(TodayBriefStyle.surfaceOutline, lineWidth: 0.5)
+                .allowsHitTesting(false)
+        }
+        .frame(maxWidth: TodayBriefStyle.maximumCardWidth)
+        .padding(.horizontal, TodayBriefStyle.horizontalInset)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("今日分组")
+    }
+
+    private var buttons: some View {
+        HStack(spacing: 2) {
+            ForEach(brief.sectionShortcuts) { section in
+                let isSelected = section.title == selectedTitle
+                Button {
+                    if !isSelected { selectGroup(section.title) }
+                } label: {
+                    Text(section.title)
+                        .font(.footnote.weight(isSelected ? .semibold : .medium))
+                        .foregroundStyle(isSelected ? TodayBriefStyle.accent : TodayBriefStyle.secondary)
+                        .fixedSize()
+                        .padding(.horizontal, 5)
+                        .padding(.bottom, 3)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .frame(maxWidth: .infinity)
+                        .contentShape(Rectangle())
+                        .overlay(alignment: .bottom) {
+                            if isSelected {
+                                Capsule()
+                                    .fill(TodayBriefStyle.accent)
+                                    .frame(width: 14, height: 2)
+                                    .padding(.bottom, 5)
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .id(section.id)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+            }
+        }
     }
 }
 
@@ -478,7 +572,6 @@ private struct TodayBriefDeck: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var stockQuotes = TodayStockQuoteStore()
     @State private var presentedStock: TodayCompanyStock?
-    @State private var selectedIndex = 0
     @State private var showsOriginals = false
     @State private var showsDirectory = false
     @State private var originalsHeights: [String: CGFloat] = [:]
@@ -492,6 +585,8 @@ private struct TodayBriefDeck: View {
     let isLoadingSources: Bool
     let isHeaderPanelOpen: Bool
     let retryReport: () async -> Void
+    let groupJump: TodayBriefGroupJump?
+    @Binding var selectedIndex: Int
 
     private enum DragAxis {
         case horizontal
@@ -611,6 +706,12 @@ private struct TodayBriefDeck: View {
             settlement = nil
             summaryHeights = summaryHeights.filter { current.contains($0.key) }
             originalsHeights = originalsHeights.filter { current.contains($0.key) }
+        }
+        .onChange(of: groupJump) { _, jump in
+            guard let jump, let section = brief.sectionShortcuts.first(where: { $0.title == jump.title }) else {
+                return
+            }
+            jumpToCard(section.firstCardIndex)
         }
         .onChange(of: isHeaderPanelOpen) { _, open in
             if open { showsDirectory = false }
@@ -733,9 +834,7 @@ private struct TodayBriefDeck: View {
                     LazyVStack(spacing: 2) {
                         ForEach(Array(brief.cards.enumerated()), id: \.element.id) { index, card in
                             Button {
-                                settlement = nil
-                                selectedIndex = index
-                                showsDirectory = false
+                                jumpToCard(index)
                             } label: {
                                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                                     Text("\(index + 1)").monospacedDigit()
@@ -775,6 +874,12 @@ private struct TodayBriefDeck: View {
         .padding([.horizontal, .bottom], 10)
         .floatingSheetClose("关闭目录") { showsDirectory = false }
         .accessibilityIdentifier("today-card-directory")
+    }
+
+    private func jumpToCard(_ index: Int) {
+        settlement = nil
+        selectedIndex = index
+        showsDirectory = false
     }
 
     private func swipeGesture(cardWidth: CGFloat) -> some Gesture {
