@@ -66,6 +66,14 @@ private enum ResearchStyle {
     }
 }
 
+private enum ResearchPage: String, CaseIterable, Identifiable {
+    case globalMarkets = "全球市场"
+    case coreStocks = "核心股票"
+    case industries = "行业表现"
+
+    var id: Self { self }
+}
+
 struct ResearchHomeView: View {
     let store: MarketStore
     let researchStore: InstitutionResearchStore
@@ -78,6 +86,7 @@ struct ResearchHomeView: View {
     @Environment(\.rootTabIsActive) private var rootTabIsActive
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.scenePhase) private var scenePhase
+    @State private var selectedPage: ResearchPage = .globalMarkets
     @State private var stockRegion: MarketRegion = .unitedStates
     @State private var presentedTopic: ResearchTopic? = {
         #if DEBUG
@@ -103,48 +112,22 @@ struct ResearchHomeView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                if isLoadingMarket {
-                    ContentLoadingPlaceholder(title: "正在准备市场概览", layout: .chart)
-                        .accessibilityIdentifier("research-home-loading")
-                } else {
-                    if let message = store.errorMessage {
-                        Button { Task { await store.refresh() } } label: {
-                            Label(store.isRetrying ? "正在重试行情" : "\(message) · 点击重试",
-                                  systemImage: "arrow.clockwise")
-                                .font(.footnote)
-                                .foregroundStyle(ResearchStyle.accent)
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(store.isRetrying)
-                    } else if let notice = store.quoteIssueMessage {
-                        Text(notice)
-                            .font(.footnote)
-                            .foregroundStyle(ResearchStyle.muted)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    globalMarkets
+        VStack(spacing: 0) {
+            pageSelector
+                .padding(.horizontal, ResearchStyle.inset)
+                .padding(.bottom, 4)
+                .overlay(alignment: .bottom) { Divider() }
+
+            TabView(selection: $selectedPage) {
+                ForEach(ResearchPage.allCases) { page in
+                    pageContent(page)
+                        .tag(page)
                 }
-                researchTopics
-                if !isLoadingMarket { coreStocks }
-                industries
-                utilities
             }
-            .padding(.horizontal, ResearchStyle.inset)
-            .padding(.top, 8)
-            .padding(.bottom, 16)
+            .tabViewStyle(.page(indexDisplayMode: .never))
         }
         .background(ResearchStyle.surface)
         .accessibilityIdentifier("research-overview")
-        .scrollIndicators(.hidden)
-        .refreshable {
-            async let dashboard: Void = store.refresh()
-            async let industryQuotes: Void = store.refreshAShareIndustryQuotes(force: true)
-            _ = await (dashboard, industryQuotes)
-        }
         .appSheet(item: $presentedTopic) { topic in
             ResearchTopicSheet(title: topic.title) {
                 switch topic {
@@ -193,6 +176,84 @@ struct ResearchHomeView: View {
                 do { try await Task.sleep(for: .seconds(30)) }
                 catch { return }
             }
+        }
+    }
+
+    private var pageSelector: some View {
+        HStack(spacing: 6) {
+            ForEach(ResearchPage.allCases) { page in
+                let isSelected = selectedPage == page
+                Button {
+                    withAnimation { selectedPage = page }
+                } label: {
+                    Text(page.rawValue)
+                        .font(.subheadline.weight(isSelected ? .semibold : .medium))
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .foregroundStyle(isSelected ? ResearchStyle.accent : ResearchStyle.muted)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(isSelected ? ResearchStyle.selection : .clear, in: RoundedRectangle(cornerRadius: 10))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("研究栏目")
+    }
+
+    private func pageContent(_ page: ResearchPage) -> some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                switch page {
+                case .globalMarkets:
+                    marketContent { globalMarkets }
+                case .coreStocks:
+                    marketContent { coreStocks }
+                case .industries:
+                    industries
+                }
+                researchTopics
+                utilities
+            }
+            .padding(.horizontal, ResearchStyle.inset)
+            .padding(.top, 8)
+            .padding(.bottom, 16)
+        }
+        .scrollIndicators(.hidden)
+        .refreshable {
+            async let dashboard: Void = store.refresh()
+            async let industryQuotes: Void = store.refreshAShareIndustryQuotes(force: true)
+            _ = await (dashboard, industryQuotes)
+        }
+    }
+
+    @ViewBuilder
+    private func marketContent<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        if isLoadingMarket {
+            ContentLoadingPlaceholder(title: "正在准备市场概览", layout: .chart)
+                .accessibilityIdentifier("research-home-loading")
+        } else {
+            if let message = store.errorMessage {
+                Button { Task { await store.refresh() } } label: {
+                    Label(store.isRetrying ? "正在重试行情" : "\(message) · 点击重试",
+                          systemImage: "arrow.clockwise")
+                        .font(.footnote)
+                        .foregroundStyle(ResearchStyle.accent)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(store.isRetrying)
+            } else if let notice = store.quoteIssueMessage {
+                Text(notice)
+                    .font(.footnote)
+                    .foregroundStyle(ResearchStyle.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            content()
         }
     }
 
