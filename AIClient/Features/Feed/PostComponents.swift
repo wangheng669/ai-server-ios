@@ -2848,7 +2848,10 @@ struct XVideoPlayerView: View {
             guard self.player === player else { return }
             isPlaying = player.timeControlStatus != .paused && !hasReachedEnd
         }
-        .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { notification in
+        .onReceive(
+            NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime, object: player.currentItem)
+                .receive(on: DispatchQueue.main)
+        ) { notification in
             guard self.player === player,
                   let item = notification.object as? AVPlayerItem, item === player.currentItem else { return }
             hasReachedEnd = true
