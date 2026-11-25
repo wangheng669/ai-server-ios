@@ -139,7 +139,7 @@ struct MarketDashboard: Codable {
     mutating func replace(_ quote: MarketQuote) {
         replace(quote, in: &coreIndices)
         replace(quote, in: &referenceIndices)
-        if let index = metricEntries.firstIndex(where: { $0.quote?.symbol == quote.symbol }) {
+        if let index = metricEntries.firstIndex(where: { $0.id == quote.symbol }) {
             metricEntries[index] = .quote(quote)
         }
         for region in Array(regionalStockEntries.keys) {
@@ -182,15 +182,18 @@ struct MarketDashboard: Codable {
             .filter { seen.insert($0.symbol).inserted }
     }
 
+    func metricEntry(symbol: String) -> MarketDashboardQuoteEntry? {
+        metricEntries.first(where: { $0.id == symbol })
+    }
+
     func unavailableMetric(symbol: String) -> MarketQuoteQuality? {
-        for entry in metricEntries {
-            if case let .unavailable(metric) = entry, metric.symbol == symbol { return metric.quality }
-        }
-        return nil
+        guard case let .unavailable(metric)? = metricEntry(symbol: symbol) else { return nil }
+        return metric.quality
     }
 
     func unavailableQuote(symbol: String) -> MarketDashboardQuoteEntry.Unavailable? {
-        let entry = commodityEntries.first(where: { $0.id == symbol })
+        let entry = metricEntry(symbol: symbol)
+            ?? commodityEntries.first(where: { $0.id == symbol })
             ?? regionalStockEntries.values.lazy.flatMap { $0 }.first(where: { $0.id == symbol })
         guard case let .unavailable(quote)? = entry else { return nil }
         return quote
@@ -417,28 +420,31 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     var liveTrendValue: Double?
     let stale: Bool?
 
-    var percentValue: Double {
-        if let previousClose, previousClose > 0 {
+    var percentValue: Double? {
+        if let previousClose, previousClose.isFinite, previousClose > 0 {
             return (price - previousClose) / previousClose * 100
         }
-        return Double((changePercent ?? "0").replacingOccurrences(of: "%", with: "")) ?? 0
+        guard let changePercent,
+              let percent = Double(changePercent.replacingOccurrences(of: "%", with: "").trimmingCharacters(in: .whitespacesAndNewlines)),
+              percent.isFinite else { return nil }
+        return percent
     }
 
     var formattedPercent: String {
         if hasSuspiciousIndexMove { return "待核验" }
-        return String(format: "%@%.2f%%", percentValue >= 0 ? "+" : "−", abs(percentValue))
+        return percentValue.map(marketFormattedChangePercent) ?? "涨跌暂缺"
     }
 
-    var changeValue: Double {
-        guard let previousClose else { return 0 }
+    var changeValue: Double? {
+        guard let previousClose, previousClose.isFinite, previousClose > 0 else { return nil }
         return price - previousClose
     }
-
-    var isUp: Bool { percentValue >= 0 }
 
     var tradingSession: MarketTradingSession {
         MarketTradingSession(rawValue: marketSession)
     }
+
+    var isMiddayBreak: Bool { quality?.reason == "midday_break" }
 
     var visibleDelayMinutes: Int? {
         guard tradingSession != .closed, let delaySeconds, delaySeconds >= 60 else { return nil }
@@ -453,30 +459,28 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         hasActiveExtendedSessionQuote ? sessionPrice ?? price : price
     }
 
-    var marketDisplayPercentValue: Double {
+    var marketDisplayPercentValue: Double? {
         guard hasActiveExtendedSessionQuote else { return percentValue }
-        guard price.isFinite, price > 0 else { return percentValue }
+        guard price.isFinite, price > 0 else { return nil }
         return (marketDisplayPrice - price) / price * 100
     }
 
-    var marketDisplayChangeValue: Double {
-        // Extended quotes are separate from the latest regular-session close.
-        // previousClose belongs to that regular session, not the new night session.
-        if hasActiveExtendedSessionQuote { return marketDisplayPrice - price }
+    var marketDisplayChangeValue: Double? {
+        if hasActiveExtendedSessionQuote {
+            guard price.isFinite, price > 0 else { return nil }
+            return marketDisplayPrice - price
+        }
         return changeValue
     }
 
     var marketDisplayFormattedPercent: String {
         if hasSuspiciousIndexMove { return "待核验" }
-        guard hasActiveExtendedSessionQuote || (previousClose ?? 0) > 0 || changePercent != nil else {
-            return "—"
-        }
-        let value = marketDisplayPercentValue
-        return String(format: "%@%.2f%%", value >= 0 ? "+" : "−", abs(value))
+        return marketDisplayPercentValue.map(marketFormattedChangePercent) ?? "涨跌暂缺"
     }
 
     var formattedSessionPercent: String? {
-        hasActiveExtendedSessionQuote ? marketDisplayFormattedPercent : nil
+        guard hasActiveExtendedSessionQuote else { return nil }
+        return marketDisplayPercentValue.map(marketFormattedChangePercent)
     }
 
     enum CodingKeys: String, CodingKey {
@@ -620,6 +624,10 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         liveTrendValue = nil
         stale = try values.decodeIfPresent(Bool.self, forKey: .stale)
     }
+}
+
+func marketFormattedChangePercent(_ value: Double) -> String {
+    String(format: "%@%.2f%%", value > 0 ? "+" : value < 0 ? "−" : "", abs(value))
 }
 
 enum MarketTradingSession: Equatable {
@@ -2015,7 +2023,7 @@ func marketAppendingLiveValue(_ value: Double, to values: [Double], limit: Int =
 extension MarketQuote {
     var hasSuspiciousIndexMove: Bool {
         let guardedSymbols: Set<String> = ["^GSPC", "^NDX", "^DJI", "^N225", "^KS11", "^STOXX50E", "^GDAXI", "^FTSE", "^FCHI"]
-        return guardedSymbols.contains(symbol.uppercased()) && abs(percentValue) >= 15
+        return guardedSymbols.contains(symbol.uppercased()) && percentValue.map { abs($0) >= 15 } == true
     }
 
     var presentationName: String {
@@ -2059,16 +2067,21 @@ extension MarketQuote {
     }
 
     var freshnessLabel: String {
+        if isMiddayBreak { return "午间休市" }
         if tradingSession == .alwaysOpen { return tradingSession.displayLabel }
         if tradingSession == .closed {
             return quality?.tradingDate.map { "截至 \($0) 收盘" } ?? "已收盘"
         }
         if let visibleDelayMinutes { return "延迟\(visibleDelayMinutes)分钟" }
-        if stale == true { return "数据延迟" }
+        if stale == true { return "报价暂缺" }
+        if quality?.status == "delayed" { return "延迟报价" }
         return tradingSession.displayLabel
     }
 
     var marketAsOfLabel: String {
+        if isMiddayBreak {
+            return quality?.asOfTimestamp.map { "\(marketShortTimestamp($0)) 上午行情" } ?? "午间休市"
+        }
         if tradingSession == .closed, let tradingDate = quality?.tradingDate {
             return "\(tradingDate) 收盘行情"
         }

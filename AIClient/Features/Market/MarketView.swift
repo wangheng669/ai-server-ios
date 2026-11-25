@@ -317,15 +317,11 @@ private struct MarketRegionPicker: View {
     }
 
     private func tabMovementTint(for quote: MarketQuote?) -> Color {
-        guard let quote else { return Color.secondary }
-        if quote.marketDisplayPercentValue > 0 { return MarketStyle.gain }
-        if quote.marketDisplayPercentValue < 0 { return MarketStyle.loss }
-        return Color.secondary
+        marketChangeTint(quote?.marketDisplayPercentValue)
     }
 
     private func tabMovementLabel(for quote: MarketQuote?) -> String {
-        guard let quote else { return "涨跌幅更新中" }
-        let change = quote.marketDisplayPercentValue
+        guard let change = quote?.marketDisplayPercentValue else { return "涨跌暂缺" }
         if change > 0 { return String(format: "上涨 %.2f%%", change) }
         if change < 0 { return String(format: "下跌 %.2f%%", abs(change)) }
         return "平盘"
@@ -338,6 +334,10 @@ private struct MarketRegionPicker: View {
     ) -> (label: String, accessibilityLabel: String, tint: Color) {
         if region == .unitedStates, overnightQuote != nil {
             return ("夜盘", "期指夜盘交易中", MarketStyle.live)
+        }
+
+        if quote?.isMiddayBreak == true {
+            return ("午休", "午间休市", .secondary)
         }
 
         switch quote?.tradingSession {
@@ -444,6 +444,16 @@ private struct MarketQuotesPage: View {
         }
     }
 
+    private var regionalMetrics: [MarketDashboardQuoteEntry] {
+        guard let region, let dashboard = store.dashboard,
+              let definition = dashboard.regions.first(where: { $0.id == region.dashboardID }) else { return [] }
+        let shown = Set(indexSymbols)
+        return definition.metricSymbols.compactMap { symbol in
+            guard !shown.contains(symbol) else { return nil }
+            return dashboard.metricEntry(symbol: symbol)
+        }
+    }
+
     private var stocks: [MarketDashboardQuoteEntry] {
         guard let region else { return [] }
         return store.dashboard?.regionalStockEntries[region.dashboardID] ?? []
@@ -454,7 +464,7 @@ private struct MarketQuotesPage: View {
     }
 
     private var requestedQuotes: [MarketQuote] {
-        (indices + stocks).compactMap(\.quote).reduce(into: [MarketQuote]()) { result, quote in
+        (indices + regionalMetrics + stocks).compactMap(\.quote).reduce(into: [MarketQuote]()) { result, quote in
             guard !result.contains(where: { $0.symbol == quote.symbol }) else { return }
             result.append(quote)
         }
@@ -496,8 +506,20 @@ private struct MarketQuotesPage: View {
                     if indices.isEmpty {
                         emptyQuotes
                     } else {
-                        indexOverview
+                        quoteOverview(indices)
+                            .accessibilityIdentifier("market-quotes-indices")
                     }
+                }
+
+                if !regionalMetrics.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("区域指标")
+                            .font(.headline)
+                            .accessibilityAddTraits(.isHeader)
+                            .padding(.horizontal, 18)
+                        quoteOverview(regionalMetrics)
+                    }
+                    .accessibilityIdentifier("market-quotes-regional-metrics")
                 }
 
                 if !stocks.isEmpty {
@@ -584,10 +606,10 @@ private struct MarketQuotesPage: View {
     }
 
     @ViewBuilder
-    private var indexOverview: some View {
+    private func quoteOverview(_ entries: [MarketDashboardQuoteEntry]) -> some View {
         if dynamicTypeSize.isAccessibilitySize {
             VStack(spacing: 0) {
-                ForEach(indices) { entry in
+                ForEach(entries) { entry in
                     switch entry {
                     case let .quote(quote):
                         quoteRow(quote)
@@ -595,7 +617,7 @@ private struct MarketQuotesPage: View {
                         unavailableQuoteButton(quote)
                             .padding(.horizontal, 18)
                     }
-                    if entry.id != indices.last?.id {
+                    if entry.id != entries.last?.id {
                         Divider().padding(.horizontal, 18)
                     }
                 }
@@ -606,7 +628,7 @@ private struct MarketQuotesPage: View {
                 alignment: .leading,
                 spacing: 8
             ) {
-                ForEach(indices) { entry in
+                ForEach(entries) { entry in
                     switch entry {
                     case let .quote(quote):
                         Button { onSelectQuote(quote.symbol) } label: {
@@ -622,7 +644,6 @@ private struct MarketQuotesPage: View {
                 }
             }
             .padding(.horizontal, 18)
-            .accessibilityIdentifier("market-quotes-indices")
         }
     }
 
@@ -691,7 +712,7 @@ private struct MarketOverviewIndexCard: View {
     let trend: [Double]
 
     private var formattedPrice: String {
-        number(quote.marketDisplayPrice, digits: marketPriceDigits(quote.marketDisplayPrice, symbol: quote.symbol))
+        marketQuotePriceText(quote)
     }
 
     var body: some View {
@@ -718,6 +739,9 @@ private struct MarketOverviewIndexCard: View {
                     .frame(width: 46, height: 26)
                     .accessibilityHidden(true)
             }
+            Text(quote.freshnessLabel)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
         .foregroundStyle(.primary)
         .padding(10)
@@ -740,7 +764,7 @@ private struct MarketOverviewQuoteRow: View {
 
     private var formattedPrice: String {
         guard quote.stale != true else { return "—" }
-        return number(quote.marketDisplayPrice, digits: marketPriceDigits(quote.marketDisplayPrice, symbol: quote.symbol))
+        return marketQuotePriceText(quote)
     }
 
     private var identitySubtitle: String {
@@ -860,7 +884,7 @@ private struct ChinaMarketStructurePanel: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("资金与杠杆信号")
                         .font(.headline)
-                    Text("交易所官方日频数据 · 趋势判断不代表预测")
+                    Text("交易所日频数据 · ETF 信号按近 5 个交易日合计")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -953,11 +977,16 @@ private struct ETFSubscriptionSignal: View {
 
     private var statusLabel: String {
         switch subscription.status {
-        case "accelerating": "持续放量"
-        case "inflow": "保持净申购"
-        case "outflow": "转为净赎回"
-        default: "多空交错"
+        case "accelerating": "近 5 日申购放量"
+        case "inflow": "近 5 日净申购"
+        case "outflow": "近 5 日净赎回"
+        default: "近 5 日方向未明"
         }
+    }
+
+    private var latestDirection: String {
+        let shares = subscription.latestNetSubscriptionShares
+        return shares > 0 ? "净申购" : shares < 0 ? "净赎回" : "净申赎持平"
     }
 
     private var streakLabel: String {
@@ -969,7 +998,7 @@ private struct ETFSubscriptionSignal: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("科创50ETF 合计净申购", systemImage: "arrow.left.arrow.right.circle")
+                Label("科创50ETF 份额变化", systemImage: "arrow.left.arrow.right.circle")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
                 MarketSignalBadge(label: statusLabel, tint: tint)
@@ -980,7 +1009,7 @@ private struct ETFSubscriptionSignal: View {
                         .font(.system(size: 23, weight: .bold, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(subscription.latestNetSubscriptionShares >= 0 ? MarketStyle.gain : MarketStyle.loss)
-                    Text("当日份额变化 · \(subscription.fundCount ?? 1) 只主要ETF")
+                    Text("\(subscription.asOf) · \(latestDirection)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -998,12 +1027,12 @@ private struct ETFSubscriptionSignal: View {
                coverage > 0 {
                 HStack(spacing: 6) {
                     Image(systemName: "yensign.circle")
-                    Text("按收盘价估算当日净流入 \(marketSignedMoney(estimatedFlow))")
+                    Text("按收盘价估算 \(marketSignedMoney(estimatedFlow))")
                     Spacer(minLength: 4)
                     Text("覆盖 \(coverage) 只")
                 }
                 .font(.caption2.weight(.medium))
-                .foregroundStyle(tint)
+                .foregroundStyle(marketChangeTint(estimatedFlow))
             }
             Text("\(streakLabel)；净申购按上交所披露的每日基金总份额变化计算。")
                 .font(.caption2)
@@ -1419,10 +1448,11 @@ private struct MarketIndexDetailView: View {
             return store.dashboard?.currentAShareBreadth
         }
         guard let items = store.indexConstituents[historicalSymbol]?.items, !items.isEmpty else { return nil }
-        let up = items.filter { $0.quote.percentValue > 0.005 }.count
-        let down = items.filter { $0.quote.percentValue < -0.005 }.count
-        let flat = max(items.count - up - down, 0)
-        return MarketBreadth(up: up, down: down, flat: flat, total: items.count)
+        let changes = items.compactMap(\.quote.percentValue)
+        guard changes.count == items.count else { return nil }
+        let up = changes.filter { $0 > 0.005 }.count
+        let down = changes.filter { $0 < -0.005 }.count
+        return MarketBreadth(up: up, down: down, flat: changes.count - up - down, total: changes.count)
     }
 
     var body: some View {
@@ -1453,7 +1483,7 @@ private struct MarketIndexDetailView: View {
                         .background(MarketDetailPageStyle.card, in: RoundedRectangle(cornerRadius: MarketDetailPageStyle.cornerRadius))
                         componentStocks
                     }
-                    MarketSummary(quote: quote, isIndex: isIndex)
+                    MarketSummary(quote: quote, isIndex: isIndex, quoteUnavailable: unavailableQuote != nil)
                     if unavailableQuote == nil {
                         Text(quoteSourceText)
                             .font(.caption2)
@@ -1644,7 +1674,7 @@ private struct MarketIndexDetailView: View {
     }
 
     private var detailPrice: some View {
-        Text(quote.map { number($0.marketDisplayPrice, digits: marketPriceDigits($0.marketDisplayPrice, symbol: $0.symbol)) } ?? "—")
+        Text(quote.map(marketQuotePriceText) ?? "—")
             .font(.title.weight(.semibold))
             .monospacedDigit()
             .tracking(-0.5)
@@ -1665,9 +1695,11 @@ private struct MarketIndexDetailView: View {
 
     private var detailPerformanceText: String {
         if selectedRange == .day {
-            return quote.map {
-                "\(signed($0.marketDisplayChangeValue, digits: marketChangeDigits($0)))  \($0.marketDisplayFormattedPercent)"
-            } ?? "等待行情数据"
+            guard let quote else { return "等待行情数据" }
+            let percent = quote.marketDisplayFormattedPercent
+            guard let change = quote.marketDisplayChangeValue, !quote.hasSuspiciousIndexMove else { return percent }
+            let digits = marketDetailPriceDigits(value: change, price: quote.marketDisplayPrice, symbol: quote.symbol)
+            return "\(signed(change, digits: digits))  \(percent)"
         }
         guard let selectedPeriodReturn else { return "正在计算区间收益率" }
         let prefix = selectedPeriodReturn >= 0 ? "+" : "−"
@@ -3163,6 +3195,7 @@ private struct VolumeBars: View {
 private struct MarketSummary: View {
     let quote: MarketQuote?
     let isIndex: Bool
+    let quoteUnavailable: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -3182,11 +3215,12 @@ private struct MarketSummary: View {
     }
 
     private var summary: String {
-        guard let quote else { return "正在获取最新行情。" }
+        guard let quote else { return quoteUnavailable ? "当前报价暂缺。" : "正在获取最新行情。" }
         let subject = quote.hasActiveExtendedSessionQuote ? "常规收盘" : isIndex ? "指数" : "价格"
-        let direction = quote.changeValue >= 0 ? "高于" : "低于"
+        guard let change = quote.changeValue else { return "昨收暂缺，无法计算涨跌额。" }
+        let comparison = change > 0 ? "高于昨收" : change < 0 ? "低于昨收" : "与昨收持平"
         guard let high = quote.high, let low = quote.low, high > low else {
-            return "\(subject)\(direction)昨收，最新行情仍在更新。"
+            return "\(subject)\(comparison)。"
         }
         let position = (quote.price - low) / (high - low)
         let positionText: String
@@ -3196,7 +3230,7 @@ private struct MarketSummary: View {
         default: positionText = "区间中部"
         }
         let digits = marketDetailPriceDigits(value: low, price: quote.price, symbol: quote.symbol)
-        return "\(subject)\(direction)昨收，日内运行于 \(number(low, digits: digits))–\(number(high, digits: digits))，目前位于\(positionText)。"
+        return "\(subject)\(comparison)，日内运行于 \(number(low, digits: digits))–\(number(high, digits: digits))，目前位于\(positionText)。"
     }
 
 
@@ -3513,14 +3547,14 @@ private struct CoreDescriptor {
         switch symbol {
         case "^GSPC", "^NDX", "^DJI", "SPY", "QQQ", "DIA", "000001.SS", "000016.SS", "000300.SS", "399006.SZ",
              "000688.SS", "000905.SS", "000852.SS", "932000.SS", "THS:883418", "^HSTECH",
-             "^HSI", "^N225", "^KS11", "^STOXX50E", "^GDAXI", "^FTSE", "^FCHI":
+             "^HSI", "^N225", "^TOPX", "^KS11", "^STOXX50E", "^GDAXI", "^FTSE", "^FCHI":
             true
         default:
             false
         }
     }
-    var name: String { switch symbol { case "^GSPC": "标普500"; case "^NDX": "纳斯达克100"; case "^DJI": "道琼斯工业指数"; case "SPY": "标普500实时代理（SPY）"; case "QQQ": "纳斯达克100实时代理（QQQ）"; case "DIA": "道琼斯实时代理（DIA）"; case "000001.SS": "上证指数"; case "000016.SS": "上证50"; case "000300.SS": "沪深300"; case "399006.SZ": "创业板指"; case "000688.SS": "科创50"; case "000905.SS": "中证500"; case "000852.SS": "中证1000"; case "932000.SS": "中证2000"; case "THS:883418": "微盘股"; case "^HSTECH": "恒生科技指数"; case "^HSI": "恒生指数"; case "^N225": "日经225"; case "^KS11": "韩国KOSPI"; case "^STOXX50E": "欧洲STOXX 50"; case "^GDAXI": "德国DAX"; case "^FTSE": "英国富时100"; case "^FCHI": "法国CAC 40"; case "GC1!": "COMEX 黄金"; case "CL1!": "WTI 原油"; case "HG1!": "COMEX 铜"; case "SI1!": "COMEX 白银"; case "NG1!": "NYMEX 天然气"; case "ZC1!": "CBOT 玉米"; default: symbol } }
-    var code: String { switch symbol { case "^GSPC": "SPX"; case "^NDX": "NDX"; case "^DJI": "DJI"; case "SPY", "QQQ", "DIA": symbol; case "000001.SS": "000001.SH"; case "000300.SS": "000300.SH"; case "000688.SS": "000688.SH"; case "^HSTECH": "HSTECH"; case "^HSI": "HSI"; case "^N225": "N225"; case "^KS11": "KOSPI"; case "^STOXX50E": "SX5E"; case "^GDAXI": "DAX"; case "^FTSE": "FTSE"; case "^FCHI": "CAC40"; default: symbol } }
+    var name: String { switch symbol { case "^GSPC": "标普500"; case "^NDX": "纳斯达克100"; case "^DJI": "道琼斯工业指数"; case "SPY": "标普500实时代理（SPY）"; case "QQQ": "纳斯达克100实时代理（QQQ）"; case "DIA": "道琼斯实时代理（DIA）"; case "000001.SS": "上证指数"; case "000016.SS": "上证50"; case "000300.SS": "沪深300"; case "399006.SZ": "创业板指"; case "000688.SS": "科创50"; case "000905.SS": "中证500"; case "000852.SS": "中证1000"; case "932000.SS": "中证2000"; case "THS:883418": "微盘股"; case "^HSTECH": "恒生科技指数"; case "^HSI": "恒生指数"; case "^N225": "日经225"; case "^TOPX": "东证指数"; case "^KS11": "韩国KOSPI"; case "^STOXX50E": "欧洲STOXX 50"; case "^GDAXI": "德国DAX"; case "^FTSE": "英国富时100"; case "^FCHI": "法国CAC 40"; case "GC1!": "COMEX 黄金"; case "CL1!": "WTI 原油"; case "HG1!": "COMEX 铜"; case "SI1!": "COMEX 白银"; case "NG1!": "NYMEX 天然气"; case "ZC1!": "CBOT 玉米"; default: symbol } }
+    var code: String { switch symbol { case "^GSPC": "SPX"; case "^NDX": "NDX"; case "^DJI": "DJI"; case "SPY", "QQQ", "DIA": symbol; case "000001.SS": "000001.SH"; case "000300.SS": "000300.SH"; case "000688.SS": "000688.SH"; case "^HSTECH": "HSTECH"; case "^HSI": "HSI"; case "^N225": "N225"; case "^TOPX": "TOPIX"; case "^KS11": "KOSPI"; case "^STOXX50E": "SX5E"; case "^GDAXI": "DAX"; case "^FTSE": "FTSE"; case "^FCHI": "CAC40"; default: symbol } }
 }
 
 
@@ -3561,10 +3595,20 @@ func marketSparklinePoints(_ values: [Double], size: CGSize, minimumRelativeRang
     }
 }
 
-private func quoteTint(_ quote: MarketQuote?) -> Color { guard let quote else { return .secondary }; return quote.isUp ? MarketStyle.gain : MarketStyle.loss }
+private func quoteTint(_ quote: MarketQuote?) -> Color {
+    marketChangeTint(quote?.percentValue)
+}
 private func marketDisplayTint(_ quote: MarketQuote?) -> Color {
-    guard let quote else { return .secondary }
-    return quote.marketDisplayPercentValue >= 0 ? MarketStyle.gain : MarketStyle.loss
+    marketChangeTint(quote?.marketDisplayPercentValue)
+}
+private func marketChangeTint(_ change: Double?) -> Color {
+    guard let change else { return .secondary }
+    return change > 0 ? MarketStyle.gain : change < 0 ? MarketStyle.loss : .secondary
+}
+private func marketQuotePriceText(_ quote: MarketQuote) -> String {
+    let price = quote.marketDisplayPrice
+    let suffix = quote.currency == "%" ? "%" : ""
+    return number(price, digits: marketPriceDigits(price, symbol: quote.symbol)) + suffix
 }
 private func companyMarketLabel(_ symbol: String) -> String {
     if symbol.hasSuffix(".SS") { return "上海证券交易所" }
@@ -3631,10 +3675,6 @@ func marketDetailPriceDigits(value: Double, price: Double?, symbol: String) -> I
     let nonzeroDigits = max(0, Int(ceil(-log10(abs(value)))))
     return min(max(priceDigits, nonzeroDigits), 10)
 }
-private func marketChangeDigits(_ quote: MarketQuote) -> Int {
-    marketDetailPriceDigits(value: quote.marketDisplayChangeValue, price: quote.marketDisplayPrice, symbol: quote.symbol)
-}
-
 private enum MarketViewDateFormatters {
     private static var chartCache: [String: DateFormatter] = [:]
 
