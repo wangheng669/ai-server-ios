@@ -75,9 +75,9 @@ struct MarketDashboard: Codable {
     var coreIndices: [MarketQuote]
     var referenceIndices: [MarketQuote]
     let realtimeProxies: [MarketRealtimeProxyDefinition]
-    private var metricEntries: [MarketMetricEntry]
+    private var metricEntries: [MarketDashboardQuoteEntry]
     var metrics: [MarketQuote] { metricEntries.compactMap(\.quote) }
-    var componentsByRegion: [String: [MarketQuote]]
+    private(set) var regionalStockEntries: [String: [MarketDashboardQuoteEntry]]
     var crypto: [MarketQuote]
     var commodities: [MarketQuote]
     var indexSessions: [String: MarketQuote]?
@@ -99,7 +99,8 @@ struct MarketDashboard: Codable {
     enum CodingKeys: String, CodingKey {
         case dataContract, definitionVersion, generatedAt, refreshIntervalMs, coreIndices, referenceIndices, realtimeProxies
         case metricEntries = "metrics"
-        case componentsByRegion, crypto, commodities
+        case regionalStockEntries = "componentsByRegion"
+        case crypto, commodities
         case indexSessions, componentsMeta, freshness, missingSymbols, expectedSymbols, symbolHealth, regions
         case ashareOverview, marketStructure, sentiment
     }
@@ -113,9 +114,11 @@ struct MarketDashboard: Codable {
         coreIndices = try values.decodeLossyQuotes(forKey: .coreIndices)
         referenceIndices = try values.decodeLossyQuotes(forKey: .referenceIndices)
         realtimeProxies = try values.decodeIfPresent([MarketRealtimeProxyDefinition].self, forKey: .realtimeProxies) ?? []
-        metricEntries = try values.decodeIfPresent([LossyMarketValue<MarketMetricEntry>].self, forKey: .metricEntries)?
+        metricEntries = try values.decodeIfPresent([LossyMarketValue<MarketDashboardQuoteEntry>].self, forKey: .metricEntries)?
             .compactMap(\.value) ?? []
-        componentsByRegion = try values.decodeLossyQuoteArrays(forKey: .componentsByRegion)
+        regionalStockEntries = try values.decode([String: [LossyMarketValue<MarketDashboardQuoteEntry>]].self,
+                                                 forKey: .regionalStockEntries)
+            .mapValues { $0.compactMap(\.value) }
         crypto = try values.decodeLossyQuotes(forKey: .crypto)
         commodities = try values.decodeLossyQuotes(forKey: .commodities)
         indexSessions = try values.decodeLossyQuoteDictionary(forKey: .indexSessions)
@@ -136,8 +139,10 @@ struct MarketDashboard: Codable {
         if let index = metricEntries.firstIndex(where: { $0.quote?.symbol == quote.symbol }) {
             metricEntries[index] = .quote(quote)
         }
-        for region in Array(componentsByRegion.keys) {
-            replace(quote, in: &componentsByRegion[region, default: []])
+        for region in Array(regionalStockEntries.keys) {
+            if let index = regionalStockEntries[region]?.firstIndex(where: { $0.id == quote.symbol }) {
+                regionalStockEntries[region]?[index] = .quote(quote)
+            }
         }
         replace(quote, in: &crypto)
         replace(quote, in: &commodities)
@@ -158,7 +163,7 @@ struct MarketDashboard: Codable {
         if let quote = coreIndices.first(where: { $0.symbol == symbol }) { return quote }
         if let quote = referenceIndices.first(where: { $0.symbol == symbol }) { return quote }
         if let quote = metrics.first(where: { $0.symbol == symbol }) { return quote }
-        if let quote = componentsByRegion.values.lazy.flatMap({ $0 }).first(where: { $0.symbol == symbol }) { return quote }
+        if let quote = regionalStockEntries.values.lazy.flatMap({ $0 }).first(where: { $0.id == symbol })?.quote { return quote }
         if let quote = crypto.first(where: { $0.symbol == symbol }) { return quote }
         if let quote = commodities.first(where: { $0.symbol == symbol }) { return quote }
         return indexSessions?.values.first(where: { $0.symbol == symbol })
@@ -166,8 +171,9 @@ struct MarketDashboard: Codable {
 
     var allRegionalComponents: [MarketQuote] {
         var seen: Set<String> = []
-        return componentsByRegion.values
+        return regionalStockEntries.values
             .flatMap { $0 }
+            .compactMap(\.quote)
             .filter { seen.insert($0.symbol).inserted }
     }
 
@@ -178,19 +184,39 @@ struct MarketDashboard: Codable {
         return nil
     }
 
+    func unavailableStock(symbol: String) -> MarketDashboardQuoteEntry.Unavailable? {
+        guard case let .unavailable(stock)? = regionalStockEntries.values.lazy.flatMap({ $0 }).first(where: { $0.id == symbol }) else {
+            return nil
+        }
+        return stock
+    }
+
     private func replace(_ quote: MarketQuote, in quotes: inout [MarketQuote]) {
         guard let index = quotes.firstIndex(where: { $0.symbol == quote.symbol }) else { return }
         quotes[index] = quote
     }
 }
 
-private enum MarketMetricEntry: Codable {
-    struct Unavailable: Codable {
+enum MarketDashboardQuoteEntry: Codable, Identifiable {
+    struct Unavailable: Codable, Identifiable {
         let symbol: String
+        let name: String?
+        let displayName: String?
+        let currency: String?
         let quality: MarketQuoteQuality
+
+        var id: String { symbol }
+        var presentationName: String { displayName ?? name ?? symbol }
     }
 
     case quote(MarketQuote), unavailable(Unavailable)
+
+    var id: String {
+        switch self {
+        case let .quote(quote): quote.symbol
+        case let .unavailable(value): value.symbol
+        }
+    }
 
     var quote: MarketQuote? {
         guard case let .quote(quote) = self else { return nil }
@@ -201,11 +227,11 @@ private enum MarketMetricEntry: Codable {
         if let quote = try? MarketQuote(from: decoder) {
             self = .quote(quote)
         } else {
-            let metric = try Unavailable(from: decoder)
-            guard metric.quality.status == "unavailable" else {
-                throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Invalid market metric"))
+            let entry = try Unavailable(from: decoder)
+            guard entry.quality.status == "unavailable" || entry.quality.status == "stale" else {
+                throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Invalid market quote"))
             }
-            self = .unavailable(metric)
+            self = .unavailable(entry)
         }
     }
 
@@ -235,10 +261,6 @@ private extension KeyedDecodingContainer where Key == MarketDashboard.CodingKeys
             .compactMapValues(\.value)
     }
 
-    func decodeLossyQuoteArrays(forKey key: Key) throws -> [String: [MarketQuote]] {
-        try decode([String: [LossyMarketValue<MarketQuote>]].self, forKey: key)
-            .mapValues { $0.compactMap(\.value) }
-    }
 }
 
 struct MarketRealtimeProxyDefinition: Codable, Hashable {
