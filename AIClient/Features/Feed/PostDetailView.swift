@@ -124,7 +124,7 @@ struct PostDetailView: View {
         }
         .floatingSheetClose(
             post.isBilibili ? "关闭视频详情" : "关闭动态详情",
-            isVisible: !post.isYouTube,
+            isVisible: !post.isYouTube && post.sourceName != "X",
             action: dismiss.callAsFunction
         )
         .navigationDestination(item: $selectedXAuthor) { author in
@@ -1863,10 +1863,7 @@ struct PostDetailView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     VStack(alignment: .leading, spacing: 0) {
-                        HStack(spacing: 8) {
-                            xAuthorHeader
-                            xPostMenu
-                        }
+                        xAuthorHeader
                         VStack(alignment: .leading, spacing: 16) {
                             ForEach(Array(xDisplayedDetailParagraphs.enumerated()), id: \.offset) { _, paragraph in
                                 Text(xStyledParagraph(paragraph))
@@ -2008,22 +2005,21 @@ struct PostDetailView: View {
             .clipped()
         }
         .background(Color(uiColor: .systemBackground))
-    }
-
-    private var xPostMenu: some View {
-        Menu {
-            Button("在 X 中查看", action: openXOriginal)
-            if let link = post.linkURL {
-                ShareLink(item: link) { Label("分享帖子", systemImage: "square.and.arrow.up") }
+        .overlay(alignment: .bottomTrailing) {
+            DetailSheetControls(closeLabel: "关闭动态详情", onClose: dismiss.callAsFunction) {
+                if post.linkURL != nil {
+                    Button(action: openXOriginal) {
+                        Text(verbatim: "𝕏")
+                            .font(.system(size: 20, weight: .semibold))
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("在 X 中查看")
+                    .accessibilityIdentifier("x-post-open-original")
+                }
             }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 19, weight: .medium))
-                .frame(width: 44, height: 44)
+            .padding(12)
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(.primary)
-        .accessibilityLabel("帖子选项")
     }
 
     private var xDisplayedDetailText: String {
