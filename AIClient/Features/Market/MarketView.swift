@@ -1440,9 +1440,9 @@ private struct MarketInstrumentDetailView: View {
     private var isAShareIndex: Bool {
         symbol.hasSuffix(".SS") || symbol.hasSuffix(".SZ") || symbol.hasPrefix("THS:")
     }
-    private var xueqiuURL: URL? {
+    private var stockLinks: MarketStockLinks? {
         guard !isIndex, !isCrypto, !isCommodity else { return nil }
-        return marketXueqiuURL(for: quote?.symbol ?? symbol)
+        return MarketStockLinks(symbol: chartSymbol)
     }
     private var detailBreadth: MarketBreadth? {
         if isAShareIndex {
@@ -1457,7 +1457,9 @@ private struct MarketInstrumentDetailView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        let links = stockLinks
+        let showsStockControls = isStock || links != nil
+        return VStack(spacing: 0) {
             if isStock { stockToolbar }
             else { detailToolbar }
             ScrollView {
@@ -1507,14 +1509,20 @@ private struct MarketInstrumentDetailView: View {
                 }
                 .frame(maxWidth: isStock ? 640 : .infinity)
                 .padding(.horizontal, isStock ? StockDetailStyle.inset : 10)
-                .padding(.bottom, isStock ? 28 : 60)
+                .padding(.bottom, showsStockControls ? 76 : 60)
                 .frame(maxWidth: .infinity)
             }
             .scrollIndicators(.hidden)
             .accessibilityIdentifier("market-detail-scroll")
         }
         .background((isStock ? InvestmentDesign.surface : MarketDetailPageStyle.canvas).ignoresSafeArea())
-        .floatingSheetClose("关闭行情详情", identifier: "market-detail-close", isVisible: !isStock, action: dismiss.callAsFunction)
+        .overlay(alignment: .bottomTrailing) {
+            if showsStockControls {
+                stockDetailControls(links)
+                    .padding(12)
+            }
+        }
+        .floatingSheetClose("关闭行情详情", identifier: "market-detail-close", isVisible: !showsStockControls, action: dismiss.callAsFunction)
         .accessibilityAction(.escape) { dismiss() }
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
@@ -1573,9 +1581,6 @@ private struct MarketInstrumentDetailView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
-            xueqiuAction
-            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭行情详情")
-                .accessibilityIdentifier("market-detail-close")
         }
         .frame(maxWidth: 640, alignment: .leading)
         .padding(.horizontal, StockDetailStyle.inset)
@@ -1704,7 +1709,6 @@ private struct MarketInstrumentDetailView: View {
                 .minimumScaleFactor(0.8)
             }
             Spacer(minLength: 0)
-            xueqiuAction
         }
         .padding(.leading, 15)
         .padding(.trailing, 10)
@@ -1712,24 +1716,32 @@ private struct MarketInstrumentDetailView: View {
         .padding(.bottom, 8)
     }
 
-    @ViewBuilder
-    private var xueqiuAction: some View {
-        if let xueqiuURL {
-            Button {
-                UIApplication.shared.open(xueqiuURL)
-            } label: {
-                Image("XueqiuMark")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 25, height: 25)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
+    private func stockDetailControls(_ links: MarketStockLinks?) -> some View {
+        DetailSheetControls(
+            closeLabel: "关闭行情详情",
+            closeIdentifier: "market-detail-close",
+            onClose: dismiss.callAsFunction
+        ) {
+            if let links {
+                stockShortcut("雪球", url: links.xueqiu, identifier: "market-xueqiu-link")
+                stockShortcut("长桥", url: links.longbridge, identifier: "market-longbridge-link")
+                stockShortcut("东方财富", url: links.eastmoney, identifier: "market-eastmoney-link")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("在雪球打开\(instrumentName)")
-            .accessibilityIdentifier("market-xueqiu-link")
         }
+    }
+
+    private func stockShortcut(_ title: String, url: URL, identifier: String) -> some View {
+        Link(destination: url) {
+            Text(title)
+                .font(.footnote.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .padding(.horizontal, 5)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("在\(title)打开\(instrumentName)")
+        .accessibilityIdentifier(identifier)
     }
 
     private var instrumentSubtitle: String {
