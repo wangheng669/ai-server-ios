@@ -723,11 +723,9 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     func prepareXAuthorPost(_ post: Post) async {
-        if !post.isXRetweetWrapper {
-            await loadXEngagementIfNeeded(post)
-        }
-        guard !Task.isCancelled else { return }
+        async let engagement: Void = post.isXRetweetWrapper ? () : loadXEngagementIfNeeded(post)
         await translateXPostIfNeeded(post)
+        await engagement
     }
 
     func translateXPostIfNeeded(_ post: Post) async {
@@ -1356,9 +1354,11 @@ final class NewsFeedViewModel: ObservableObject {
         guard #available(iOS 26.0, *), !Task.isCancelled else { return }
         let candidates = posts.prefix(10)
         let cache = FeedTranslationCache.shared
-        let keys = cache.warmXTranslations(candidates.flatMap(\.xTranslationInputs))
-        let firstRows = Set(candidates.prefix(3).flatMap(\.xTranslationInputs).map(\.key))
-        await cache.waitForXTranslations(keys.filter { firstRows.contains($0) }, upTo: .milliseconds(350))
+        let firstBodies = candidates.prefix(3).compactMap(\.xBodyTranslationInput)
+        cache.warmXTranslations(firstBodies + candidates.flatMap(\.xTranslationInputs))
+        if let firstBody = firstBodies.first {
+            await cache.waitForXTranslations([firstBody.key], upTo: .milliseconds(200))
+        }
     }
 
     private func seedCachedXTranslations(for posts: [Post]) {
@@ -1392,16 +1392,12 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     private func pretranslateTimeline(_ posts: [Post]) {
-        guard source == .x, !posts.isEmpty else { return }
-        let candidates = Array(posts.prefix(10))
+        guard #available(iOS 26.0, *), source == .x, !posts.isEmpty else { return }
+        let candidates = posts.prefix(10)
+        // Reserve the shared server allowance for rows the user is reading.
         Task(priority: .utility) { [weak self] in
-            guard let self, self.source == .x else { return }
-            if #available(iOS 26.0, *) {
-                FeedTranslationCache.shared.warmXTranslations(candidates.flatMap(\.xTranslationInputs))
-            }
-            await runWithLimitedConcurrency(candidates, maximumConcurrentRequests: 2) { post in
-                await self.translateXPostIfNeeded(post)
-            }
+            guard self?.source == .x else { return }
+            FeedTranslationCache.shared.warmXTranslations(candidates.flatMap(\.xTranslationInputs))
         }
     }
 
