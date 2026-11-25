@@ -355,13 +355,15 @@ struct TodayWorldView: View {
     @Environment(\.rootBottomChromeHeight) private var bottomChromeHeight
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store: TodayWorldStore
+    private let marketStore: MarketStore
     @State private var waitingForRechargeReturn = false
     @State private var showsStatus = false
     @State private var showsTools = false
     @State private var statusHeight: CGFloat = 0
 
-    init(store: TodayWorldStore) {
+    init(store: TodayWorldStore, marketStore: MarketStore) {
         _store = StateObject(wrappedValue: store)
+        self.marketStore = marketStore
     }
 
     var body: some View {
@@ -426,6 +428,7 @@ struct TodayWorldView: View {
                     if let brief = store.brief {
                         TodayBriefOverviewView(
                             brief: brief,
+                            marketStore: marketStore,
                             viewport: CGSize(
                                 width: viewport.width,
                                 height: readingHeight - topInset - headingHeight - 8
