@@ -1862,8 +1862,11 @@ struct EmbeddedWebPage: View {
     let source: FeedSource
     var showsCloseButton = true
     @StateObject private var model = EmbeddedWebViewModel()
-    @State private var isShowingWeiboAccountMenu = false
     @Environment(\.dismiss) private var dismiss
+
+    private var hidesWeiboAccountToolbar: Bool {
+        source == .weibo && model.isWeiboLoggedIn && !model.isAuthenticating && !model.requiresWeiboAuthentication
+    }
 
     private var requestURL: URL {
         #if DEBUG
@@ -1907,39 +1910,56 @@ struct EmbeddedWebPage: View {
         .background(Color(uiColor: .systemBackground))
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.visible, for: .navigationBar)
+        .toolbar(hidesWeiboAccountToolbar ? .hidden : .visible, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .overlay(alignment: .bottomTrailing) {
             if showsCloseButton {
                 DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭网页详情")
+                    .contextMenu {
+                        if hidesWeiboAccountToolbar {
+                            Section {
+                                weiboAccountActions
+                            } header: {
+                                if let account = model.weiboAccount {
+                                    Text(account.displayName)
+                                }
+                            }
+                        }
+                    }
+                    .accessibilityActions {
+                        if hidesWeiboAccountToolbar {
+                            weiboAccountActions
+                        }
+                    }
                     .padding(16)
             }
         }
         .toolbar {
-            if source == .weibo {
+            if source == .weibo, !hidesWeiboAccountToolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         if model.isAuthenticating {
                             model.finishWeiboLogin()
-                        } else if model.isWeiboLoggedIn {
-                            isShowingWeiboAccountMenu = true
                         } else {
                             model.beginWeiboLogin()
                         }
-                    } label: { weiboAccountButtonLabel }
-                    .accessibilityLabel(model.isAuthenticating ? "完成微博登录" : (model.isWeiboLoggedIn ? "微博账号" : "登录微博"))
+                    } label: {
+                        Label(
+                            model.isAuthenticating ? "完成微博登录" : "登录微博",
+                            systemImage: model.isAuthenticating ? "checkmark.circle.fill" : "person.crop.circle"
+                        )
+                        .labelStyle(.iconOnly)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(model.isAuthenticating ? Color.green : Color.primary)
+                    }
                 }
             }
         }
-        .confirmationDialog("微博账号", isPresented: $isShowingWeiboAccountMenu, titleVisibility: .visible) {
-            Button("重新登录") { model.beginWeiboLogin() }
-            Button("退出登录", role: .destructive) { model.logoutWeibo() }
-            Button("取消", role: .cancel) {}
-        } message: {
-            if let account = model.weiboAccount {
-                Text("当前账号：\(account.displayName)")
-            }
-        }
+    }
+
+    @ViewBuilder private var weiboAccountActions: some View {
+        Button("重新登录微博") { model.beginWeiboLogin() }
+        Button("退出微博登录", role: .destructive) { model.logoutWeibo() }
     }
 
     private var weiboAuthenticationPrompt: some View {
@@ -1964,23 +1984,6 @@ struct EmbeddedWebPage: View {
         .padding(.top, 44)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color(uiColor: .systemBackground))
-    }
-
-    @ViewBuilder private var weiboAccountButtonLabel: some View {
-        if let account = model.weiboAccount {
-            AvatarView(url: account.avatarURL, name: account.displayName, size: 30, placeholderSymbol: "person.crop.circle")
-                .overlay { Circle().stroke(.quaternary, lineWidth: 0.5) }
-        } else if model.isWeiboLoggedIn {
-            Text("微")
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .frame(width: 30, height: 30)
-                .background(Color.red, in: Circle())
-        } else {
-            Image(systemName: model.isAuthenticating ? "checkmark.circle.fill" : "person.crop.circle")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(model.isAuthenticating ? Color.green : Color.primary)
-        }
     }
 }
 
