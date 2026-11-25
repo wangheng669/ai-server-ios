@@ -74,9 +74,10 @@ struct MarketView: View {
         false
         #endif
     }()
-    @State private var selectedMarketQuotesScope: MarketQuotesScope? = {
+    @State private var showsMarketQuotes = false
+    @State private var selectedStockRegion: MarketRegion? = {
         #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("--market-core-stocks-preview") ? .region(.unitedStates) : nil
+        ProcessInfo.processInfo.arguments.contains("--market-core-stocks-preview") ? .unitedStates : nil
         #else
         nil
         #endif
@@ -100,7 +101,7 @@ struct MarketView: View {
     @Environment(\.rootTabIsActive) private var rootTabIsActive
 
     private var isResearchVisible: Bool {
-        rootTabIsActive && selectedDetail == nil && selectedMarketQuotesScope == nil
+        rootTabIsActive && selectedDetail == nil && !showsMarketQuotes && selectedStockRegion == nil
             && !showsRetailInvestors && !showsInvestors && !showsGlobalRanking
     }
 
@@ -127,8 +128,11 @@ struct MarketView: View {
             onOpenInvestors: {
                 showsInvestors = true
             },
-            onOpenMarketQuotes: { scope in
-                selectedMarketQuotesScope = scope
+            onOpenMarketQuotes: {
+                showsMarketQuotes = true
+            },
+            onOpenAllStocks: { region in
+                selectedStockRegion = region
             },
             onOpenMarketDetail: { symbol in
                 #if DEBUG
@@ -163,8 +167,15 @@ struct MarketView: View {
                 .appPresentationBackground(InvestmentDesign.surface)
                 .appPresentationScrollsWithoutExpanding()
         }
-        .appSheet(item: $selectedMarketQuotesScope) { scope in
-            MarketQuotesSheet(scope: scope, store: store)
+        .appSheet(isPresented: $showsMarketQuotes) {
+            MarketQuotesSheet(store: store)
+                .appPresentationDetents([.large])
+                .appPresentationCornerRadius(28)
+                .appPresentationBackground(MarketStyle.surface)
+                .appPresentationScrollsWithoutExpanding()
+        }
+        .appSheet(item: $selectedStockRegion) { region in
+            MarketStocksSheet(region: region, store: store)
                 .appPresentationDetents([.large])
                 .appPresentationCornerRadius(28)
                 .appPresentationBackground(MarketStyle.surface)
@@ -205,6 +216,8 @@ enum MarketRegion: String, CaseIterable, Identifiable {
     case commodity = "商品"
     case crypto = "加密"
 
+    static let stockRegions: [Self] = [.unitedStates, .china, .japan, .korea, .europe]
+
     var id: Self { self }
 
     var symbols: [String] {
@@ -242,7 +255,7 @@ enum MarketRegion: String, CaseIterable, Identifiable {
     }
 }
 
-enum MarketQuotesScope: Hashable, Identifiable {
+private enum MarketQuotesScope: Hashable, Identifiable {
     case global
     case region(MarketRegion)
 
@@ -355,15 +368,10 @@ private struct MarketRegionPicker: View {
 }
 
 private struct MarketQuotesSheet: View {
-    @State private var scope: MarketQuotesScope
+    @State private var scope: MarketQuotesScope = .global
     let store: MarketStore
     @Environment(\.dismiss) private var dismiss
     @State private var selectedDetail: MarketDetailRoute?
-
-    init(scope: MarketQuotesScope, store: MarketStore) {
-        _scope = State(initialValue: scope)
-        self.store = store
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -3542,7 +3550,7 @@ private struct MarketConstituentRow: View {
     }
 }
 
-private struct MarketInstrumentLogo: View {
+struct MarketInstrumentLogo: View {
     let quote: MarketQuote
     let path: String?
     var size: CGFloat = 40
@@ -3745,7 +3753,7 @@ private extension UIImage {
     }
 }
 
-private struct Sparkline: View {
+struct Sparkline: View {
     let values: [Double]
     let color: Color
     var showsFill = true
@@ -3855,7 +3863,7 @@ private func marketChangeTint(_ change: Double?) -> Color {
     guard let change else { return .secondary }
     return change > 0 ? MarketStyle.gain : change < 0 ? MarketStyle.loss : .secondary
 }
-private func marketQuotePriceText(_ quote: MarketQuote) -> String {
+func marketQuotePriceText(_ quote: MarketQuote) -> String {
     let price = quote.marketDisplayPrice
     let suffix = quote.currency == "%" ? "%" : ""
     return number(price, digits: marketPriceDigits(price, symbol: quote.symbol)) + suffix

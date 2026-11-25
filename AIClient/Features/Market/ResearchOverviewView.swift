@@ -74,7 +74,8 @@ struct ResearchHomeView: View {
     let companyStore: CompanyResearchStore
     let onOpenGlobalRanking: () -> Void
     let onOpenInvestors: () -> Void
-    let onOpenMarketQuotes: (MarketQuotesScope) -> Void
+    let onOpenMarketQuotes: () -> Void
+    let onOpenAllStocks: (MarketRegion) -> Void
     let onOpenMarketDetail: (String) -> Void
     let onOpenRetailInvestors: () -> Void
     @Environment(\.rootTabIsActive) private var rootTabIsActive
@@ -90,7 +91,6 @@ struct ResearchHomeView: View {
     }()
 
     private var chartSymbols: [String] { ResearchHomeContent.chartSymbols }
-    private let stockRegions: [MarketRegion] = [.unitedStates, .china, .japan, .korea, .europe]
     private var stocks: [MarketQuote] {
         ResearchHomeContent.stocks(in: store.dashboard, region: stockRegion)
     }
@@ -298,7 +298,7 @@ struct ResearchHomeView: View {
                 "主要指数", trailing: "全部行情",
                 status: store.isShowingCachedSnapshot ? "缓存行情" : nil
             ) {
-                onOpenMarketQuotes(.global)
+                onOpenMarketQuotes()
             }
             ResearchGlobalMarketSnapshot(
                 store: store,
@@ -321,7 +321,7 @@ struct ResearchHomeView: View {
         VStack(spacing: 8) {
             sectionHeading(store.dashboard?.componentsMeta?.label ?? "核心股票", trailing: "全部股票",
                            status: store.isShowingCachedSnapshot ? "缓存行情" : nil) {
-                onOpenMarketQuotes(.region(stockRegion))
+                onOpenAllStocks(stockRegion)
             }
             stockRegionSelector
             let entries = ResearchHomeContent.stockEntries(in: store.dashboard, region: stockRegion)
@@ -342,7 +342,7 @@ struct ResearchHomeView: View {
 
     private var stockRegionSelector: some View {
         HStack(spacing: 6) {
-            ForEach(stockRegions) { region in
+            ForEach(MarketRegion.stockRegions) { region in
                 Button { stockRegion = region } label: {
                     Text(region.rawValue)
                         .font(.footnote.weight(stockRegion == region ? .semibold : .medium))
@@ -919,7 +919,7 @@ private struct ResearchIndustryChangeBar: View {
     }
 }
 
-private extension MarketQuote {
+extension MarketQuote {
     var researchStatus: String {
         if stale == true { return "报价待更新" }
         if isMiddayBreak { return "午间休市" }
