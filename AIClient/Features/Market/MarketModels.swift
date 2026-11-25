@@ -1415,22 +1415,32 @@ struct MarketChartPresentation: Sendable {
 }
 
 struct MarketChartArtifacts: Sendable {
-    let presentation: MarketChartPresentation
     let listTrend: [Double]
-    let intradayDisplay: MarketChartDisplayArtifacts?
+    let displays: [MarketChartPeriod: MarketChartDisplayArtifacts]
+    let hasDisplayPoints: Bool
 }
 
-func marketChartArtifacts(for chart: MarketChart) async throws -> MarketChartArtifacts {
-    try Task.checkCancellation()
-    let intradayDisplay = chart.interval == "1m"
-        ? try await marketChartDisplayArtifacts(for: chart, period: .intraday)
-        : nil
-    let presentation = intradayDisplay?.presentation ?? MarketChartPresentation(chart: chart)
+@concurrent
+func marketChartArtifacts(for chart: MarketChart, range: MarketRange) async throws -> MarketChartArtifacts {
+    var displays: [MarketChartPeriod: MarketChartDisplayArtifacts] = [:]
+    for period in MarketChartPeriod.allCases where period.sourceRange == range && period != .minute1 {
+        displays[period] = try marketChartDisplayArtifacts(for: chart, period: period)
+    }
+    // Both 1-minute views use the same source and display interval.
+    displays[.minute1] = displays[.intraday]
+    var listTrend: [Double] = []
+    if range == .day {
+        let points = displays[.intraday]?.presentation.points
+            ?? marketChartDisplayPoints(chart.candles, interval: chart.interval).sorted { $0.timestamp < $1.timestamp }
+        listTrend = marketSampledChartTrend(displayPoints: points)
+    }
+    let hasDisplayPoints = displays.values.contains { !$0.presentation.points.isEmpty }
+        || !marketChartDisplayPoints(chart.candles, interval: chart.interval).isEmpty
     try Task.checkCancellation()
     return MarketChartArtifacts(
-        presentation: presentation,
-        listTrend: marketSampledChartTrend(displayPoints: presentation.points),
-        intradayDisplay: intradayDisplay
+        listTrend: listTrend,
+        displays: displays,
+        hasDisplayPoints: hasDisplayPoints
     )
 }
 
@@ -1446,9 +1456,9 @@ struct MarketChartDisplayArtifacts: Sendable {
     let drawnPointCount: Int
 }
 
-func marketChartDisplayArtifacts(
+private func marketChartDisplayArtifacts(
     for source: MarketChart, period: MarketChartPeriod
-) async throws -> MarketChartDisplayArtifacts? {
+) throws -> MarketChartDisplayArtifacts? {
     try Task.checkCancellation()
     guard let chart = marketChartForDisplay(source, period: period) else { return nil }
     try Task.checkCancellation()

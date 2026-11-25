@@ -628,6 +628,7 @@ private struct TodayBriefDeck: View {
         let cardHeight = summaryHeights[brief.cards[selection].id] ?? min(350, maximumHeight)
         let stock = brief.cards[selection].stock
         let stockSymbols = rootTabIsActive && scenePhase == .active ? brief.stockSymbols : []
+        let visibleStockSymbol = !stockSymbols.isEmpty && !showsOriginals ? stock?.symbol : nil
         VStack(spacing: 8) {
             readingProgress(selection: selection, width: cardWidth)
             ZStack(alignment: .top) {
@@ -677,6 +678,12 @@ private struct TodayBriefDeck: View {
             }
         }
         .marketInstrumentDetailSheet(item: $presentedStock, store: marketStore)
+        .task(id: visibleStockSymbol, priority: .utility) {
+            guard let visibleStockSymbol else { return }
+            do { try await Task.sleep(for: .milliseconds(250)) }
+            catch { return }
+            await marketStore.preloadStockCharts(symbol: visibleStockSymbol, ranges: [.day, .week, .year])
+        }
         .task(id: stockSymbols, priority: .utility) {
             guard !stockSymbols.isEmpty else { return }
             async let closingQuotes: Void = marketStore.stockQuotes.runUpdates(symbols: stockSymbols)
