@@ -1,4 +1,3 @@
-import OSLog
 import SwiftUI
 import UIKit
 
@@ -1504,92 +1503,9 @@ struct TodayEditionStatusDetails: View {
 }
 
 struct TodayToolsMenu<Heading: View, Report: View>: View {
-    private var updateLogger: Logger {
-        Logger(subsystem: Bundle.main.bundleIdentifier ?? "AIServerClient", category: "UpdateCheck")
-    }
-
     @Environment(\.openURL) private var openURL
-    @Environment(\.scenePhase) private var scenePhase
     @State private var headingHeight: CGFloat = 63
     @State private var rechargeUnavailable = false
-    @State private var updateUnavailable = false
-    @AppStorage("focus.requestedUpdateRelease") private var requestedUpdateRelease = ""
-    @State private var installerPresentation: InstallerPresentation?
-    @State private var showsInstallOptions = false
-    @State private var completedUpdateVersion: String?
-    @State private var updateCheckAttempt = 0
-    @State private var updateCheckState: UpdateCheckState = .idle
-    @State private var availableUpdate: AvailableUpdate?
-
-    private enum UpdateCheckState: Equatable {
-        case idle, checking, current, updateAvailable
-        case failed(UpdateCheckFailure)
-    }
-
-    private enum UpdateCheckFailure: Error, Equatable {
-        case configuration, invalidManifest
-        case server(Int)
-        case network(URLError.Code)
-
-        var isTransient: Bool {
-            switch self {
-            case .server(500), .server(502), .server(503), .server(504),
-                 .network(.timedOut), .network(.networkConnectionLost), .network(.secureConnectionFailed),
-                 .network(.notConnectedToInternet), .network(.cannotConnectToHost),
-                 .network(.cannotFindHost), .network(.dnsLookupFailed):
-                return true
-            default:
-                return false
-            }
-        }
-
-        var message: String {
-            switch self {
-            case .configuration:
-                return "当前版本缺少更新配置"
-            case .invalidManifest:
-                return "更新清单无效，请稍后重试"
-            case .server(429):
-                return "更新请求过于频繁，请稍后重试"
-            case .server(let status):
-                return "更新服务器返回错误（\(status)），请稍后重试"
-            case .network(let code):
-                return NetworkErrorPresentation.message(for: URLError(code))
-            }
-        }
-    }
-
-    private enum InstallerPresentation: Equatable {
-        case requesting, waitingForConfirmation
-    }
-
-    private struct AvailableUpdate {
-        let version: String
-        let build: Int
-        let installURL: URL
-
-        var releaseID: String { "\(version)+\(build)" }
-    }
-
-    private struct PublishedVersion: Decodable {
-        let version: String
-        let build: Int
-        let package: String
-
-        func installURL(in channel: URL) -> URL? {
-            let prefix = "build-\(version)-\(build)-"
-            let identifier = package.dropFirst(prefix.count)
-            guard package.hasPrefix(prefix), identifier.utf8.count == 16,
-                  identifier.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
-                  var components = URLComponents(string: "itms-services://") else { return nil }
-            let manifest = channel.appendingPathComponent(package, isDirectory: true).appendingPathComponent("manifest.plist")
-            components.queryItems = [
-                URLQueryItem(name: "action", value: "download-manifest"),
-                URLQueryItem(name: "url", value: manifest.absoluteString)
-            ]
-            return components.url
-        }
-    }
 
     @Binding var waitingForRechargeReturn: Bool
     @Binding var showsTools: Bool
@@ -1630,29 +1546,6 @@ struct TodayToolsMenu<Heading: View, Report: View>: View {
                 .padding(.top, headingHeight + 5)
             }
         }
-        .task(id: completedUpdateVersion) {
-            guard completedUpdateVersion != nil else { return }
-            do { try await Task.sleep(for: .seconds(6)) }
-            catch { return }
-            completedUpdateVersion = nil
-        }
-        .task(id: installerPresentation) {
-            guard installerPresentation == .waitingForConfirmation else { return }
-            do { try await Task.sleep(for: .seconds(15)) }
-            catch { return }
-            installerPresentation = nil
-        }
-        .task(id: scenePhase == .active ? updateCheckAttempt : nil, priority: .utility) {
-            guard scenePhase == .active else {
-                if updateCheckState == .checking { updateCheckState = .idle }
-                return
-            }
-            while !Task.isCancelled {
-                await checkForUpdate()
-                do { try await Task.sleep(for: .seconds(300)) }
-                catch { return }
-            }
-        }
     }
 
     private var toolsButton: some View {
@@ -1664,21 +1557,11 @@ struct TodayToolsMenu<Heading: View, Report: View>: View {
                 .foregroundStyle(TodayBriefStyle.accent)
                 .frame(width: 44, height: 44)
                 .background(TodayBriefStyle.accent.opacity(showsTools ? 0.08 : 0), in: Circle())
-                .overlay(alignment: .topTrailing) {
-                    if availableUpdate != nil {
-                        Circle()
-                            .fill(TodayBriefStyle.accent)
-                            .frame(width: 7, height: 7)
-                            .padding(4)
-                            .accessibilityHidden(true)
-                    }
-                }
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("今日选项")
-        .accessibilityValue(availableUpdate == nil ? "" : "有可用更新")
-        .accessibilityHint("查看余额、费用、充值和更新")
+        .accessibilityHint("查看余额、费用和充值")
         .accessibilityIdentifier("today-tools")
     }
 
@@ -1691,22 +1574,10 @@ struct TodayToolsMenu<Heading: View, Report: View>: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("today-tools-panel")
-        .onAppear(perform: showCompletedUpdate)
         .alert("无法打开支付宝", isPresented: $rechargeUnavailable) {
             Button("知道了", role: .cancel) {}
         } message: {
             Text("请在已安装支付宝的 iPhone 上点击「支付宝充值」，前往阿里云官方充值页。")
-        }
-        .alert("无法发起安装", isPresented: $updateUnavailable) {
-            Button("知道了", role: .cancel) {}
-        } message: {
-            Text("无法打开 iOS 安装入口，请稍后重试。")
-        }
-        .alert("已发起安装", isPresented: $showsInstallOptions, presenting: availableUpdate) { update in
-            Button("重新发起") { requestInstallation(update) }
-            Button("关闭", role: .cancel) {}
-        } message: { _ in
-            Text("如果没有看到系统安装弹窗，可以重新发起。已确认安装时，请在主屏幕查看焦点图标的进度。")
         }
     }
 
@@ -1715,214 +1586,9 @@ struct TodayToolsMenu<Heading: View, Report: View>: View {
             balanceControl.padding(.bottom, 6)
             billingDetails
             rechargeButton
-            Divider()
-            updateControl
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-    }
-
-    @ViewBuilder
-    private var installStatus: some View {
-        if let completedUpdateVersion {
-            Label("已更新至 \(completedUpdateVersion)", systemImage: "checkmark.circle.fill")
-                .font(.subheadline)
-                .foregroundStyle(TodayBriefStyle.accent)
-                .accessibilityIdentifier("today-app-update-completed")
-        } else if let update = availableUpdate, requestedUpdateRelease == update.releaseID,
-                  installerPresentation != .requesting {
-            Label("已请求安装 \(update.version)", systemImage: "arrow.down.to.line")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("today-app-update-handed-off")
-        }
-    }
-
-    private var updateControl: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let availableUpdate { updateButton(availableUpdate) }
-            Button { updateCheckAttempt += 1 } label: {
-                HStack(spacing: 8) {
-                    if updateCheckState == .checking {
-                        ProgressView().controlSize(.small)
-                        Text("正在检查更新…")
-                    } else {
-                        Label("检查更新", systemImage: "arrow.clockwise")
-                    }
-                    Spacer(minLength: 0)
-                    if let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String {
-                        Text(version).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                .modifier(TodayToolActionLabel())
-            }
-            .buttonStyle(.plain)
-            .disabled(updateCheckState == .checking)
-            .accessibilityIdentifier("today-check-update")
-
-            if case .failed(let failure) = updateCheckState {
-                Text(failure.message)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("today-update-check-failed")
-            } else if updateCheckState == .current && completedUpdateVersion == nil {
-                Text("已是最新版本")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            installStatus
-        }
-    }
-
-    private var installEntryURL: URL? {
-        guard let value = Bundle.main.object(forInfoDictionaryKey: "FocusDirectInstallURL") as? String,
-              let url = URL(string: value), url.scheme == "https", url.host != nil else { return nil }
-        return url
-    }
-
-    private func numericVersion(_ version: String, build: Int) -> [Int]? {
-        let fields = version.split(separator: ".", omittingEmptySubsequences: false)
-        guard (2...3).contains(fields.count), build > 0,
-              fields.allSatisfy({ !$0.isEmpty && $0.allSatisfy { $0.isASCII && $0.isNumber } }) else { return nil }
-        let numbers = fields.compactMap { Int($0) }
-        guard numbers.count == fields.count else { return nil }
-        return numbers + Array(repeating: 0, count: 3 - numbers.count) + [build]
-    }
-
-    private var installedRelease: (version: String, order: [Int])? {
-        guard let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
-              let buildString = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
-              let build = Int(buildString), let order = numericVersion(version, build: build) else { return nil }
-        return (version, order)
-    }
-
-    private func showCompletedUpdate() {
-        let parts = requestedUpdateRelease.split(separator: "+", omittingEmptySubsequences: false)
-        guard parts.count == 2, let build = Int(parts[1]),
-              let requested = numericVersion(String(parts[0]), build: build),
-              let installed = installedRelease,
-              !installed.order.lexicographicallyPrecedes(requested) else { return }
-        requestedUpdateRelease = ""
-        completedUpdateVersion = installed.version
-    }
-
-    @MainActor
-    private func checkForUpdate() async {
-        guard !Task.isCancelled else { return }
-        let start = ProcessInfo.processInfo.systemUptime
-        updateCheckState = .checking
-        do {
-            guard let entry = installEntryURL, let installed = installedRelease else {
-                throw UpdateCheckFailure.configuration
-            }
-            let channel = entry.deletingLastPathComponent()
-            let published: PublishedVersion
-            do {
-                published = try await fetchPublishedVersion(in: channel)
-            } catch let failure as UpdateCheckFailure where failure.isTransient {
-                updateLogger.info("Retrying update check after \(String(describing: failure), privacy: .public)")
-                try await Task.sleep(for: .milliseconds(250))
-                published = try await fetchPublishedVersion(in: channel)
-            }
-            try Task.checkCancellation()
-            guard let remote = numericVersion(published.version, build: published.build),
-                  let installURL = published.installURL(in: channel) else {
-                throw UpdateCheckFailure.invalidManifest
-            }
-            if installed.order.lexicographicallyPrecedes(remote) {
-                availableUpdate = AvailableUpdate(version: published.version, build: published.build, installURL: installURL)
-                updateCheckState = .updateAvailable
-            } else {
-                availableUpdate = nil
-                updateCheckState = .current
-            }
-            let elapsed = ProcessInfo.processInfo.systemUptime - start
-            updateLogger.info("Update check completed in \(elapsed, format: .fixed(precision: 3)) seconds")
-        } catch is CancellationError {
-            guard !Task.isCancelled else { return }
-            updateCheckState = .idle
-        } catch {
-            guard !Task.isCancelled else { return }
-            let failure = error as? UpdateCheckFailure ?? .network(.unknown)
-            let elapsed = ProcessInfo.processInfo.systemUptime - start
-            updateLogger.error("Update check failed after \(elapsed, format: .fixed(precision: 3)) seconds: \(String(describing: failure), privacy: .public)")
-            updateCheckState = .failed(failure)
-        }
-    }
-
-    private func fetchPublishedVersion(in channel: URL) async throws -> PublishedVersion {
-        let url = channel.appendingPathComponent("latest.json").appending(queryItems: [
-            .init(name: "check", value: UUID().uuidString)
-        ])
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 4)
-        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await withThrowingTaskGroup(of: (Data, URLResponse).self) { group in
-                group.addTask { [request] in
-                    try await URLSession.shared.data(for: request)
-                }
-                group.addTask {
-                    try await Task.sleep(for: .seconds(4))
-                    throw URLError(.timedOut)
-                }
-                defer { group.cancelAll() }
-                guard let result = try await group.next() else { throw CancellationError() }
-                return result
-            }
-        } catch let error as URLError {
-            if error.code == .cancelled { throw CancellationError() }
-            throw UpdateCheckFailure.network(error.code)
-        }
-        guard let response = response as? HTTPURLResponse else { throw UpdateCheckFailure.invalidManifest }
-        guard response.statusCode == 200 else { throw UpdateCheckFailure.server(response.statusCode) }
-        guard let published = try? JSONDecoder().decode(PublishedVersion.self, from: data) else {
-            throw UpdateCheckFailure.invalidManifest
-        }
-        return published
-    }
-
-    private func requestInstallation(_ update: AvailableUpdate) {
-        guard installerPresentation == nil else { return }
-        installerPresentation = .requesting
-        UIApplication.shared.open(update.installURL) { opened in
-            if opened {
-                requestedUpdateRelease = update.releaseID
-                installerPresentation = .waitingForConfirmation
-            } else {
-                installerPresentation = nil
-                updateUnavailable = true
-            }
-        }
-    }
-
-    private func updateButton(_ update: AvailableUpdate) -> some View {
-        let alreadyRequested = requestedUpdateRelease == update.releaseID
-        return Button {
-            if alreadyRequested {
-                showsInstallOptions = true
-            } else {
-                requestInstallation(update)
-            }
-        } label: {
-            HStack(spacing: 4) {
-                if let installerPresentation {
-                    ProgressView().controlSize(.small)
-                    Text(installerPresentation == .requesting ? "发起中" : "等待确认")
-                } else if alreadyRequested {
-                    Label("安装状态", systemImage: "info.circle")
-                } else {
-                    Label("更新", systemImage: "arrow.down.circle")
-                }
-            }
-            .modifier(TodayToolActionLabel())
-        }
-        .buttonStyle(.plain)
-        .disabled(installerPresentation != nil)
-        .accessibilityIdentifier("today-app-update")
-        .accessibilityValue(update.version)
-        .accessibilityHint(alreadyRequested ? "查看安装说明" : "向 iOS 发起安装请求")
     }
 
     private var balanceControl: some View {
