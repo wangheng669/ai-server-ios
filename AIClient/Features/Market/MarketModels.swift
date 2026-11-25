@@ -2230,7 +2230,7 @@ struct MarketStockAppLinks {
         }
 
         guard let xueqiu = URL(string: "https://xueqiu.com/S/\(xueqiuCode)"),
-              let longbridge = URL(string: "longbridge://page/stock/detail?id=\(longbridgeCode)") else { return nil }
+              let longbridge = URL(string: "lb://page/stock/detail?id=\(longbridgeCode)") else { return nil }
         self.xueqiu = xueqiu
         self.longbridge = longbridge
     }
