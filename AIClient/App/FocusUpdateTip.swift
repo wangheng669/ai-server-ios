@@ -75,19 +75,18 @@ struct FocusUpdateTip: View {
     var body: some View {
         VStack(spacing: 0) {
             if let update = visibleUpdate {
-                tipSurface {
-                    updateContent(update)
-                }
-                .accessibilityIdentifier("focus-update-tip")
+                updateContent(update)
+                    .padding(.horizontal, 16)
+                    .transition(.opacity)
+                    .accessibilityIdentifier("focus-update-tip")
             } else if let completedUpdateVersion {
-                tipSurface {
-                    Label("已更新至 \(completedUpdateVersion)", systemImage: "checkmark.circle.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(TodayBriefStyle.accent)
-                        .padding(.horizontal, 12)
-                        .frame(minHeight: 44)
-                }
-                .accessibilityIdentifier("focus-update-completed")
+                Text("已更新至 \(completedUpdateVersion)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 4)
+                    .transition(.opacity)
+                    .accessibilityIdentifier("focus-update-completed")
             }
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: visibleUpdate?.releaseID)
@@ -127,35 +126,13 @@ struct FocusUpdateTip: View {
         }
     }
 
-    private func tipSurface(@ViewBuilder content: () -> some View) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 16)
-        return content()
-            .padding(.vertical, 4)
-            .frame(maxWidth: 440)
-            .background(TodayBriefStyle.surface, in: shape)
-            .overlay { shape.strokeBorder(TodayBriefStyle.surfaceOutline).allowsHitTesting(false) }
-            .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 4)
-            .transition(.opacity)
-    }
-
     private func updateContent(_ update: AvailableUpdate) -> some View {
         let alreadyRequested = requestedUpdateRelease == update.releaseID
-        return HStack(spacing: 8) {
-            Image(systemName: "arrow.down.circle")
-                .font(.title3)
-                .foregroundStyle(TodayBriefStyle.accent)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(alreadyRequested ? "已发起安装" : "发现新版本")
-                    .font(.subheadline.weight(.semibold))
-                Text(update.version)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .accessibilityElement(children: .combine)
-            Spacer(minLength: 0)
+        let canStartInstall = !alreadyRequested && installerPresentation == nil
+        return HStack(spacing: 4) {
+            Text(alreadyRequested ? "已发起安装 \(update.version)" : "新版 \(update.version)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Button {
                 if alreadyRequested {
                     showsInstallOptions = true
@@ -173,11 +150,11 @@ struct FocusUpdateTip: View {
                         Text(alreadyRequested ? "安装说明" : "更新")
                     }
                 }
-                .font(.subheadline.weight(.semibold))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .foregroundStyle(TodayBriefStyle.accent)
-                .background(TodayBriefStyle.accent.opacity(0.10), in: Capsule())
+                .font(.caption.weight(canStartInstall ? .semibold : .regular))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .foregroundStyle(canStartInstall ? TodayBriefStyle.accent : TodayBriefStyle.secondary)
+                .background(canStartInstall ? TodayBriefStyle.accent.opacity(0.08) : .clear, in: Capsule())
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
             }
@@ -188,7 +165,7 @@ struct FocusUpdateTip: View {
                 dismissedReleaseID = update.releaseID
             } label: {
                 Image(systemName: "xmark")
-                    .font(.footnote.weight(.semibold))
+                    .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
@@ -196,7 +173,6 @@ struct FocusUpdateTip: View {
             .buttonStyle(.plain)
             .accessibilityLabel("关闭更新提示")
         }
-        .padding(.leading, 12)
     }
 
     private var installEntryURL: URL? {
