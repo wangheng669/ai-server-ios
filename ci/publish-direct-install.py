@@ -29,6 +29,9 @@ SIGNING_WORKFLOW = "focus-adhoc.yml"
 BUNDLE_ID = "com.wangheng.aiserverclient"
 CONFIG = Path.home() / ".local/share/focus-direct-install/release-config.json"
 LOCK = CONFIG.parent / "config.lock"
+QUEUE_ROOT = CONFIG.parent / "queue"
+QUEUE_DELAY = 90
+QUEUE_MAX_DELAY = 180
 WORK_ROOT = Path.home() / ".cache/ai-server-ios"
 SCRATCH_ROOT = WORK_ROOT / "focus-direct-install-tmp"
 RECEIPT_ROOT = CONFIG.parent / "receipts"
@@ -632,11 +635,123 @@ def release_lock(channel):
         yield file.fileno()
 
 
+@contextmanager
+def queue_lock(name):
+    private_directory(QUEUE_ROOT)
+    with (QUEUE_ROOT / f"{name}.lock").open("a") as file:
+        fcntl.flock(file, fcntl.LOCK_EX)
+        yield
+
+
+def queue_read():
+    path = QUEUE_ROOT / "state.json"
+    return json.loads(path.read_bytes()) if path.exists() else {"pending": None, "inflight": None}
+
+
+def queue_save(state):
+    write_atomic(QUEUE_ROOT / "state.json", json.dumps(state).encode())
+
+
+def is_ancestor(older, newer):
+    result = subprocess.run(["git", "-C", PROJECT, "merge-base", "--is-ancestor", older, newer])
+    require(result.returncode in (0, 1), "Unable to check release commit ancestry")
+    return result.returncode == 0
+
+
+def current_release(channel):
+    current, key = read_current(channel)
+    if current is None:
+        return None, key
+    require_package_name(current["package"], current)
+    record = RECEIPT_ROOT / current["package"] / RECEIPT_NAME
+    if not record.is_file() or record.is_symlink():
+        return None, key
+    receipt = json.loads(record.read_bytes())
+    identity = receipt["identity"]
+    require(receipt.get("status") == "published" and receipt.get("public_readback_at")
+            and receipt["package"] == current["package"]
+            and version_key(identity["version"], identity["build"]) == key,
+            "Current release receipt does not match the install channel")
+    return identity, key
+
+
+def queue_release(args, config, configuration_file, entry_url, channel):
+    source = args.source_commit
+    require(is_ancestor(source, os.environ["FOCUS_RELEASE_MAIN"]), "Queue only accepts commits already on main")
+    with queue_lock("state"):
+        published, _ = current_release(channel)
+        if published and is_ancestor(source, published["source_commit"]):
+            print(f"Already published in {published['version']} ({published['build']})", flush=True)
+            return
+        state = queue_read()
+        pending = state["pending"]
+        inflight = state["inflight"]
+        if not inflight or not is_ancestor(source, inflight["source_commit"]):
+            now = time.time()
+            if pending and is_ancestor(source, pending["source_commit"]):
+                if args.queue_now:
+                    pending["ready_at"] = now
+            else:
+                if pending:
+                    require(is_ancestor(pending["source_commit"], source), "Cannot batch divergent release commits")
+                first = pending["first_at"] if pending else now
+                urgent = args.queue_now or (pending and pending["urgent"])
+                state["pending"] = {
+                    "source_commit": source,
+                    "first_at": first,
+                    "ready_at": now if urgent else min(now + QUEUE_DELAY, first + QUEUE_MAX_DELAY),
+                    "urgent": bool(urgent),
+                }
+            if args.queue_now:
+                state["pending"]["urgent"] = True
+            queue_save(state)
+    print(f"Queued {source[:12]} for the shared direct-install release", flush=True)
+
+    # Do not hold the archive/export lock here: the signing runner needs it.
+    # The short state lock still lets other callers submit during signing.
+    with queue_lock("dispatcher"):
+        while True:
+            with queue_lock("state"):
+                state = queue_read()
+                published, key = current_release(channel)
+                if published and is_ancestor(source, published["source_commit"]):
+                    print(f"Published {published['version']} ({published['build']}) includes {source[:12]}", flush=True)
+                    return
+                inflight = state["inflight"]
+                pending = state["pending"]
+                if inflight is None:
+                    require(pending is not None, "Queued release request is missing")
+                    remaining = pending["ready_at"] - time.time()
+                    if remaining <= 0:
+                        major, minor, patch, build = key
+                        inflight = {
+                            "source_commit": pending["source_commit"],
+                            "version": f"{major}.{minor}.{patch + 1}",
+                            "build": build + 1,
+                        }
+                        state.update(inflight=inflight, pending=None)
+                        queue_save(state)
+            if inflight is None:
+                time.sleep(min(remaining, 2))
+                continue
+            if not published or not is_ancestor(inflight["source_commit"], published["source_commit"]):
+                release_action(argparse.Namespace(**inflight, release=True, publish=False,
+                                                  export_signed=False, prepare=False),
+                               config, configuration_file, entry_url, channel, auth=None)
+            with queue_lock("state"):
+                state = queue_read()
+                state["inflight"] = None
+                pending = state["pending"]
+                if pending and is_ancestor(pending["source_commit"], inflight["source_commit"]):
+                    state["pending"] = None
+                queue_save(state)
+
+
 def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--version", required=True)
-    parser.add_argument("--build", required=True, type=int)
+    parser.add_argument("--version")
+    parser.add_argument("--build", type=int)
     parser.add_argument("--source-commit", required=True, help="Full SHA of the committed app source")
     parser.add_argument("--archive-sha256", help=argparse.SUPPRESS)
     action = parser.add_mutually_exclusive_group(required=True)
@@ -644,8 +759,15 @@ def main():
     action.add_argument("--release", action="store_true", help="Prepare, sign and publish this release")
     action.add_argument("--publish", action="store_true", help="Resume public verification using a signed handoff")
     action.add_argument("--export-signed", action="store_true", help=argparse.SUPPRESS)
+    action.add_argument("--queue", action="store_true", help="Batch a merged commit and wait for a shared release")
+    action.add_argument("--queue-now", action="store_true", help="Batch immediately after any active release")
     args = parser.parse_args()
-    target = version_key(args.version, args.build)
+    queued = args.queue or args.queue_now
+    if queued:
+        require(args.version is None and args.build is None, "The shared queue assigns the release version")
+    else:
+        require(args.version is not None and args.build is not None, "Pass both --version and --build")
+        version_key(args.version, args.build)
     require(re.fullmatch(r"[a-f0-9]{40}", args.source_commit), "Expected a full Git commit SHA")
     if args.export_signed:
         require(os.environ.get("GITHUB_REF") == "refs/heads/main"
@@ -683,6 +805,18 @@ def main():
     ), "Expected a nonempty list of device UDIDs")
     config["device_udids"] = sorted(device.upper() for device in devices)
     require(len(set(config["device_udids"])) == len(devices), "Device UDIDs must be unique")
+    if queued:
+        queue_release(args, config, configuration_file, entry_url, channel)
+    elif args.export_signed:
+        release_action(args, config, configuration_file, entry_url, channel, auth)
+    else:
+        # Explicit recovery/maintenance cannot race with a queued publication.
+        with queue_lock("dispatcher"):
+            release_action(args, config, configuration_file, entry_url, channel, auth=None)
+
+
+def release_action(args, config, configuration_file, entry_url, channel, auth):
+    target = version_key(args.version, args.build)
     configuration = json.dumps([entry_url, config["team_id"], config["device_udids"]]).encode()
     identity = {"source_commit": args.source_commit, "version": args.version, "build": args.build,
                 "configuration_sha256": hashlib.sha256(configuration).hexdigest()}
