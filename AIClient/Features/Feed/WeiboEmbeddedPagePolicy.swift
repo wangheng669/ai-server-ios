@@ -2,11 +2,9 @@ import Foundation
 
 struct WeiboAccountProfile: Decodable {
     let displayName: String
-    let avatarURL: URL
 
     enum CodingKeys: String, CodingKey {
         case displayName = "screen_name"
-        case avatarURL = "profile_image_url"
     }
 }
 
@@ -42,11 +40,8 @@ enum WeiboAccountAPI {
         guard let (data, response) = try? await session.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200,
               let result = try? JSONDecoder().decode(Response.self, from: data),
-              result.ok > 0,
-              let profile = result.data,
-              profile.avatarURL.scheme == "https",
-              profile.avatarURL.host != nil else { return nil }
-        return profile
+              result.ok > 0 else { return nil }
+        return result.data
     }
 
     private final class ProfileRequestDelegate: NSObject, URLSessionTaskDelegate {
