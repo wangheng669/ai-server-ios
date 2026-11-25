@@ -55,7 +55,7 @@
 		D0B100000000000000000001 /* WeiboEmbeddedPagePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B100000000000000000003 /* WeiboEmbeddedPagePolicy.swift */; };
 		801D06F0246D5D96D45CA002 /* FamousHoldingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40244177985ED17E7717147A /* FamousHoldingsStore.swift */; };
 		8F922EC1F4F62D3B56B74D1D /* ServerSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 097BF52E5F2C1BE5326021E6 /* ServerSetupView.swift */; };
-		912BA358792A0CF9208478FB /* FamousHoldingDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 041A88D0726A910552794148 /* FamousHoldingDetailView.swift */; };
+		912BA358792A0CF9208478FB /* FamousHoldingPositions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 041A88D0726A910552794148 /* FamousHoldingPositions.swift */; };
 		92D94B2A4B1E251539E7F2AD /* FamousHoldingsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6017E166E5F6A363E603B660 /* FamousHoldingsModels.swift */; };
 		98C37AD5B7A82018DFF1B291 /* MarketModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CF6BC692002C20D456E9D73 /* MarketModels.swift */; };
 		9C0435A43070CEEF7C5977E8 /* PeopleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4451E467F4556EF68A32271 /* PeopleView.swift */; };
@@ -124,7 +124,7 @@
 		A4B804000000000000000002 /* CityMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CityMap.swift; sourceTree = "<group>"; };
 		C17A00000000000000000007 /* CityMapRegions.geojson */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = CityMaps/CityMapRegions.geojson; sourceTree = "<group>"; };
 		AA1000000000000000000002 /* GoogleSignalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleSignalView.swift; sourceTree = "<group>"; };
-		041A88D0726A910552794148 /* FamousHoldingDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamousHoldingDetailView.swift; sourceTree = "<group>"; };
+		041A88D0726A910552794148 /* FamousHoldingPositions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamousHoldingPositions.swift; sourceTree = "<group>"; };
 		07CD0E8186D0B14FE290474A /* LearningDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningDetailView.swift; sourceTree = "<group>"; };
 		08CC62B12BC71FE42CB5DC47 /* CountryGDPDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CountryGDPDetailView.swift; sourceTree = "<group>"; };
 		0964D64008AE6D9891C78345 /* MarketService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketService.swift; sourceTree = "<group>"; };
@@ -392,7 +392,7 @@
 				08CC62B12BC71FE42CB5DC47 /* CountryGDPDetailView.swift */,
 				5C6756677ADA82073372908E /* CountryGDPRankingView.swift */,
 				B11C22D33E44F55A66778890 /* GlobalAssetsRankingView.swift */,
-				041A88D0726A910552794148 /* FamousHoldingDetailView.swift */,
+				041A88D0726A910552794148 /* FamousHoldingPositions.swift */,
 				6017E166E5F6A363E603B660 /* FamousHoldingsModels.swift */,
 				40244177985ED17E7717147A /* FamousHoldingsStore.swift */,
 				DEBD6D31DCEDA25975180F41 /* FamousHoldingsView.swift */,
@@ -576,7 +576,7 @@
 				A11B22C33D44E55F66778890 /* GlobalAssetsRankingView.swift in Sources */,
 				0BB9A3475C0408092697FA60 /* DeploymentStatusTip.swift in Sources */,
 				70F66C875F174C2EBAC44EBC /* FocusUpdateTip.swift in Sources */,
-				912BA358792A0CF9208478FB /* FamousHoldingDetailView.swift in Sources */,
+				912BA358792A0CF9208478FB /* FamousHoldingPositions.swift in Sources */,
 				F13F00000000000000000001 /* Sec13FNotificationView.swift in Sources */,
 				F11700000000000000000001 /* NativeReportNotificationView.swift in Sources */,
 				F11800000000000000000001 /* MarketSentimentNotificationView.swift in Sources */,

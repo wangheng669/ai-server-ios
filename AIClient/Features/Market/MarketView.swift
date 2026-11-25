@@ -60,8 +60,7 @@ struct MarketView: View {
     @State private var showsRetailInvestors = false
     @State private var showsInvestors = {
         #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("--holdings-preview") ||
-            ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--holdings-detail-preview=") })
+        ProcessInfo.processInfo.arguments.contains("--holdings-preview")
         #else
         false
         #endif
