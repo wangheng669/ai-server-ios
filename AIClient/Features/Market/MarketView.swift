@@ -154,7 +154,8 @@ struct MarketView: View {
         }
         .appSheet(isPresented: $showsInvestors) {
             FamousHoldingsView(store: holdingsStore, onClose: { showsInvestors = false })
-                .appPresentationDetents([.large])
+                .appPresentationDetents([.medium, .large])
+                .appPresentationGrabber()
                 .appPresentationCornerRadius(28)
                 .appPresentationBackground(InvestmentDesign.surface)
                 .appPresentationScrollsWithoutExpanding()
