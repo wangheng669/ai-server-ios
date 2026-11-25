@@ -80,7 +80,7 @@ struct PostDetailView: View {
     @State private var xLiveReplyContext: XReplyContext?
     @State private var isLoadingXReplyContext = false
     @State private var isLoadingXFullText: Bool
-    @State private var weiboImageSelection: ImageGallerySelection?
+    @State private var imageGallerySelection: ImageGallerySelection?
     @State private var showsXueqiuQuote = false
     @State private var xueqiuOpenFailed = false
     @State private var presentedArticleLink: InAppBrowserDestination?
@@ -152,7 +152,7 @@ struct PostDetailView: View {
                 .wikipediaReaderPresentation()
         }
         .inAppBrowserCover(item: $presentedArticleLink)
-        .imageGallery(item: $weiboImageSelection)
+        .imageGallery(item: $imageGallerySelection)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if post.sourceName == "知乎" {
                 zhihuBottomBar
@@ -249,7 +249,12 @@ struct PostDetailView: View {
             VStack(alignment: .leading, spacing: 16) {
                 newYorkTimesHeader
                 if let cover {
-                    NewYorkTimesArticleImage(photo: cover.photo, height: 245, coverDisplayURL: cover.displayURL)
+                    NewYorkTimesArticleImage(
+                        photo: cover.photo,
+                        height: 245,
+                        coverDisplayURL: cover.displayURL,
+                        onOpen: openNewYorkTimesPhoto
+                    )
                 }
                 switch newYorkTimesBody {
                 case .loading:
@@ -327,11 +332,15 @@ struct PostDetailView: View {
                     newYorkTimesParagraph(text, index: index, links: links)
                 case .image(let photo):
                     if cover.map({ photo.matches($0.url) }) != true {
-                        NewYorkTimesArticleImage(photo: photo, height: 230)
+                        NewYorkTimesArticleImage(photo: photo, height: 230, onOpen: openNewYorkTimesPhoto)
                     }
                 }
             }
         }
+    }
+
+    private func openNewYorkTimesPhoto(_ url: URL) {
+        imageGallerySelection = ImageGallerySelection(urls: [url], initialIndex: 0)
     }
 
     private func newYorkTimesCover(
@@ -672,7 +681,7 @@ struct PostDetailView: View {
                                 count: 1,
                                 initialAspectRatio: post.weiboImageAspectRatio(for: url)
                             ) {
-                                weiboImageSelection = ImageGallerySelection(
+                                imageGallerySelection = ImageGallerySelection(
                                     urls: post.weiboDetailImageURLs,
                                     initialIndex: 0
                                 )
@@ -688,7 +697,7 @@ struct PostDetailView: View {
                                         compactHeight: weiboGridImageHeight,
                                         initialAspectRatio: post.weiboImageAspectRatio(for: url)
                                     ) {
-                                        weiboImageSelection = ImageGallerySelection(
+                                        imageGallerySelection = ImageGallerySelection(
                                             urls: post.weiboDetailImageURLs,
                                             initialIndex: index
                                         )
@@ -3848,25 +3857,24 @@ private struct NewYorkTimesArticleImage: View {
     let photo: NewYorkTimesArticlePhoto
     let height: CGFloat
     var coverDisplayURL: URL? = nil
-    @State private var gallerySelection: ImageGallerySelection?
+    let onOpen: (URL) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Button {
-                gallerySelection = ImageGallerySelection(urls: [photo.url], initialIndex: 0)
-            } label: {
-                RemoteImage(
-                    url: coverDisplayURL ?? photo.url,
-                    height: height,
-                    contentMode: .fit,
-                    decodingSize: coverDisplayURL.map { _ in
-                        ImageLoader.newYorkTimesCoverSize(screenWidth: UIScreen.main.bounds.width)
-                    }
-                )
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+            RemoteImage(
+                url: coverDisplayURL ?? photo.url,
+                height: height,
+                contentMode: .fit,
+                decodingSize: coverDisplayURL.map { _ in
+                    ImageLoader.newYorkTimesCoverSize(screenWidth: UIScreen.main.bounds.width)
+                }
+            )
+            .contentShape(Rectangle())
+            .onTapGesture { onOpen(photo.url) }
+            .accessibilityElement(children: .ignore)
             .accessibilityLabel("查看文章配图")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { onOpen(photo.url) }
 
             if let caption = photo.caption, !caption.isEmpty {
                 Text(caption)
@@ -3880,7 +3888,6 @@ private struct NewYorkTimesArticleImage: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .imageGallery(item: $gallerySelection)
     }
 }
 
