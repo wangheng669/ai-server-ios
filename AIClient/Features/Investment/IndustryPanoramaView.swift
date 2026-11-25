@@ -196,6 +196,7 @@ private enum IndustryPalette {
     static let canvas = Color(uiColor: .systemBackground)
     static let panel = Color(uiColor: .secondarySystemBackground)
     static let line = Color(uiColor: .separator).opacity(0.22)
+    static let inset: CGFloat = 18
     static let accent = Color(uiColor: UIColor { traits in
         traits.userInterfaceStyle == .dark
             ? UIColor(red: 0.38, green: 0.84, blue: 0.73, alpha: 1)
@@ -210,6 +211,8 @@ private enum IndustryPane: String, CaseIterable {
 
 struct IndustryPanoramaView: View {
     @Environment(\.rootTabIsActive) private var rootTabIsActive
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.scenePhase) private var scenePhase
     @State private var industries: [IndustryPayload] = []
     @State private var selectedID: String?
     @State private var pane: IndustryPane = .overview
@@ -217,19 +220,16 @@ struct IndustryPanoramaView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var lastLoadedAt: Date?
-    @Environment(\.scenePhase) private var scenePhase
 
     private var selectedIndustry: IndustryPayload? {
-        industries.first(where: { $0.id == selectedID }) ?? industries.first
+        industries.first(where: { $0.id == selectedID })
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            if !industries.isEmpty {
-                industryPicker
-                panePicker
-            }
             if let industry = selectedIndustry {
+                industryPicker(industry)
+                panePicker
                 TabView(selection: $pane) {
                     ForEach(IndustryPane.allCases, id: \.self) { page in
                         industryPage(industry, page: page)
@@ -243,7 +243,7 @@ struct IndustryPanoramaView: View {
                 ScrollView {
                     if isLoading {
                         ContentLoadingPlaceholder(title: "正在准备行业全景", rowCount: 4)
-                            .padding(.horizontal, 22)
+                            .padding(.horizontal, IndustryPalette.inset)
                     } else {
                         ContentUnavailableView {
                             Label("行业数据暂时不可用", systemImage: "chart.bar.xaxis")
@@ -268,114 +268,103 @@ struct IndustryPanoramaView: View {
         }
     }
 
-    private var industryPicker: some View {
-        HStack(spacing: 6) {
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal) {
-                    HStack(spacing: 8) {
-                        ForEach(industries) { industry in
-                            let selected = industry.id == selectedIndustry?.id
-                            Button {
-                                selectedID = industry.id
-                            } label: {
-                                Text(industry.title)
-                                    .font(.subheadline.weight(selected ? .semibold : .medium))
-                                    .foregroundStyle(selected ? IndustryPalette.canvas : .primary)
-                                    .padding(.horizontal, 15)
-                                    .frame(minHeight: 42)
-                                    .background(selected ? IndustryPalette.accent : IndustryPalette.panel, in: Capsule())
-                            }
-                            .id(industry.id)
-                            .buttonStyle(.plain)
-                            .accessibilityAddTraits(selected ? .isSelected : [])
-                        }
-                    }
-                    .padding(.leading, 20)
-                    .padding(.vertical, 10)
-                }
-                .scrollIndicators(.hidden)
-                .accessibilityIdentifier("industry-category-picker")
-                .onChange(of: selectedID) { _, id in
-                    if let id { withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo(id, anchor: .center) } }
-                }
-            }
-            Menu {
+    private func industryPicker(_ selected: IndustryPayload) -> some View {
+        Menu {
+            Picker("行业", selection: $selectedID) {
                 ForEach(industries) { industry in
-                    Button { selectedID = industry.id } label: {
-                        if industry.id == selectedIndustry?.id {
-                            Label(industry.title, systemImage: "checkmark")
-                        } else {
-                            Text(industry.title)
-                        }
-                    }
+                    Label(industry.title, systemImage: industry.icon).tag(Optional(industry.id))
                 }
-            } label: {
-                Image(systemName: "square.grid.2x2")
-                    .font(.system(size: 19, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .frame(width: 44, height: 44)
             }
-            .accessibilityLabel("全部行业")
-            .accessibilityIdentifier("industry-directory")
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: selected.icon)
+                    .font(.title3.weight(.medium))
+                    .foregroundStyle(IndustryPalette.accent)
+                    .frame(minWidth: 40, minHeight: 40)
+                    .background(IndustryPalette.accent.opacity(0.09), in: RoundedRectangle(cornerRadius: 10))
+                    .accessibilityHidden(true)
+                Text(selected.title)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(IndustryPalette.accent)
+                    .accessibilityHidden(true)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .background(IndustryPalette.panel, in: RoundedRectangle(cornerRadius: 14))
+            .contentShape(Rectangle())
         }
-        .padding(.trailing, 12)
+        .accessibilityLabel("切换行业")
+        .accessibilityValue(selected.title)
+        .accessibilityIdentifier("industry-directory")
+        .padding(.horizontal, IndustryPalette.inset)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
     }
 
     private var panePicker: some View {
-        HStack(spacing: 0) {
-            ForEach(IndustryPane.allCases, id: \.self) { item in
-                Button { withAnimation(.easeOut(duration: 0.22)) { pane = item } } label: {
-                    VStack(spacing: 9) {
-                        Text(item.rawValue)
-                            .font(.subheadline.weight(pane == item ? .semibold : .regular))
-                            .foregroundStyle(pane == item ? .primary : .secondary)
-                        Capsule().fill(pane == item ? IndustryPalette.accent : .clear)
-                            .frame(width: 26, height: 3)
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal) {
+                        paneButtons
                     }
-                    .frame(maxWidth: .infinity, minHeight: 42)
-                    .contentShape(Rectangle())
+                    .scrollIndicators(.hidden)
+                    .onChange(of: pane, initial: true) { _, selected in
+                        proxy.scrollTo(selected, anchor: .center)
+                    }
+                }
+            } else {
+                paneButtons
+            }
+        }
+        .overlay(alignment: .bottom) { IndustryPalette.line.frame(height: 1) }
+    }
+
+    private var paneButtons: some View {
+        HStack(spacing: 4) {
+            ForEach(IndustryPane.allCases, id: \.self) { item in
+                let selected = item == pane
+                Button { withAnimation(.easeOut(duration: 0.22)) { pane = item } } label: {
+                    Text(item.rawValue)
+                        .font(.subheadline.weight(selected ? .semibold : .medium))
+                        .foregroundStyle(selected ? IndustryPalette.accent : .secondary)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(.horizontal, 10)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background {
+                            if selected {
+                                RoundedRectangle(cornerRadius: 8).fill(IndustryPalette.accent.opacity(0.09))
+                            }
+                        }
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("industry-pane-\(item.rawValue)")
-                .accessibilityAddTraits(pane == item ? .isSelected : [])
+                .accessibilityAddTraits(selected ? .isSelected : [])
+                .id(item)
             }
         }
-        .padding(.horizontal, 16)
-        .overlay(alignment: .bottom) { IndustryPalette.line.frame(height: 0.5) }
-    }
-
-    private func industryHeading(_ industry: IndustryPayload) -> some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 7) {
-                Text(industry.title)
-                    .font(.largeTitle.weight(.bold))
-                    .tracking(-0.8)
-                    .accessibilityIdentifier("industry-selected-title")
-                Text(industry.subtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-            Image(systemName: industry.icon)
-                .font(.system(size: 25, weight: .medium))
-                .foregroundStyle(IndustryPalette.accent)
-                .frame(width: 56, height: 56)
-                .background(IndustryPalette.accent.opacity(0.09), in: RoundedRectangle(cornerRadius: 18))
-        }
+        .padding(.horizontal, IndustryPalette.inset)
+        .padding(.bottom, 8)
     }
 
     private func industryPage(_ industry: IndustryPayload, page: IndustryPane) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                industryHeading(industry)
                 if let errorMessage {
                     Label(errorMessage, systemImage: "exclamationmark.circle")
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
                 paneContent(industry, page: page)
             }
-            .padding(.horizontal, 22)
+            .padding(.horizontal, IndustryPalette.inset)
+            .padding(.top, 14)
             .padding(.bottom, 32)
         }
         .scrollIndicators(.hidden)
@@ -422,6 +411,8 @@ struct IndustryPanoramaView: View {
 }
 
 private struct IndustryOverview: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     let industry: IndustryPayload
     @State private var showsMonthly = true
     @State private var salesMetric: AutoSalesMetric = .nev
@@ -430,7 +421,53 @@ private struct IndustryOverview: View {
     private var isNEV: Bool { salesMetric == .nev }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
+        VStack(alignment: .leading, spacing: 18) {
+            if !industry.subtitle.isEmpty {
+                Text(industry.subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            summary
+            if !months.isEmpty || history.count > 1 {
+                trendSection
+                    .padding(14)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 16)
+                            .strokeBorder(IndustryPalette.line)
+                            .allowsHitTesting(false)
+                    }
+            } else {
+                Label("暂无连续历史数据", systemImage: "chart.bar.xaxis")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            if months.isEmpty || !showsMonthly {
+                IndustrySourceNote(source: industry.scale.source, period: industry.scale.period)
+            }
+            if !industry.anchors.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("关注环节").font(.headline).accessibilityAddTraits(.isHeader)
+                    let column = dynamicTypeSize.isAccessibilitySize
+                        ? GridItem(.flexible(), alignment: .leading)
+                        : GridItem(.adaptive(minimum: 128), alignment: .leading)
+                    LazyVGrid(columns: [column], alignment: .leading, spacing: 12) {
+                        ForEach(industry.anchors, id: \.self) { anchor in
+                            HStack(alignment: .top, spacing: 8) {
+                                Circle().fill(IndustryPalette.accent).frame(width: 5, height: 5).padding(.top, 7)
+                                    .accessibilityHidden(true)
+                                Text(anchor).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                }
+                .padding(.top, 2)
+            }
+        }
+    }
+
+    private var summary: some View {
+        Group {
             if showsMonthly, let sales = industry.autoSales, let latest = months.last {
                 monthlyHeadline(sales, latest: latest)
             } else {
@@ -439,69 +476,48 @@ private struct IndustryOverview: View {
                     parts: IndustryMetricParts(industry.scale.value), growth: industry.scale.growth
                 )
             }
-            if !months.isEmpty || history.count > 1 {
-                trendSection
-            }
-            if months.isEmpty || !showsMonthly {
-                IndustrySourceNote(source: industry.scale.source, period: industry.scale.period)
-            }
-            if !industry.anchors.isEmpty {
-                VStack(alignment: .leading, spacing: 13) {
-                    IndustrySectionHeading(title: "关注环节", subtitle: "从业务理解这个行业")
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 12) {
-                        ForEach(industry.anchors, id: \.self) { anchor in
-                            HStack(alignment: .top, spacing: 8) {
-                                Circle().fill(IndustryPalette.accent).frame(width: 5, height: 5).padding(.top, 7)
-                                Text(anchor).font(.subheadline).fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                    }
-                }
-                .padding(.top, 2)
-            }
-            if months.isEmpty && history.count < 2 {
-                Label("当前提供该统计期的规模数据，暂无连续历史序列。", systemImage: "info.circle")
-                    .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    .padding(16).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(IndustryPalette.panel, in: RoundedRectangle(cornerRadius: 16))
-            }
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(IndustryPalette.panel, in: RoundedRectangle(cornerRadius: 16))
     }
 
     private func monthlyHeadline(_ sales: IndustryPayload.AutoSales, latest: IndustryPayload.AutoSales.Month) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 16))
+        return VStack(alignment: .leading, spacing: 14) {
             IndustryHeadline(
                 label: isNEV ? "新能源汽车月销量" : "汽车月销量",
                 period: IndustryDataPresentation.monthLabel(latest.period),
                 parts: IndustryMetricParts((isNEV ? latest.nevSales : latest.totalSales).formatted(.number.precision(.fractionLength(1))) + sales.unit),
                 growth: IndustryDataPresentation.signedPercent(isNEV ? latest.nevYoY : latest.totalYoY) + " 同比"
             )
-            HStack(spacing: 0) {
+            IndustryPalette.line.frame(height: 1)
+            layout {
                 IndustrySecondaryMetric(
                     title: "销量环比",
                     value: IndustryDataPresentation.monthlyChange(months, isNEV: isNEV).map(IndustryDataPresentation.signedPercent) ?? "—"
                 )
-                IndustryPalette.line.frame(width: 1, height: 38).padding(.horizontal, 18)
                 IndustrySecondaryMetric(title: "新能源渗透率", value: latest.nevPenetrationRate.formatted(.number.precision(.fractionLength(1))) + "%")
             }
-            .padding(14)
-            .background(IndustryPalette.panel, in: RoundedRectangle(cornerRadius: 18))
         }
     }
 
     private var trendSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text("规模趋势").font(.title3.weight(.semibold))
-                Spacer()
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .center))
+        return VStack(alignment: .leading, spacing: 16) {
+            layout {
+                Text("规模趋势").font(.headline).accessibilityAddTraits(.isHeader)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 if !months.isEmpty && history.count > 1 {
-                    Picker("统计周期", selection: $showsMonthly) {
-                        Text("月度").tag(true)
-                        Text("年度").tag(false)
+                    if dynamicTypeSize.isAccessibilitySize {
+                        trendPeriodPicker.pickerStyle(.menu)
+                    } else {
+                        trendPeriodPicker.pickerStyle(.segmented).frame(width: 142)
                     }
-                    .pickerStyle(.segmented)
-                    .frame(width: 142)
-                    .accessibilityIdentifier("industry-trend-period")
                 }
             }
             if showsMonthly && !months.isEmpty, let sales = industry.autoSales {
@@ -536,6 +552,14 @@ private struct IndustryOverview: View {
             }
         }
     }
+
+    private var trendPeriodPicker: some View {
+        Picker("统计周期", selection: $showsMonthly) {
+            Text("月度").tag(true)
+            Text("年度").tag(false)
+        }
+        .accessibilityIdentifier("industry-trend-period")
+    }
 }
 
 private struct IndustryHeadline: View {
@@ -543,38 +567,37 @@ private struct IndustryHeadline: View {
     let period: String
     let parts: IndustryMetricParts
     let growth: String?
-    @ScaledMetric(relativeTo: .largeTitle) private var numberSize: CGFloat = 52
+    @ScaledMetric(relativeTo: .largeTitle) private var numberSize: CGFloat = 44
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 13) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top) {
-                Text(label).font(.subheadline).foregroundStyle(.secondary)
-                Spacer(minLength: 12)
-                Text(period).font(.caption.weight(.medium)).foregroundStyle(IndustryPalette.accent)
+                Text(label).font(.subheadline.weight(.semibold))
+                Spacer(minLength: 8)
+                Text(period).font(.caption.weight(.medium)).foregroundStyle(.secondary)
                     .multilineTextAlignment(.trailing)
             }
+            .fixedSize(horizontal: false, vertical: true)
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                if !parts.qualifier.isEmpty { Text(parts.qualifier).font(.title3).foregroundStyle(.secondary) }
+                if !parts.qualifier.isEmpty { Text(parts.qualifier).font(.callout).foregroundStyle(.secondary) }
                 Text(parts.value)
-                    .font(.system(size: numberSize, weight: .semibold, design: .rounded))
-                    .tracking(-1.6).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
+                    .font(.system(size: numberSize, weight: .semibold))
+                    .tracking(-1.3).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
                     .accessibilityIdentifier("industry-primary-value")
                 if !parts.unit.isEmpty {
-                    Text(parts.unit).font(.title3.weight(.medium)).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 8)
-                if let growth {
-                    HStack(spacing: 4) {
-                        Image(systemName: growth.contains("-") || growth.contains("−") ? "arrow.down.right" : "arrow.up.right")
-                        Text(growth)
-                    }
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(growth.contains("-") || growth.contains("−") ? IndustryPalette.negative : IndustryPalette.accent)
-                    .multilineTextAlignment(.trailing)
+                    Text(parts.unit).font(.callout.weight(.medium)).foregroundStyle(.secondary)
                 }
             }
+            if let growth {
+                let tint = growth.contains("-") || growth.contains("−") ? IndustryPalette.negative : IndustryPalette.accent
+                Text(growth)
+                    .font(.footnote.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(tint)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
+            }
         }
-        .padding(.vertical, 3)
     }
 }
 
