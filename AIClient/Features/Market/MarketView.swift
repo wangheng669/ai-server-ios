@@ -1399,6 +1399,8 @@ private struct MarketInstrumentDetailView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var selectedPeriod: MarketChartPeriod
     @State private var presentedValuation: CompanyValuationHistoryRoute?
+    @State private var openingStockApp: MarketStockApp?
+    @State private var stockAppError: String?
 
     init(route: MarketDetailRoute, store: MarketStore, onSelectSymbol: @escaping (String) -> Void) {
         self.route = route
@@ -1440,9 +1442,9 @@ private struct MarketInstrumentDetailView: View {
     private var isAShareIndex: Bool {
         symbol.hasSuffix(".SS") || symbol.hasSuffix(".SZ") || symbol.hasPrefix("THS:")
     }
-    private var stockLinks: MarketStockLinks? {
+    private var stockLinks: MarketStockAppLinks? {
         guard !isIndex, !isCrypto, !isCommodity else { return nil }
-        return MarketStockLinks(symbol: chartSymbol)
+        return MarketStockAppLinks(symbol: chartSymbol)
     }
     private var detailBreadth: MarketBreadth? {
         if isAShareIndex {
@@ -1524,12 +1526,25 @@ private struct MarketInstrumentDetailView: View {
         }
         .floatingSheetClose("关闭行情详情", identifier: "market-detail-close", isVisible: !showsStockControls, action: dismiss.callAsFunction)
         .accessibilityAction(.escape) { dismiss() }
+        .alert("无法打开 App", isPresented: Binding(
+            get: { stockAppError != nil },
+            set: { if !$0 { stockAppError = nil } }
+        )) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(stockAppError ?? "")
+        }
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .appSheet(item: $presentedValuation) { route in
             CompanyValuationHistorySheet(route: route)
                 .appPresentationDetents([.large])
                 .appPresentationCornerRadius(28)
+        }
+        .task(id: openingStockApp) {
+            if let app = openingStockApp, let links {
+                await openStockApp(app, links: links)
+            }
         }
         .task(id: isStock ? chartSymbol : nil) {
             guard isStock else { return }
@@ -1716,25 +1731,25 @@ private struct MarketInstrumentDetailView: View {
         .padding(.bottom, 8)
     }
 
-    private func stockDetailControls(_ links: MarketStockLinks?) -> some View {
+    private func stockDetailControls(_ links: MarketStockAppLinks?) -> some View {
         DetailSheetControls(
             closeLabel: "关闭行情详情",
             closeIdentifier: "market-detail-close",
             onClose: dismiss.callAsFunction
         ) {
-            if let links {
-                stockShortcut("雪球", url: links.xueqiu, identifier: "market-xueqiu-link")
-                stockShortcut("长桥", url: links.longbridge, identifier: "market-longbridge-link")
-                stockShortcut("东方财富", url: links.eastmoney, identifier: "market-eastmoney-link")
+            if links != nil {
+                ForEach(MarketStockApp.allCases) { app in
+                    stockShortcut(app)
+                }
             }
         }
     }
 
-    private func stockShortcut(_ title: String, url: URL, identifier: String) -> some View {
+    private func stockShortcut(_ app: MarketStockApp) -> some View {
         Button {
-            UIApplication.shared.open(url)
+            openingStockApp = app
         } label: {
-            Text(title)
+            Text(app.title)
                 .font(.footnote.weight(.semibold))
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
@@ -1742,8 +1757,25 @@ private struct MarketInstrumentDetailView: View {
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
         }
-        .accessibilityLabel("在\(title)打开\(instrumentName)")
-        .accessibilityIdentifier(identifier)
+        .disabled(openingStockApp != nil)
+        .accessibilityLabel("在\(app.title) App 打开\(instrumentName)")
+        .accessibilityIdentifier("market-\(app.rawValue)-link")
+    }
+
+    private func openStockApp(_ app: MarketStockApp, links: MarketStockAppLinks) async {
+        defer { openingStockApp = nil }
+        let url = try? await links.url(for: app)
+        guard !Task.isCancelled else { return }
+        guard let url else {
+            stockAppError = "暂时无法在\(app.title)查到这只股票。"
+            return
+        }
+        let options: [UIApplication.OpenExternalURLOptionsKey: Any] =
+            app.requiresUniversalLink ? [.universalLinksOnly: true] : [:]
+        let opened = await UIApplication.shared.open(url, options: options)
+        if !opened, !Task.isCancelled {
+            stockAppError = "请确认已安装\(app.title) App。"
+        }
     }
 
     private var instrumentSubtitle: String {
