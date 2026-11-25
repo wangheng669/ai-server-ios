@@ -614,7 +614,7 @@ private struct EditorialRootView: View {
     var body: some View {
         ZStack {
             tabContent(.world) {
-                TodayWorldView(store: pageStores.today)
+                TodayWorldView(store: pageStores.today, marketStore: pageStores.market)
             }
             tabContent(.signal) {
                 GoogleSignalView(sentiment: signalSentiment)

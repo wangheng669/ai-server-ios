@@ -80,6 +80,54 @@ enum TodayOverviewSelection {
     }
 }
 
+private struct TodayCompanyStock: Sendable {
+    enum QuoteSource: Hashable, Sendable {
+        case dashboard
+        case index(String)
+    }
+
+    let name: String
+    let symbol: String
+    let source: QuoteSource
+
+    init(name: String, symbol: String, source: QuoteSource = .dashboard) {
+        self.name = name
+        self.symbol = symbol
+        self.source = source
+    }
+
+    private static let bySystem: [String: Self] = [
+        "pichai": .init(name: "Alphabet", symbol: "GOOGL"),
+        "nadella": .init(name: "微软", symbol: "MSFT"),
+        "huang": .init(name: "英伟达", symbol: "NVDA"),
+        "zuckerberg": .init(name: "Meta", symbol: "META"),
+        "apple": .init(name: "苹果", symbol: "AAPL"),
+        "amazon": .init(name: "亚马逊", symbol: "AMZN"),
+        "amd": .init(name: "AMD", symbol: "AMD"),
+        "tencent": .init(name: "腾讯", symbol: "0700.HK"),
+        "qwen": .init(name: "阿里巴巴", symbol: "9988.HK", source: .index("^HSI"))
+    ]
+
+    static func match(systemKey: String, sourceKeys: Set<String>) -> Self? {
+        guard systemKey == "musk" else { return bySystem[systemKey] }
+        if sourceKeys == ["spacex"] { return Self(name: "SpaceX", symbol: "SPCX") }
+        if sourceKeys == ["tesla"] { return Self(name: "特斯拉", symbol: "TSLA") }
+        return nil
+    }
+
+    static func match(event: TodayReadingEvent, systems: [TodayWorldFinalReportSystem]) -> Self? {
+        guard let key = event.companySystemKey else { return nil }
+        guard key == "musk" else { return match(systemKey: key, sourceKeys: []) }
+        // This report group covers several companies. Attribute only the sources cited by this card.
+        let postIDs = Set(event.postIDs)
+        let citedFacts = systems.filter { $0.systemKey == key }.flatMap(\.facts).filter {
+            !postIDs.isDisjoint(with: $0.postIDs)
+        }
+        guard !postIDs.isEmpty, postIDs.isSubset(of: Set(citedFacts.flatMap(\.postIDs))) else { return nil }
+        return match(systemKey: key, sourceKeys: Set(citedFacts.flatMap(\.sourceKeys)))
+    }
+}
+
 struct TodayBriefProjection: Sendable {
     private struct FollowUpKey: Equatable {
         let systems: Set<String>
@@ -122,6 +170,7 @@ struct TodayBriefProjection: Sendable {
         let followUps: [String]
         let title: String?
         let section: String
+        let stock: TodayCompanyStock?
 
         var sourceLabel: String {
             switch content {
@@ -215,7 +264,7 @@ struct TodayBriefProjection: Sendable {
             }
             return Card(
                 id: "highlight-" + event.id, content: .event(event), followUps: followUps,
-                title: item.title, section: "重点"
+                title: item.title, section: "重点", stock: TodayCompanyStock.match(event: event, systems: systems)
             )
         }
         var companyCards: [Card] = []
@@ -234,7 +283,8 @@ struct TodayBriefProjection: Sendable {
                         content: .company(CompanyCard(system, fact: fact)),
                         followUps: takeFollowUps(for: key),
                         title: system.headline,
-                        section: section.sectionName
+                        section: section.sectionName,
+                        stock: TodayCompanyStock.match(systemKey: system.systemKey, sourceKeys: Set(fact?.sourceKeys ?? []))
                     ))
                 }
             }
@@ -243,7 +293,7 @@ struct TodayBriefProjection: Sendable {
             let event = TodayReadingEvent.highlight(watch.item, systems: systems)
             return Card(
                 id: "watch-" + event.id, content: .event(event), followUps: [],
-                title: watch.item.title, section: "后续关注"
+                title: watch.item.title, section: "后续关注", stock: TodayCompanyStock.match(event: event, systems: systems)
             )
         }
         cards = highlights + companyCards + standaloneWatches
@@ -253,6 +303,7 @@ struct TodayBriefProjection: Sendable {
 
 struct TodayBriefOverviewView: View {
     let brief: TodayBriefProjection
+    let marketStore: MarketStore
     let viewport: CGSize
     let isLoadingSources: Bool
     let isHeaderPanelOpen: Bool
@@ -268,7 +319,7 @@ struct TodayBriefOverviewView: View {
                     .padding(TodayBriefStyle.horizontalInset)
             } else {
                 TodayBriefDeck(
-                    brief: brief, viewport: viewport, isLoadingSources: isLoadingSources,
+                    brief: brief, marketStore: marketStore, viewport: viewport, isLoadingSources: isLoadingSources,
                     isHeaderPanelOpen: isHeaderPanelOpen, retryReport: retryReport
                 )
             }
@@ -423,6 +474,7 @@ private struct TodayReportRetryButton: View {
 private struct TodayBriefDeck: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.rootTabIsActive) private var rootTabIsActive
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selectedIndex = 0
     @State private var showsOriginals = false
     @State private var showsDirectory = false
@@ -432,6 +484,7 @@ private struct TodayBriefDeck: View {
     @GestureState private var drag: Drag?
 
     let brief: TodayBriefProjection
+    let marketStore: MarketStore
     let viewport: CGSize
     let isLoadingSources: Bool
     let isHeaderPanelOpen: Bool
@@ -477,6 +530,8 @@ private struct TodayBriefDeck: View {
         let cardWidth = min(max(0, viewport.width - TodayBriefStyle.horizontalInset * 2), TodayBriefStyle.maximumCardWidth)
         let selection = min(selectedIndex, brief.cards.count - 1)
         let cardHeight = summaryHeights[brief.cards[selection].id] ?? min(350, maximumHeight)
+        let stock = brief.cards[selection].stock
+        let quoteSource = rootTabIsActive && scenePhase == .active ? stock?.source : nil
         VStack(spacing: 8) {
             readingProgress(selection: selection, width: cardWidth)
             ZStack(alignment: .top) {
@@ -485,17 +540,25 @@ private struct TodayBriefDeck: View {
                         .onTapGesture { setOriginals(false) }
                         .accessibilityHidden(true)
                 }
-                summaryDeck(selection: selection, width: cardWidth, height: cardHeight, maximumHeight: maximumHeight)
-                    .opacity(showsOriginals ? 0 : 1)
-                    .allowsHitTesting(!showsOriginals)
-                    .accessibilityHidden(showsOriginals)
+                VStack(spacing: 14) {
+                    summaryDeck(selection: selection, width: cardWidth, height: cardHeight, maximumHeight: maximumHeight)
+                    if let stock, !showsOriginals {
+                        TodayCompanyStockCard(stock: stock, marketStore: marketStore)
+                            .frame(width: cardWidth)
+                    }
+                }
+                .padding(.bottom, stagePadding)
+                .opacity(showsOriginals ? 0 : 1)
+                .allowsHitTesting(!showsOriginals)
+                .accessibilityHidden(showsOriginals)
                 if showsOriginals {
                     originalsDeck(selection: selection, width: cardWidth, maximumHeight: maximumHeight, backLayers: backLayers)
                         .transition(.opacity)
                 }
             }
             .padding(.top, 6)
-            .frame(width: viewport.width, height: max(maximumHeight, cardHeight) + stackHeight + stagePadding, alignment: .top)
+            .frame(width: viewport.width)
+            .frame(minHeight: max(maximumHeight, cardHeight) + stackHeight + stagePadding, alignment: .top)
             .clipped()
             .contentShape(Rectangle())
             .simultaneousGesture(swipeGesture(cardWidth: cardWidth), including: showsDirectory ? .none : .all)
@@ -514,6 +577,10 @@ private struct TodayBriefDeck: View {
                     }
                 }
             }
+        }
+        .task(id: quoteSource, priority: .utility) {
+            guard let quoteSource else { return }
+            await loadStockQuotes(from: quoteSource)
         }
         .onChange(of: brief.cards.map(\.id)) { previous, current in
             if let id = previous.indices.contains(selectedIndex) ? previous[selectedIndex] : nil,
@@ -537,6 +604,28 @@ private struct TodayBriefDeck: View {
             }
         }
         .accessibilityIdentifier("today-card-pager")
+    }
+
+    private func loadStockQuotes(from source: TodayCompanyStock.QuoteSource) async {
+        if source == .dashboard {
+            await marketStore.preloadDashboard()
+        } else {
+            await refreshStockQuotes(from: source)
+        }
+        while !Task.isCancelled {
+            do { try await Task.sleep(for: .seconds(30)) }
+            catch { return }
+            await refreshStockQuotes(from: source)
+        }
+    }
+
+    private func refreshStockQuotes(from source: TodayCompanyStock.QuoteSource) async {
+        switch source {
+        case .dashboard:
+            await marketStore.refresh(force: false)
+        case .index(let symbol):
+            await marketStore.loadIndexConstituents(symbol: symbol, maximumAge: 300)
+        }
     }
 
     private func summaryDeck(selection: Int, width: CGFloat, height: CGFloat, maximumHeight: CGFloat) -> some View {
@@ -964,6 +1053,119 @@ private struct TodayBriefDeckLayers<Layer: View>: View, Animatable {
     private func stack(from first: Int, size: Int) -> [Int] {
         guard (0..<cardCount).contains(first) else { return [] }
         return Array(first..<min(cardCount, first + size))
+    }
+}
+
+private struct TodayCompanyStockCard: View {
+    let stock: TodayCompanyStock
+    let marketStore: MarketStore
+
+    private var quote: MarketQuote? {
+        switch stock.source {
+        case .dashboard: marketStore.quote(symbol: stock.symbol)
+        case .index(let symbol): marketStore.indexConstituents[symbol]?.items.first { $0.id == stock.symbol }?.quote
+        }
+    }
+
+    private var isLoading: Bool {
+        switch stock.source {
+        case .dashboard: marketStore.dashboard == nil && marketStore.errorMessage == nil
+        case .index(let symbol):
+            marketStore.indexConstituents[symbol] == nil && marketStore.constituentErrors[symbol] == nil
+        }
+    }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 14) {
+                identity
+                Spacer(minLength: 0)
+                pricing(alignment: .trailing)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                identity
+                pricing(alignment: .leading)
+            }
+        }
+        .padding(.horizontal, 15)
+        .padding(.vertical, 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(TodayBriefStyle.accent.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(TodayBriefStyle.surfaceOutline)
+                .allowsHitTesting(false)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("today-stock-\(stock.symbol)")
+    }
+
+    private var identity: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(stock.name)
+                .font(.subheadline.weight(.semibold))
+            Text(stock.symbol)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    @ViewBuilder
+    private func pricing(alignment: HorizontalAlignment) -> some View {
+        if let quote, quote.stale != true, quote.marketDisplayPrice.isFinite, quote.marketDisplayPrice > 0 {
+            VStack(alignment: alignment, spacing: 4) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) { priceAndChange(quote) }
+                        .fixedSize(horizontal: true, vertical: false)
+                    VStack(alignment: alignment, spacing: 3) { priceAndChange(quote) }
+                }
+                Text(quoteContext(quote))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .monospacedDigit()
+        } else {
+            Text(isLoading ? "股价更新中" : "股价暂缺")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func priceAndChange(_ quote: MarketQuote) -> some View {
+        let price = quote.marketDisplayPrice
+        let value = price.formatted(.number.precision(.fractionLength(marketPriceDigits(price, symbol: quote.symbol))))
+        let label = [value, quote.currency].compactMap { $0 }.joined(separator: " ")
+        let change = quote.marketDisplayPercentValue
+        let tint: Color = switch change {
+        case let .some(value) where value > 0: InvestmentDesign.gain
+        case let .some(value) where value < 0: InvestmentDesign.loss
+        default: .secondary
+        }
+        return Group {
+            Text(label).font(.subheadline.weight(.semibold))
+            Text(quote.marketDisplayFormattedPercent).font(.caption.weight(.medium)).foregroundStyle(tint)
+        }
+    }
+
+    private func quoteContext(_ quote: MarketQuote) -> String {
+        let session: String
+        if quote.tradingSession.isExtended {
+            session = quote.hasActiveExtendedSessionQuote
+                ? (quote.hasIndicativeOvernightPrice ? "夜盘参考" : quote.tradingSession.displayLabel)
+                : "常规收盘"
+        } else {
+            session = quote.isMiddayBreak ? "午间休市" : quote.tradingSession.displayLabel
+        }
+        let loadStatus: String? = switch stock.source {
+        case .dashboard:
+            marketStore.isShowingCachedSnapshot ? "缓存" : (marketStore.errorMessage == nil ? nil : "未更新")
+        case .index(let symbol):
+            marketStore.constituentErrors[symbol] == nil ? nil : "未更新"
+        }
+        let delay = quote.hasDelayedSessionPrice ? "延迟" : nil
+        return [session, loadStatus ?? delay, quote.marketAsOfTimestamp.map(marketShortTimestamp)]
+            .compactMap { $0 }.joined(separator: " · ")
     }
 }
 
