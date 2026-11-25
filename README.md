@@ -43,11 +43,15 @@ GitHub `main` 是稳定代码源。开始前运行 `./ci/safe-sync.sh main`。�
 
 焦点改动完成并验证通过后，直接把新版本发到 App 内的「今日 → 更新」。点「更新」后由 iOS 确认并安装，不打开浏览器。日常交付使用 Ad Hoc 直装，无需提交 TestFlight。
 
-在黑苹果上，先在开发工作区提交要交付的改动，再用本机统一入口指定这次发布的源码提交、版本和构建号。
+日常改动验证通过、合入 `main` 且获得发布授权后，在黑苹果把这次已合入的完整提交 SHA 交给统一队列：
 
 ```sh
-~/.local/bin/focus-direct-install --release --source-commit "$(git rev-parse HEAD)" --version 1.0.115 --build 107
+~/.local/bin/focus-direct-install --queue --source-commit <完整提交SHA>
 ```
+
+尚未归档的相邻请求按 `main` 的提交祖先关系合成一包。默认等最后一次新增请求后 90 秒，单批合并窗口最长 180 秒；已经开始的发布不取消。签名期间可继续收请求，下一轮只处理包含这些请求的最新提交。用户明确要求紧急发布时用 `--queue-now` 跳过合并窗口，仍不打断当前发布。队列统一分配版本与构建号，收到 `Published … includes …` 或 `Already published in …` 才算已经交付。
+
+队列状态保存在发布主机上。若发布中断或失败，重新提交同一个已合入的 SHA 即可尝试恢复；已开始的批次保留原版本号和源码，复用原交接。没有调用者时不会自行启动发布。仅在恢复手工发布或专门维护时，才使用 `--release --source-commit <完整提交SHA> --version <原版本号> --build <原构建号>`。
 
 工具每次从 GitHub `main` 读取发布程序，并且只从指定提交导出 Xcode 工程、App、配置和两个通知扩展。发布主机上的入口文件使用 `main` 的 `ci/focus-direct-install.sh`，以 `0700` 权限安装到 `~/.local/bin/focus-direct-install`。Xcode 配置覆盖文件及设备 SDK 在归档前核对。
 
