@@ -359,9 +359,10 @@ struct TodayWorldView: View {
     @State private var waitingForRechargeReturn = false
     @State private var showsStatus = false
     @State private var showsTools = false
+    @State private var showsDirectory = false
     @State private var statusHeight: CGFloat = 0
     @State private var cardSelection: (date: String, index: Int)?
-    @State private var groupJump: TodayBriefGroupJump?
+    @State private var cardNavigation: TodayBriefNavigation?
 
     init(store: TodayWorldStore, marketStore: MarketStore) {
         _store = StateObject(wrappedValue: store)
@@ -414,7 +415,7 @@ struct TodayWorldView: View {
                 retry: { await store.loadBalance(force: true) },
                 viewport: CGSize(width: viewport.width, height: readingHeight - topInset)
             ) {
-                pageHeading
+                headerControls
             } report: { headingHeight in
                 VStack(spacing: 8) {
                     if showsStatus, let editionNotice {
@@ -437,9 +438,9 @@ struct TodayWorldView: View {
                                     - (showsStatus && editionNotice != nil ? statusHeight + 8 : 0)
                             ),
                             isLoadingSources: store.isLoading || store.isLoadingSources,
-                            isHeaderPanelOpen: showsTools,
                             retryReport: { await store.loadReport(force: true) },
-                            groupJump: groupJump,
+                            navigation: cardNavigation,
+                            showsDirectory: $showsDirectory,
                             selectedIndex: selectedCardIndex(for: brief.date)
                         )
                         .id(brief.date)
@@ -455,21 +456,29 @@ struct TodayWorldView: View {
         .safeAreaInset(edge: .bottom, spacing: 4) {
             if let brief = store.brief, brief.sectionShortcuts.count > 1 {
                 TodayBriefGroupBar(brief: brief, selectedIndex: selectedCardIndex(for: brief.date).wrappedValue) { title in
-                    groupJump = TodayBriefGroupJump(title: title)
+                    cardNavigation = TodayBriefNavigation(.group(title))
                 }
             }
         }
         .padding(.bottom, bottomChromeHeight + 8)
         .onChange(of: store.brief?.date) { _, date in
             if cardSelection?.date != date { cardSelection = nil }
+            showsDirectory = false
+        }
+        .onChange(of: store.brief?.cardCount) { _, count in
+            if count == 0 { showsDirectory = false }
         }
         .onChange(of: showsTools) { _, open in
-            if open { showsStatus = false }
+            if open {
+                showsStatus = false
+                showsDirectory = false
+            }
         }
         .onChange(of: rootTabIsActive) { _, active in
             if !active {
                 showsTools = false
                 showsStatus = false
+                showsDirectory = false
             }
         }
     }
@@ -485,24 +494,58 @@ struct TodayWorldView: View {
     }
 
     @ViewBuilder
-    private var pageHeading: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("今日")
-                .font(.largeTitle.weight(.semibold))
-                .foregroundStyle(TodayBriefStyle.ink)
+    private var headerControls: some View {
+        if let date = store.brief?.date ?? store.report?.date,
+           let label = TodayBriefDate.edition(date) {
+            Text(label)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(TodayBriefStyle.secondary)
                 .accessibilityAddTraits(.isHeader)
-            if let date = store.brief?.date ?? store.report?.date,
-               let label = TodayBriefDate.edition(date) {
-                Text(label).font(.subheadline.weight(.medium)).foregroundStyle(TodayBriefStyle.ink)
-            }
         }
         Spacer(minLength: 4)
         if let editionNotice {
             TodayEditionStatusButton(notice: editionNotice, isOpen: showsStatus) {
                 showsTools = false
+                showsDirectory = false
                 showsStatus.toggle()
             }
         }
+        if let brief = store.brief, brief.cardCount > 0 {
+            readingPosition(
+                selection: min(selectedCardIndex(for: brief.date).wrappedValue, brief.cardCount - 1),
+                count: brief.cardCount
+            )
+        }
+    }
+
+    private func readingPosition(selection: Int, count: Int) -> some View {
+        Button {
+            showsTools = false
+            showsStatus = false
+            showsDirectory.toggle()
+        } label: {
+            HStack(spacing: 5) {
+                Text("\(selection + 1) / \(count)").monospacedDigit()
+                Image(systemName: "list.bullet").accessibilityHidden(true)
+            }
+            .font(.caption.weight(.semibold))
+            .fixedSize()
+            .padding(.horizontal, 8)
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(TodayBriefStyle.accent)
+        .accessibilityLabel("本期目录")
+        .accessibilityValue("第 \(selection + 1) 张，共 \(count) 张")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: cardNavigation = TodayBriefNavigation(.step(1))
+            case .decrement: cardNavigation = TodayBriefNavigation(.step(-1))
+            @unknown default: break
+            }
+        }
+        .accessibilityIdentifier("today-card-position")
     }
 
     private var emptyReportView: some View {

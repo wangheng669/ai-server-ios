@@ -206,6 +206,8 @@ struct TodayBriefProjection: Sendable {
     private(set) var previews: [URL: UIImage] = [:]
     private(set) var hasPreparedPreviews = false
 
+    var cardCount: Int { cards.count }
+
     func sectionTitle(at index: Int) -> String? {
         guard !cards.isEmpty else { return nil }
         return cards[min(index, cards.count - 1)].section
@@ -317,12 +319,17 @@ struct TodayBriefProjection: Sendable {
     }
 }
 
-struct TodayBriefGroupJump: Equatable {
-    let title: String
+struct TodayBriefNavigation: Equatable {
+    enum Destination: Equatable {
+        case group(String)
+        case step(Int)
+    }
+
+    let destination: Destination
     private let id = UUID()
 
-    init(title: String) {
-        self.title = title
+    init(_ destination: Destination) {
+        self.destination = destination
     }
 }
 
@@ -331,9 +338,9 @@ struct TodayBriefOverviewView: View {
     let marketStore: MarketStore
     let viewport: CGSize
     let isLoadingSources: Bool
-    let isHeaderPanelOpen: Bool
     let retryReport: () async -> Void
-    let groupJump: TodayBriefGroupJump?
+    let navigation: TodayBriefNavigation?
+    @Binding var showsDirectory: Bool
     @Binding var selectedIndex: Int
 
     var body: some View {
@@ -347,8 +354,8 @@ struct TodayBriefOverviewView: View {
             } else {
                 TodayBriefDeck(
                     brief: brief, marketStore: marketStore, viewport: viewport, isLoadingSources: isLoadingSources,
-                    isHeaderPanelOpen: isHeaderPanelOpen, retryReport: retryReport, groupJump: groupJump,
-                    selectedIndex: $selectedIndex
+                    retryReport: retryReport, navigation: navigation,
+                    showsDirectory: $showsDirectory, selectedIndex: $selectedIndex
                 )
             }
         }
@@ -570,7 +577,6 @@ private struct TodayBriefDeck: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var presentedStock: MarketDetailRoute?
     @State private var showsOriginals = false
-    @State private var showsDirectory = false
     @State private var originalsHeights: [String: CGFloat] = [:]
     @State private var summaryHeights: [String: CGFloat] = [:]
     @State private var settlement: Settlement?
@@ -580,9 +586,9 @@ private struct TodayBriefDeck: View {
     let marketStore: MarketStore
     let viewport: CGSize
     let isLoadingSources: Bool
-    let isHeaderPanelOpen: Bool
     let retryReport: () async -> Void
-    let groupJump: TodayBriefGroupJump?
+    let navigation: TodayBriefNavigation?
+    @Binding var showsDirectory: Bool
     @Binding var selectedIndex: Int
 
     private enum DragAxis {
@@ -621,58 +627,55 @@ private struct TodayBriefDeck: View {
         let backLayers = min(1, brief.cards.count - 1)
         let stackHeight = CGFloat(backLayers) * Self.layerSpacing
         let stagePadding: CGFloat = 26
-        let maximumHeight = max(210, viewport.height - 52 - stagePadding - stackHeight)
+        let maximumHeight = max(210, viewport.height - stagePadding - stackHeight)
         let cardWidth = min(max(0, viewport.width - TodayBriefStyle.horizontalInset * 2), TodayBriefStyle.maximumCardWidth)
         let selection = min(selectedIndex, brief.cards.count - 1)
         let cardHeight = summaryHeights[brief.cards[selection].id] ?? min(350, maximumHeight)
         let stock = brief.cards[selection].stock
         let stockSymbols = rootTabIsActive && scenePhase == .active ? brief.stockSymbols : []
         let visibleStockSymbol = !stockSymbols.isEmpty && !showsOriginals ? stock?.symbol : nil
-        VStack(spacing: 8) {
-            readingProgress(selection: selection, width: cardWidth)
-            ZStack(alignment: .top) {
-                if showsOriginals {
-                    Color.clear.contentShape(Rectangle())
-                        .onTapGesture { setOriginals(false) }
-                        .accessibilityHidden(true)
-                }
-                VStack(spacing: 14) {
-                    summaryDeck(selection: selection, width: cardWidth, height: cardHeight, maximumHeight: maximumHeight)
-                    if let stock, !showsOriginals {
-                        TodayCompanyStockCard(stock: stock, marketStore: marketStore) {
-                            presentedStock = MarketDetailRoute(symbol: stock.symbol, companyName: stock.name)
-                        }
-                            .frame(width: cardWidth)
+        ZStack(alignment: .top) {
+            if showsOriginals {
+                Color.clear.contentShape(Rectangle())
+                    .onTapGesture { setOriginals(false) }
+                    .accessibilityHidden(true)
+            }
+            VStack(spacing: 14) {
+                summaryDeck(selection: selection, width: cardWidth, height: cardHeight, maximumHeight: maximumHeight)
+                if let stock, !showsOriginals {
+                    TodayCompanyStockCard(stock: stock, marketStore: marketStore) {
+                        presentedStock = MarketDetailRoute(symbol: stock.symbol, companyName: stock.name)
                     }
-                }
-                .padding(.bottom, stagePadding)
-                .opacity(showsOriginals ? 0 : 1)
-                .allowsHitTesting(!showsOriginals)
-                .accessibilityHidden(showsOriginals)
-                if showsOriginals {
-                    originalsDeck(selection: selection, width: cardWidth, maximumHeight: maximumHeight, backLayers: backLayers)
-                        .transition(.opacity)
+                        .frame(width: cardWidth)
                 }
             }
-            .padding(.top, 6)
-            .frame(width: viewport.width)
-            .frame(minHeight: max(maximumHeight, cardHeight) + stackHeight + stagePadding, alignment: .top)
-            .clipped()
-            .contentShape(Rectangle())
-            .simultaneousGesture(swipeGesture(cardWidth: cardWidth), including: showsDirectory ? .none : .all)
-            .accessibilityHidden(showsDirectory)
-            .overlay(alignment: .top) {
-                if showsDirectory {
-                    ZStack(alignment: .top) {
-                        Color.clear
-                            .contentShape(Rectangle())
-                            .onTapGesture { showsDirectory = false }
-                            .accessibilityHidden(true)
-                        directory(selection: selection)
-                            .frame(width: cardWidth)
-                            .modifier(TodayMenuSurface())
-                            .padding(.top, 6)
-                    }
+            .padding(.bottom, stagePadding)
+            .opacity(showsOriginals ? 0 : 1)
+            .allowsHitTesting(!showsOriginals)
+            .accessibilityHidden(showsOriginals)
+            if showsOriginals {
+                originalsDeck(selection: selection, width: cardWidth, maximumHeight: maximumHeight, backLayers: backLayers)
+                    .transition(.opacity)
+            }
+        }
+        .padding(.top, 6)
+        .frame(width: viewport.width)
+        .frame(minHeight: max(maximumHeight, cardHeight) + stackHeight + stagePadding, alignment: .top)
+        .clipped()
+        .contentShape(Rectangle())
+        .simultaneousGesture(swipeGesture(cardWidth: cardWidth), including: showsDirectory ? .none : .all)
+        .accessibilityHidden(showsDirectory)
+        .overlay(alignment: .top) {
+            if showsDirectory {
+                ZStack(alignment: .top) {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { showsDirectory = false }
+                        .accessibilityHidden(true)
+                    directory(selection: selection)
+                        .frame(width: cardWidth)
+                        .modifier(TodayMenuSurface())
+                        .padding(.top, 6)
                 }
             }
         }
@@ -705,19 +708,19 @@ private struct TodayBriefDeck: View {
             summaryHeights = summaryHeights.filter { current.contains($0.key) }
             originalsHeights = originalsHeights.filter { current.contains($0.key) }
         }
-        .onChange(of: groupJump) { _, jump in
-            guard let jump, let section = brief.sectionShortcuts.first(where: { $0.title == jump.title }) else {
-                return
+        .onChange(of: navigation) { _, request in
+            guard let request else { return }
+            switch request.destination {
+            case let .group(title):
+                guard let section = brief.sectionShortcuts.first(where: { $0.title == title }) else { return }
+                jumpToCard(section.firstCardIndex)
+            case let .step(direction):
+                advance(direction)
             }
-            jumpToCard(section.firstCardIndex)
-        }
-        .onChange(of: isHeaderPanelOpen) { _, open in
-            if open { showsDirectory = false }
         }
         .onChange(of: rootTabIsActive) { _, active in
             if !active {
                 presentedStock = nil
-                showsDirectory = false
                 settlement = nil
                 endOriginals()
             }
@@ -774,50 +777,6 @@ private struct TodayBriefDeck: View {
             .accessibilityIdentifier("today-card-\(card.id)")
             .id(card.id)
         }
-    }
-
-    private func readingProgress(selection: Int, width: CGFloat) -> some View {
-        HStack(spacing: 10) {
-            Button { showsDirectory.toggle() } label: {
-                HStack(spacing: 6) {
-                    Text("\(selection + 1) / \(brief.cards.count)").monospacedDigit()
-                    Image(systemName: "list.bullet").accessibilityHidden(true)
-                }
-                .font(.subheadline.weight(.semibold))
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(TodayBriefStyle.accent)
-            .accessibilityLabel("本期目录")
-            .accessibilityValue("第 \(selection + 1) 张，共 \(brief.cards.count) 张")
-            .accessibilityAdjustableAction { direction in
-                switch direction {
-                case .increment: advance(1)
-                case .decrement: advance(-1)
-                @unknown default: break
-                }
-            }
-            .accessibilityIdentifier("today-card-position")
-
-            GeometryReader { track in
-                Capsule().fill(TodayBriefStyle.accent.opacity(0.10))
-                    .overlay(alignment: .leading) {
-                        Capsule().fill(TodayBriefStyle.accent)
-                            .frame(width: track.size.width * CGFloat(selection + 1) / CGFloat(brief.cards.count))
-                    }
-            }
-            .frame(height: 3)
-            .accessibilityHidden(true)
-            if selection == brief.cards.count - 1 {
-                Text("本期末尾")
-                    .font(.caption)
-                    .foregroundStyle(TodayBriefStyle.accent)
-                    .fixedSize()
-            }
-        }
-        .frame(width: width)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: selection)
     }
 
     private func directory(selection: Int) -> some View {
@@ -1504,7 +1463,7 @@ struct TodayEditionStatusDetails: View {
 
 struct TodayToolsMenu<Heading: View, Report: View>: View {
     @Environment(\.openURL) private var openURL
-    @State private var headingHeight: CGFloat = 63
+    @State private var headingHeight: CGFloat = 44
     @State private var rechargeUnavailable = false
 
     @Binding var waitingForRechargeReturn: Bool
@@ -1521,7 +1480,7 @@ struct TodayToolsMenu<Heading: View, Report: View>: View {
     var body: some View {
         let width = max(0, min(TodayBriefStyle.maximumCardWidth, viewport.width - TodayBriefStyle.horizontalInset * 2))
         VStack(spacing: 8) {
-            HStack(alignment: .bottom, spacing: 4) {
+            HStack(spacing: 4) {
                 heading()
                 toolsButton
             }
@@ -1569,6 +1528,7 @@ struct TodayToolsMenu<Heading: View, Report: View>: View {
         ViewThatFits(in: .vertical) {
             toolsContent
             ScrollView { toolsContent }
+                .scrollIndicators(.hidden)
                 .scrollBounceBehavior(.basedOnSize)
                 .frame(maxHeight: 320)
         }
