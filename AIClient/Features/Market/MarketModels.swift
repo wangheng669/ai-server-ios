@@ -2173,32 +2173,50 @@ func marketActiveIndexSession(_ quote: MarketQuote?) -> MarketQuote? {
     return quote.tradingSession.isActivelyTrading && quote.tradingSession != .alwaysOpen ? quote : nil
 }
 
-func marketXueqiuURL(for symbol: String) -> URL? {
-    let normalized = symbol.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-    let xueqiuCode: String
+struct MarketStockLinks {
+    let xueqiu: URL
+    let longbridge: URL
+    let eastmoney: URL
 
-    if normalized.hasSuffix(".SS") || normalized.hasSuffix(".SZ") {
-        let code = String(normalized.dropLast(3))
-        guard code.count == 6, code.allSatisfy(\.isNumber) else { return nil }
-        xueqiuCode = (normalized.hasSuffix(".SS") ? "SH" : "SZ") + code
-    } else if normalized.hasSuffix(".HK") {
-        let code = String(normalized.dropLast(3))
-        guard (1...5).contains(code.count), code.allSatisfy(\.isNumber) else { return nil }
-        xueqiuCode = String(repeating: "0", count: 5 - code.count) + code
-    } else {
-        let supportedCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: ".-"))
-        let unsupportedMarketSuffixes = [".T", ".KS", ".KQ"]
-        guard !normalized.isEmpty,
-              !normalized.hasPrefix("^"),
-              !normalized.contains(":"),
-              !normalized.contains("!"),
-              !unsupportedMarketSuffixes.contains(where: normalized.hasSuffix),
-              normalized.unicodeScalars.allSatisfy(supportedCharacters.contains),
-              normalized.unicodeScalars.contains(where: CharacterSet.letters.contains) else { return nil }
-        xueqiuCode = normalized
+    init?(symbol: String) {
+        let normalized = symbol.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let xueqiuCode: String
+        let longbridgeCode: String
+        let eastmoneyPath: String
+
+        if normalized.hasSuffix(".SS") || normalized.hasSuffix(".SZ") {
+            let code = String(normalized.dropLast(3))
+            guard code.count == 6, code.allSatisfy(\.isNumber) else { return nil }
+            let exchange = normalized.hasSuffix(".SS") ? "SH" : "SZ"
+            xueqiuCode = exchange + code
+            longbridgeCode = "\(code).\(exchange)"
+            eastmoneyPath = "\(exchange.lowercased())\(code)"
+        } else if normalized.hasSuffix(".HK") {
+            let code = normalized.dropLast(3)
+            guard (1...5).contains(code.count), code.allSatisfy(\.isNumber) else { return nil }
+            let paddedCode = String(repeating: "0", count: 5 - code.count) + code
+            xueqiuCode = paddedCode
+            longbridgeCode = "\(paddedCode).HK"
+            eastmoneyPath = "hk/\(paddedCode)"
+        } else {
+            let supportedCharacters = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-")
+            let unsupportedMarketSuffixes = [".T", ".KS", ".KQ"]
+            guard !unsupportedMarketSuffixes.contains(where: normalized.hasSuffix),
+                  normalized.unicodeScalars.allSatisfy(supportedCharacters.contains),
+                  normalized.unicodeScalars.contains(where: CharacterSet.uppercaseLetters.contains) else { return nil }
+            let quoteCode = normalized.replacingOccurrences(of: "-", with: ".")
+            xueqiuCode = normalized
+            longbridgeCode = "\(quoteCode).US"
+            eastmoneyPath = "us/\(quoteCode.lowercased())"
+        }
+
+        guard let xueqiu = URL(string: "https://xueqiu.com/S/\(xueqiuCode)"),
+              let longbridge = URL(string: "https://longbridge.com/zh-CN/quote/\(longbridgeCode)"),
+              let eastmoney = URL(string: "https://quote.eastmoney.com/\(eastmoneyPath).html") else { return nil }
+        self.xueqiu = xueqiu
+        self.longbridge = longbridge
+        self.eastmoney = eastmoney
     }
-
-    return URL(string: "https://xueqiu.com/S/\(xueqiuCode)")
 }
 
 func marketShortTimestamp(_ timestamp: Int64) -> String {
