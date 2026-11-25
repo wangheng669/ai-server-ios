@@ -79,7 +79,8 @@ struct MarketDashboard: Codable {
     var metrics: [MarketQuote] { metricEntries.compactMap(\.quote) }
     private(set) var regionalStockEntries: [String: [MarketDashboardQuoteEntry]]
     var crypto: [MarketQuote]
-    var commodities: [MarketQuote]
+    private(set) var commodityEntries: [MarketDashboardQuoteEntry]
+    var commodities: [MarketQuote] { commodityEntries.compactMap(\.quote) }
     var indexSessions: [String: MarketQuote]?
     let componentsMeta: MarketComponentsMeta?
     let freshness: MarketDashboardFreshness?
@@ -100,7 +101,8 @@ struct MarketDashboard: Codable {
         case dataContract, definitionVersion, generatedAt, refreshIntervalMs, coreIndices, referenceIndices, realtimeProxies
         case metricEntries = "metrics"
         case regionalStockEntries = "componentsByRegion"
-        case crypto, commodities
+        case crypto
+        case commodityEntries = "commodities"
         case indexSessions, componentsMeta, freshness, missingSymbols, expectedSymbols, symbolHealth, regions
         case ashareOverview, marketStructure, sentiment
     }
@@ -120,7 +122,8 @@ struct MarketDashboard: Codable {
                                                  forKey: .regionalStockEntries)
             .mapValues { $0.compactMap(\.value) }
         crypto = try values.decodeLossyQuotes(forKey: .crypto)
-        commodities = try values.decodeLossyQuotes(forKey: .commodities)
+        commodityEntries = try values.decodeIfPresent([LossyMarketValue<MarketDashboardQuoteEntry>].self, forKey: .commodityEntries)?
+            .compactMap(\.value) ?? []
         indexSessions = try values.decodeLossyQuoteDictionary(forKey: .indexSessions)
         componentsMeta = try values.decodeIfPresent(MarketComponentsMeta.self, forKey: .componentsMeta)
         freshness = try values.decodeIfPresent(MarketDashboardFreshness.self, forKey: .freshness)
@@ -145,7 +148,9 @@ struct MarketDashboard: Codable {
             }
         }
         replace(quote, in: &crypto)
-        replace(quote, in: &commodities)
+        if let index = commodityEntries.firstIndex(where: { $0.id == quote.symbol }) {
+            commodityEntries[index] = .quote(quote)
+        }
         for key in indexSessions.map({ Array($0.keys) }) ?? [] where indexSessions?[key]?.symbol == quote.symbol {
             var quotes = [indexSessions?[key]].compactMap { $0 }
             replace(quote, in: &quotes)
@@ -184,11 +189,11 @@ struct MarketDashboard: Codable {
         return nil
     }
 
-    func unavailableStock(symbol: String) -> MarketDashboardQuoteEntry.Unavailable? {
-        guard case let .unavailable(stock)? = regionalStockEntries.values.lazy.flatMap({ $0 }).first(where: { $0.id == symbol }) else {
-            return nil
-        }
-        return stock
+    func unavailableQuote(symbol: String) -> MarketDashboardQuoteEntry.Unavailable? {
+        let entry = commodityEntries.first(where: { $0.id == symbol })
+            ?? regionalStockEntries.values.lazy.flatMap { $0 }.first(where: { $0.id == symbol })
+        guard case let .unavailable(quote)? = entry else { return nil }
+        return quote
     }
 
     private func replace(_ quote: MarketQuote, in quotes: inout [MarketQuote]) {

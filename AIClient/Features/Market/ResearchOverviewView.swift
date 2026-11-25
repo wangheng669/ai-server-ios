@@ -648,7 +648,7 @@ private struct ResearchStockQuotes: View {
                     stockRow(quote)
                 case let .unavailable(stock):
                     Button { onOpen(stock.symbol) } label: {
-                        MarketUnavailableStockRow(stock: stock, store: store)
+                        MarketUnavailableQuoteRow(quote: stock, store: store)
                             .padding(.horizontal, 8)
                     }
                     .buttonStyle(.plain)
@@ -742,16 +742,16 @@ private struct ResearchStockQuotes: View {
         return showsExtendedHours ? code : "\(code)\n\(quote.researchStatus)"
     }
 }
-struct MarketUnavailableStockRow: View {
-    let stock: MarketDashboardQuoteEntry.Unavailable
+struct MarketUnavailableQuoteRow: View {
+    let quote: MarketDashboardQuoteEntry.Unavailable
     let store: MarketStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(stock.presentationName).font(.subheadline.weight(.semibold))
-                    Text([stock.symbol, stock.currency].compactMap { $0 }.joined(separator: " · "))
+                    Text(quote.presentationName).font(.subheadline.weight(.semibold))
+                    Text([quote.symbol, quote.currency].compactMap { $0 }.joined(separator: " · "))
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 4)
@@ -759,8 +759,8 @@ struct MarketUnavailableStockRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            if let trade = store.lastSessionTrade(symbol: stock.symbol, asOf: stock.quality.asOfTimestamp) {
-                MarketLastSessionTradeNote(trade: trade, symbol: stock.symbol)
+            if let trade = store.lastSessionTrade(symbol: quote.symbol, asOf: quote.quality.asOfTimestamp) {
+                MarketLastSessionTradeNote(trade: trade, symbol: quote.symbol)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
