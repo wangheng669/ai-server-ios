@@ -230,11 +230,13 @@ final class GlobalRankingStore {
 struct CountryGDPRankingView: View {
     @Environment(\.rootTabIsActive) private var rootTabIsActive
     let store: GlobalRankingStore
+    let onClose: () -> Void
     @State private var category: GlobalRankingCategory
     @State private var selectedCountry: CountryGDPRoute?
 
-    init(store: GlobalRankingStore, initialCategory: GlobalRankingCategory = .countryGDP) {
+    init(store: GlobalRankingStore, initialCategory: GlobalRankingCategory, onClose: @escaping () -> Void) {
         self.store = store
+        self.onClose = onClose
         #if DEBUG
         _category = State(
             initialValue: ProcessInfo.processInfo.arguments.contains("--global-assets-preview")
@@ -248,6 +250,7 @@ struct CountryGDPRankingView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            ResearchSheetHeading(title: "资产排行", onClose: onClose)
             categoryPicker
 
             switch category {
@@ -260,7 +263,7 @@ struct CountryGDPRankingView: View {
                                 rankingSection(ranking)
                                 sourceFooter(ranking)
                             }
-                            .padding(.bottom, 88)
+                            .padding(.bottom, 28)
                         }
                         .background(InvestmentDesign.surface)
                         .scrollIndicators(.hidden)
@@ -300,35 +303,28 @@ struct CountryGDPRankingView: View {
     }
 
     private var categoryPicker: some View {
-        HStack(spacing: 28) {
+        HStack(spacing: 4) {
             ForEach(GlobalRankingCategory.allCases) { item in
+                let selected = category == item
                 Button {
-                    withAnimation(.easeOut(duration: 0.18)) { category = item }
+                    category = item
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: item.icon)
-                            .font(.system(size: 12, weight: .semibold))
-                        Text(item.rawValue)
-                            .font(.system(size: 13, weight: .semibold))
-                    }
-                    .foregroundStyle(category == item ? InvestmentDesign.accent : Color.secondary)
-                    .frame(height: 40)
-                    .overlay(alignment: .bottom) {
-                        Capsule()
-                            .fill(category == item ? InvestmentDesign.accent : Color.clear)
-                            .frame(height: 2)
-                    }
+                    Label(item.rawValue, systemImage: item.icon)
+                        .font(.subheadline.weight(selected ? .semibold : .medium))
+                        .foregroundStyle(selected ? ResearchDesign.accent : .secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(selected ? ResearchDesign.selection : .clear, in: RoundedRectangle(cornerRadius: 8))
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityAddTraits(category == item ? .isSelected : [])
+                .accessibilityAddTraits(selected ? .isSelected : [])
             }
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, InvestmentDesign.pageInset)
-        .background(InvestmentDesign.surface)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(InvestmentDesign.divider).frame(height: 0.5)
-        }
+        .padding(3)
+        .background(ResearchDesign.fill, in: RoundedRectangle(cornerRadius: 11))
+        .padding(.horizontal, ResearchDesign.inset)
+        .padding(.bottom, 6)
         .accessibilityIdentifier("global-ranking-category-picker")
     }
 
@@ -361,21 +357,14 @@ struct CountryGDPRankingView: View {
     }
 
     private func overview(_ ranking: CountryGDPRanking) -> some View {
-        VStack(alignment: .leading, spacing: 22) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 9) {
-                Image(systemName: "globe.asia.australia.fill")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(InvestmentDesign.accent)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("全球经济体")
-                        .font(.system(size: 16, weight: .bold))
-                    Text("按现价美元 GDP 排名")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
+                Text("按现价美元 GDP 排名")
+                    .font(.subheadline.weight(.semibold))
+                    .accessibilityAddTraits(.isHeader)
                 Spacer()
                 Text(verbatim: "\(ranking.year)")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
 
@@ -411,13 +400,11 @@ struct CountryGDPRankingView: View {
                 }
             }
         }
-        .padding(.horizontal, InvestmentDesign.pageInset)
-        .padding(.top, 20)
-        .padding(.bottom, 22)
+        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .bottom) {
-            Divider().overlay(InvestmentDesign.divider)
-        }
+        .researchPanel(fill: ResearchDesign.fill)
+        .padding(.horizontal, ResearchDesign.inset)
+        .padding(.top, 10)
     }
 
     private func rankingHeader(_ ranking: CountryGDPRanking) -> some View {

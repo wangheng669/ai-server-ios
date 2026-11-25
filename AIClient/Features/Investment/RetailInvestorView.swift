@@ -19,10 +19,15 @@ struct RetailInvestorView: View {
     }
 
     var body: some View {
-        VStack(spacing: 8) {
-            header
+        VStack(spacing: 0) {
+            ResearchSheetHeading(title: "散户观点", onClose: dismiss.callAsFunction)
                 .frame(maxWidth: TodayBriefStyle.maximumCardWidth)
-                .padding(.horizontal, TodayBriefStyle.horizontalInset)
+
+            if items.count > 1 {
+                pageProgress
+                    .frame(maxWidth: TodayBriefStyle.maximumCardWidth)
+                    .padding(.horizontal, ResearchDesign.inset)
+            }
 
             if items.isEmpty {
                 emptyState
@@ -31,9 +36,7 @@ struct RetailInvestorView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .padding(.top, 10)
-        .padding(.bottom, 8)
-        .background(TodayBriefStyle.surface)
+        .background(InvestmentDesign.surface)
         .task {
             await store.refreshInvestorMood(force: true)
         }
@@ -47,35 +50,15 @@ struct RetailInvestorView: View {
         }
     }
 
-    private var header: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("散户观点")
-                    .font(.headline)
-                    .accessibilityAddTraits(.isHeader)
-
-                if items.count > 1 {
-                    pageProgress
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            DetailSheetCloseButton(
-                action: dismiss.callAsFunction,
-                accessibilityLabel: "关闭散户观点"
-            )
-        }
-    }
-
     private var pageProgress: some View {
         HStack(spacing: 8) {
-            Text("\(selectedIndex + 1) / \(items.count)")
+            Text("样本 \(selectedIndex + 1) / \(items.count)")
                 .font(.caption.weight(.semibold).monospacedDigit())
-                .foregroundStyle(TodayBriefStyle.accent)
+                .foregroundStyle(ResearchDesign.accent)
                 .fixedSize()
 
             ProgressView(value: Double(selectedIndex + 1), total: Double(items.count))
-                .tint(TodayBriefStyle.accent)
+                .tint(ResearchDesign.accent)
                 .accessibilityHidden(true)
         }
         .accessibilityElement(children: .ignore)
@@ -98,7 +81,8 @@ struct RetailInvestorView: View {
                         InvestorMoodVideoCard(item: item) { playbackItem = item }
                             .frame(maxWidth: TodayBriefStyle.maximumCardWidth)
                             .padding(.horizontal, TodayBriefStyle.horizontalInset)
-                            .padding(.bottom, 6)
+                            .padding(.top, 10)
+                            .padding(.bottom, 12)
                             .containerRelativeFrame(.horizontal)
                             .frame(height: viewport.size.height)
                     }
@@ -142,32 +126,25 @@ private struct InvestorMoodVideoCard: View {
     @State private var showsDouyinOpenFailure = false
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: TodayBriefStyle.cardCornerRadius)
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 18) {
                     header
+                        .padding(14)
+                        .researchPanel(fill: ResearchDesign.fill)
                     interpretation
+                        .padding(.horizontal, 2)
                 }
-                .padding(16)
+                .padding(.bottom, 16)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollBounceBehavior(.basedOnSize)
 
-            Divider()
-                .padding(.horizontal, 16)
+            ResearchDesign.line.frame(height: 1)
             originalVideoButton
-                .padding(.horizontal, 16)
-                .padding(.vertical, 4)
+                .padding(.vertical, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(TodayBriefStyle.surface, in: shape)
-        .clipShape(shape)
-        .overlay {
-            shape.strokeBorder(TodayBriefStyle.surfaceOutline)
-                .allowsHitTesting(false)
-        }
-        .shadow(color: TodayBriefStyle.accent.opacity(0.06), radius: 6, x: 0, y: 2)
         .accessibilityIdentifier("retail-investor-card-\(item.id)")
         .alert("无法打开抖音 App", isPresented: $showsDouyinOpenFailure) {
             Button("知道了", role: .cancel) {}
@@ -185,7 +162,7 @@ private struct InvestorMoodVideoCard: View {
             VStack(alignment: .leading, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.nickname)
-                        .font(.subheadline.weight(.semibold))
+                        .font(.headline)
                     Text(publication)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -194,7 +171,7 @@ private struct InvestorMoodVideoCard: View {
 
                 if let description = item.description.nonEmpty {
                     Text(description)
-                        .font(.headline)
+                        .font(.body.weight(.semibold))
                         .accessibilityAddTraits(.isHeader)
                 }
             }
@@ -238,7 +215,7 @@ private struct InvestorMoodVideoCard: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(TodayBriefStyle.accent)
+                .foregroundStyle(ResearchDesign.accent)
                 .accessibilityAddTraits(.isHeader)
             Text(text)
                 .font(.body)
@@ -262,10 +239,19 @@ private struct InvestorMoodVideoCard: View {
                     .scaledToFit()
                     .frame(width: 20, height: 20)
                     .accessibilityHidden(true)
-                Text(url == nil ? "原视频暂不可用" : "抖音原视频")
+                Text(url == nil ? "原视频暂不可用" : "打开抖音原视频")
                     .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 0)
+                if url != nil {
+                    Image(systemName: "arrow.up.right")
+                        .font(.caption.weight(.semibold))
+                        .accessibilityHidden(true)
+                }
             }
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .foregroundStyle(url == nil ? .secondary : ResearchDesign.accent)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44)
+            .background(ResearchDesign.fill, in: RoundedRectangle(cornerRadius: 10))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

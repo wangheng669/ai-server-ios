@@ -430,6 +430,7 @@ private struct ChinaMacroPresentation: Identifiable {
 struct ChinaMacroView: View {
     @Environment(\.rootTabIsActive) private var rootTabIsActive
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var store = ChinaMacroStore()
     @State private var section = ChinaMacroSection.overview
     @State private var metric = ChinaMacroMetric.gdpGrowth
@@ -439,8 +440,8 @@ struct ChinaMacroView: View {
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 14) {
-                header
                 sectionPicker
+                header
                 if store.isLoading && store.years.isEmpty {
                     ContentLoadingPlaceholder(title: "正在读取宏观数据", layout: .chart)
                 } else if store.loadError && store.years.isEmpty {
@@ -456,9 +457,9 @@ struct ChinaMacroView: View {
             }
             .padding(.horizontal, InvestmentDesign.pageInset)
             .padding(.top, 14)
-            .padding(.bottom, 80)
+            .padding(.bottom, 24)
         }
-        .background(InvestmentDesign.canvas)
+        .background(InvestmentDesign.surface)
         .task(id: rootTabIsActive && scenePhase == .active) {
             guard rootTabIsActive, scenePhase == .active else { return }
             await store.loadIfNeeded()
@@ -493,7 +494,10 @@ struct ChinaMacroView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 5))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
             Label(
                 latestYear.map { "收录至 \(String($0)) 年" } ?? "正在更新数据",
                 systemImage: "calendar"
@@ -511,43 +515,54 @@ struct ChinaMacroView: View {
     }
 
     private var sectionPicker: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-        HStack(spacing: 4) {
-            ForEach(ChinaMacroSection.allCases) { item in
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) { section = item }
-                } label: {
-                    Text(item.rawValue)
-                        .font(.subheadline.weight(section == item ? .semibold : .regular))
-                        .foregroundStyle(section == item ? InvestmentDesign.accent : .secondary)
-                        .frame(minWidth: 58)
-                        .padding(.vertical, 10)
-                        .background(section == item ? InvestmentDesign.surface : Color.clear)
-                        .clipShape(RoundedRectangle(cornerRadius: 11))
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: 5) {
+                    ForEach(ChinaMacroSection.allCases) { item in
+                        let selected = section == item
+                        Button { section = item } label: {
+                            Text(item.rawValue)
+                                .font(.subheadline.weight(selected ? .semibold : .medium))
+                                .foregroundStyle(selected ? ResearchDesign.accent : .secondary)
+                                .fixedSize()
+                                .padding(.horizontal, 12)
+                                .frame(minHeight: 36)
+                                .background(selected ? ResearchDesign.selection : ResearchDesign.fill,
+                                            in: RoundedRectangle(cornerRadius: 8))
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(selected ? .isSelected : [])
+                        .id(item)
+                    }
                 }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(section == item ? .isSelected : [])
             }
-        }
-        .padding(4)
-        .background(Color.secondary.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+            .scrollIndicators(.hidden)
+            .onChange(of: section, initial: true) { _, selection in
+                proxy.scrollTo(selection, anchor: .center)
+            }
         }
         .accessibilityIdentifier("macro-category-picker")
     }
 
     private var snapshotBar: some View {
         let lpr = latest(.mortgageRate)
-        return HStack(spacing: 8) {
-            snapshotObservation("GDP 增速", observation: store.latestGrowth, tint: InvestmentDesign.accent)
-            snapshotObservation("CPI 同比", observation: store.latestInflation, tint: .orange)
+        let layout = dynamicTypeSize >= .xxxLarge
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 4))
+        return layout {
+            snapshotObservation("GDP 增速", observation: store.latestGrowth, tint: ResearchDesign.accent)
+            snapshotObservation("CPI 同比", observation: store.latestInflation, tint: ResearchDesign.accent)
             snapshotItem(
                 "五年以上 LPR",
                 value: lpr.flatMap { ChinaMacroMetric.mortgageRate.value(in: $0) },
                 period: lpr?.periodLabel(for: .mortgageRate),
-                tint: .purple
+                tint: ResearchDesign.accent
             )
         }
+        .padding(6)
+        .researchPanel(fill: ResearchDesign.fill)
     }
 
     @ViewBuilder
@@ -566,7 +581,7 @@ struct ChinaMacroView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title).font(.caption2).foregroundStyle(.secondary)
             Text(value.map { "\(format($0))%" } ?? "—")
-                .font(.headline.monospacedDigit())
+                .font(.title3.weight(.semibold).monospacedDigit())
                 .foregroundStyle(tint)
             Text(period ?? "等待数据")
                 .font(.caption2)
@@ -653,9 +668,11 @@ struct ChinaMacroView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                HStack(alignment: .top, spacing: 0) {
-                    ForEach(Array(metrics.enumerated()), id: \.element) { index, item in
-                        if index > 0 { Divider().frame(height: 48).padding(.horizontal, 10) }
+                let layout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+                    : AnyLayout(HStackLayout(alignment: .top, spacing: 10))
+                layout {
+                    ForEach(metrics, id: \.self) { item in
                         metricSummary(item)
                     }
                 }
@@ -672,12 +689,7 @@ struct ChinaMacroView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(InvestmentDesign.surface)
-        .clipShape(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
-        .overlay {
-            RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius)
-                .stroke(InvestmentDesign.divider, lineWidth: 1)
-        }
+        .researchPanel()
     }
 
     private func metricSummary(_ item: ChinaMacroMetric) -> some View {
@@ -686,9 +698,14 @@ struct ChinaMacroView: View {
             presentation = ChinaMacroPresentation(metric: item, year: latest?.year)
         } label: {
             VStack(alignment: .leading, spacing: 4) {
-            Text(item.title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack(spacing: 4) {
+                Text(item.title)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .accessibilityHidden(true)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
             Text(latest.flatMap { item.value(in: $0) }.map { "\(format($0))\(item.unitSuffix)" } ?? "—")
                 .font(.system(size: 21, weight: .bold, design: .rounded))
                 .foregroundStyle(item.color)
@@ -697,14 +714,12 @@ struct ChinaMacroView: View {
             Text(latest.map { $0.periodLabel(for: item) } ?? "暂无数据")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
-            Label("点按查看", systemImage: "rectangle.portrait.and.arrow.forward")
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(.tertiary)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(item.title)，打开详细数据")
+        .accessibilityHint("打开详细数据")
     }
 
     private func sparkline(_ item: ChinaMacroMetric, tint: Color) -> some View {
@@ -800,8 +815,7 @@ struct ChinaMacroView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(16)
-        .background(InvestmentDesign.surface)
-        .clipShape(RoundedRectangle(cornerRadius: InvestmentDesign.cornerRadius))
+        .researchPanel()
     }
 
     private var recentValues: some View {

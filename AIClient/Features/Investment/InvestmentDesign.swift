@@ -12,3 +12,45 @@ enum InvestmentDesign {
     static let pageInset: CGFloat = 16
     static let cornerRadius: CGFloat = 14
 }
+
+enum ResearchDesign {
+    static let accent = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.66, green: 0.78, blue: 1, alpha: 1)
+            : UIColor(red: 0.15, green: 0.32, blue: 0.60, alpha: 1)
+    })
+    static let selection = accent.opacity(0.10)
+    static let fill = Color(uiColor: .secondarySystemBackground)
+    static let line = Color.primary.opacity(0.09)
+    static let inset: CGFloat = 18
+    static let radius: CGFloat = 14
+}
+
+struct ResearchSheetHeading: View {
+    let title: String
+    let onClose: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(title)
+                .font(.title2.weight(.bold))
+                .accessibilityAddTraits(.isHeader)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            DetailSheetCloseButton(action: onClose, accessibilityLabel: "关闭\(title)")
+                .accessibilityIdentifier("detail-sheet-close")
+        }
+        .padding(.horizontal, ResearchDesign.inset)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
+        .background(InvestmentDesign.surface)
+    }
+}
+
+extension View {
+    func researchPanel(fill: Color = InvestmentDesign.surface) -> some View {
+        let shape = RoundedRectangle(cornerRadius: ResearchDesign.radius)
+        return background(fill, in: shape)
+            .clipShape(shape)
+            .overlay { shape.strokeBorder(ResearchDesign.line).allowsHitTesting(false) }
+    }
+}

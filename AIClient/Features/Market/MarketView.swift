@@ -144,32 +144,25 @@ struct MarketView: View {
         .environment(\.rootTabIsActive, isResearchVisible)
         .appSheet(isPresented: $showsRetailInvestors) {
             RetailInvestorView(store: investorMoodStore)
-                .appPresentationDetents([.medium, .large])
+                .appPresentationDetents([.large])
                 .appPresentationCornerRadius(28)
                 .appPresentationBackground(InvestmentDesign.surface)
                 .appPresentationScrollsWithoutExpanding()
         }
         .appSheet(isPresented: $showsInvestors) {
-            FamousHoldingsView(store: holdingsStore)
-                .overlay(alignment: .bottomTrailing) {
-                    DetailSheetControls(closeLabel: "关闭机构持仓", onClose: { showsInvestors = false })
-                        .padding(12)
-                }
-            .appPresentationDetents([.large])
-            .appPresentationCornerRadius(24)
-            .appPresentationBackground(Color(uiColor: .systemBackground))
-            .appPresentationScrollsWithoutExpanding()
+            FamousHoldingsView(store: holdingsStore, onClose: { showsInvestors = false })
+                .appPresentationDetents([.large])
+                .appPresentationCornerRadius(28)
+                .appPresentationBackground(InvestmentDesign.surface)
+                .appPresentationScrollsWithoutExpanding()
         }
         .appSheet(isPresented: $showsGlobalRanking) {
-            CountryGDPRankingView(store: globalRankingStore, initialCategory: rankingCategory)
-                .overlay(alignment: .bottomTrailing) {
-                    DetailSheetControls(closeLabel: "关闭全球排行", onClose: { showsGlobalRanking = false })
-                        .padding(12)
-                }
-            .appPresentationDetents([.large])
-            .appPresentationCornerRadius(28)
-            .appPresentationBackground(InvestmentDesign.surface)
-            .appPresentationScrollsWithoutExpanding()
+            CountryGDPRankingView(store: globalRankingStore, initialCategory: rankingCategory,
+                                  onClose: { showsGlobalRanking = false })
+                .appPresentationDetents([.large])
+                .appPresentationCornerRadius(28)
+                .appPresentationBackground(InvestmentDesign.surface)
+                .appPresentationScrollsWithoutExpanding()
         }
         .appSheet(item: $selectedMarketQuotesScope) { scope in
             MarketQuotesSheet(scope: scope, store: store)

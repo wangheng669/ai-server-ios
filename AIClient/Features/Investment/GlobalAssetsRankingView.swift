@@ -49,24 +49,14 @@ struct GlobalAssetsRankingView: View {
     }
 
     private func overview(_ ranking: GlobalAssetsRanking) -> some View {
-        VStack(alignment: .leading, spacing: 22) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 9) {
-                Image(systemName: "chart.bar.fill")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(InvestmentDesign.accent)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("全球资产")
-                        .font(.system(size: 16, weight: .bold))
-                        .lineLimit(1)
-                    Text("按采集时的总市值排名")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                .layoutPriority(1)
+                Text("按总市值排名")
+                    .font(.subheadline.weight(.semibold))
+                    .accessibilityAddTraits(.isHeader)
                 Spacer()
                 Text("\(ranking.assets.count) 项")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
 
@@ -104,13 +94,11 @@ struct GlobalAssetsRankingView: View {
                 }
             }
         }
-        .padding(.horizontal, InvestmentDesign.pageInset)
-        .padding(.top, 20)
-        .padding(.bottom, 22)
+        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .bottom) {
-            Divider().overlay(InvestmentDesign.divider)
-        }
+        .researchPanel(fill: ResearchDesign.fill)
+        .padding(.horizontal, ResearchDesign.inset)
+        .padding(.top, 10)
     }
 
     private func rankingSection(_ ranking: GlobalAssetsRanking) -> some View {
@@ -145,7 +133,7 @@ struct GlobalAssetsRankingView: View {
                 Image(systemName: "link")
                     .foregroundStyle(InvestmentDesign.accent)
                 Text("数据来源：\(ranking.sourceName)。点按查看原始数据。")
-                    .font(.system(size: 11))
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.leading)
                 Spacer()
@@ -163,8 +151,13 @@ struct GlobalAssetsRankingView: View {
     }
 
     private func assetRow(_ asset: GlobalAsset) -> some View {
-        HStack(spacing: 10) {
-            assetIcon(asset, size: 30)
+        HStack(spacing: 9) {
+            Text(asset.rank.formatted())
+                .font(.caption.weight(.semibold).monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 22, alignment: .trailing)
+                .accessibilityHidden(true)
+            assetIcon(asset, size: 28)
             VStack(alignment: .leading, spacing: 2) {
                 Text(asset.name).font(.body.weight(.semibold)).lineLimit(1)
                 Text(asset.symbol).font(.caption).foregroundStyle(.secondary)
@@ -181,8 +174,9 @@ struct GlobalAssetsRankingView: View {
                     change(asset.change7DPercent, label: "7d")
                 }
             }
+            .fixedSize(horizontal: true, vertical: false)
         }
-        .padding(.horizontal, InvestmentDesign.pageInset)
+        .padding(.horizontal, ResearchDesign.inset)
         .frame(minHeight: 62)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("第 \(asset.rank) 名，\(asset.name)，市值 \(GlobalAssetsFormat.marketCap(asset.marketCapUSD))")
