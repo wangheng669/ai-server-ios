@@ -618,6 +618,7 @@ func marketSymbolDisplayName(_ symbol: String) -> String {
     case "THS:883418": "微盘股"
     case "^TOPX": "东证指数"
     case "JP10Y": "日本10年国债"
+    case "KR10Y": "韩国10年国债"
     default: symbol
     }
 }

@@ -58,8 +58,8 @@ private enum ResearchStyle {
     static let inset: CGFloat = 18
 
     static func tint(_ quote: MarketQuote?) -> Color {
-        guard let quote, !quote.hasSuspiciousIndexMove else { return muted }
-        return quote.marketDisplayPercentValue >= 0 ? InvestmentDesign.gain : InvestmentDesign.loss
+        guard let quote, !quote.hasSuspiciousIndexMove, let change = quote.marketDisplayPercentValue else { return muted }
+        return change > 0 ? InvestmentDesign.gain : change < 0 ? InvestmentDesign.loss : muted
     }
 }
 
@@ -362,7 +362,7 @@ struct ResearchHomeView: View {
 
     private func metric(_ title: String, symbol: String, yield: Bool) -> some View {
         let quote = store.quote(symbol: symbol)
-        let change = quote.flatMap { $0.previousClose == nil ? nil : $0.marketDisplayChangeValue }
+        let change = quote?.marketDisplayChangeValue
         return Button { onOpenMarketDetail(symbol) } label: {
             indicator(title) {
                 Text(quote.map { String(format: yield ? "%.2f%%" : "%.2f", $0.marketDisplayPrice) } ?? "—")
@@ -421,22 +421,32 @@ struct ResearchHomeView: View {
 
     private func sectorCard(_ title: String, symbol: String) -> some View {
         let quote = store.quote(symbol: symbol)
+        let lastTrade = store.dashboard?.unavailableQuote(symbol: symbol).flatMap {
+            store.lastSessionTrade(symbol: symbol, asOf: $0.quality.asOfTimestamp)
+        }
         return Button { onOpenMarketDetail(symbol) } label: {
-            HStack(spacing: 6) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
-                    Text(symbol)
-                        .font(.caption2).foregroundStyle(ResearchStyle.muted)
-                    Text(quote?.researchStatus ?? "暂无行情")
-                        .font(.caption2).foregroundStyle(ResearchStyle.muted)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(title).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                        Text(symbol).font(.caption2).foregroundStyle(ResearchStyle.muted)
+                        Text(quote?.researchStatus ?? "当前报价暂缺")
+                            .font(.caption2)
+                            .foregroundStyle(ResearchStyle.muted)
+                    }
+                    Spacer(minLength: 0)
+                    if let quote {
+                        Text(quote.marketDisplayFormattedPercent)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(ResearchStyle.tint(quote))
+                            .monospacedDigit()
+                    }
                 }
-                Spacer(minLength: 0)
-                Text(quote?.marketDisplayFormattedPercent ?? "—")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(ResearchStyle.tint(quote))
-                    .monospacedDigit()
+                .lineLimit(1).minimumScaleFactor(0.75)
+                if quote == nil, let lastTrade {
+                    MarketLastSessionTradeNote(trade: lastTrade, symbol: symbol)
+                }
             }
-            .lineLimit(1).minimumScaleFactor(0.75)
             .padding(.horizontal, 7)
             .padding(.vertical, 6)
             .frame(minHeight: 44, alignment: .leading)
@@ -563,6 +573,7 @@ struct ResearchHomeView: View {
 private extension MarketQuote {
     var researchStatus: String {
         if stale == true { return "报价待更新" }
+        if isMiddayBreak { return "午间休市" }
         if tradingSession == .closed, let date = quality?.tradingDate {
             return "\(date.suffix(5)) 收盘"
         }

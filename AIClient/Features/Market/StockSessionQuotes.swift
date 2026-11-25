@@ -3,7 +3,7 @@ import SwiftUI
 struct StockSessionQuotes {
     struct Price {
         let value: Double
-        let percent: Double
+        let percent: Double?
         var timestamp: Int64?
         var isDelayed = false
     }
@@ -81,10 +81,9 @@ struct StockSessionPriceCell: View {
         let price = quote.map {
             $0.value.formatted(.number.precision(.fractionLength(marketPriceDigits($0.value, symbol: symbol))))
         } ?? column.emptyLabel
-        let percent = quote.map {
-            String(format: "%@%.2f%%", $0.percent >= 0 ? "+" : "−", abs($0.percent))
-        }
-        let tint = quote.map { $0.percent >= 0 ? InvestmentDesign.gain : InvestmentDesign.loss } ?? muted
+        let percent = quote?.percent
+        let percentLabel = quote.map { $0.percent.map(marketFormattedChangePercent) ?? "涨跌暂缺" }
+        let tint: Color = percent.map { $0 > 0 ? InvestmentDesign.gain : $0 < 0 ? InvestmentDesign.loss : muted } ?? muted
         return VStack(alignment: showsTitle ? .leading : .trailing, spacing: showsTitle ? 4 : 2) {
             if showsTitle {
                 Text(column.title).font(.caption.weight(.medium)).foregroundStyle(muted)
@@ -92,8 +91,9 @@ struct StockSessionPriceCell: View {
             Text(price)
                 .font(quote == nil ? .caption2 : (showsTitle ? .title3.weight(.semibold) : .subheadline.weight(.semibold)))
                 .foregroundStyle(quote == nil ? muted : .primary)
-            if let percent {
-                Text(percent).font(.caption2.weight(.medium)).foregroundStyle(tint)
+            if let percentLabel {
+                Text(percentLabel)
+                    .font(.caption2.weight(.medium)).foregroundStyle(tint)
             }
             if !detail.isEmpty {
                 Text(detail).font(showsTitle ? .caption2 : .system(size: 9)).foregroundStyle(muted)
@@ -111,7 +111,7 @@ struct StockSessionPriceCell: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel([column.title, price, percent,
+        .accessibilityLabel([column.title, price, percentLabel,
                              quote?.isDelayed == true ? "延迟" : nil, time].compactMap { $0 }.joined(separator: "，"))
     }
 }
