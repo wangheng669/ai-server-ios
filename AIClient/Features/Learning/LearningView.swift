@@ -1603,12 +1603,6 @@ private struct LearningVideoLessonDetailView: View {
                 }
                 try Task.checkCancellation()
 
-                #if !targetEnvironment(simulator)
-                let audioSession = AVAudioSession.sharedInstance()
-                try? audioSession.setCategory(.playback, mode: .moviePlayback)
-                try? audioSession.setActive(true)
-                #endif
-
                 let item = AVPlayerItem(asset: asset)
                 item.preferredForwardBufferDuration = 2
                 let newPlayer = AVPlayer(playerItem: item)

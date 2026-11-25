@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 import ImageIO
-import AVKit
+import AVFoundation
 import CryptoKit
 import WebKit
 
@@ -2580,21 +2580,21 @@ struct XFeedQuotedPostCard: View {
 }
 
 @MainActor
-final class XVideoPlaybackSession {
+private final class XVideoPlaybackSession {
     static let shared = XVideoPlaybackSession()
 
     private weak var activePlayer: AVPlayer?
     private var activeURL: URL?
     private var positions: [URL: CMTime] = [:]
 
-    func play(_ player: AVPlayer, url: URL) {
+    func play(_ player: AVPlayer, url: URL, restoringPosition: Bool = false) {
         if let activePlayer, activePlayer !== player {
             savePosition(of: activePlayer, url: activeURL)
             activePlayer.pause()
         }
         activePlayer = player
         activeURL = url
-        if let position = positions[url], position.isNumeric, position.seconds > 0.25 {
+        if restoringPosition, let position = positions[url], position.seconds > 0.25 {
             player.seek(
                 to: position,
                 toleranceBefore: CMTime(seconds: 0.1, preferredTimescale: 600),
@@ -2605,8 +2605,13 @@ final class XVideoPlaybackSession {
     }
 
     func pause(_ player: AVPlayer, url: URL) {
-        savePosition(of: player, url: url)
         player.pause()
+        guard activePlayer === player else { return }
+        savePosition(of: player, url: url)
+    }
+
+    func finish(_ player: AVPlayer, url: URL) {
+        positions[url] = nil
         if activePlayer === player {
             activePlayer = nil
             activeURL = nil
@@ -2616,7 +2621,7 @@ final class XVideoPlaybackSession {
     private func savePosition(of player: AVPlayer, url: URL?) {
         guard let url else { return }
         let position = player.currentTime()
-        guard position.isNumeric, position.seconds.isFinite, position.seconds > 0 else { return }
+        guard position.isNumeric else { return }
         positions[url] = position
     }
 }
@@ -2632,7 +2637,7 @@ struct XVideoPlayerView: View {
     private enum PlaybackState {
         case idle
         case preparing
-        case playing
+        case ready
         case failed
     }
 
@@ -2644,13 +2649,16 @@ struct XVideoPlayerView: View {
     @State private var playbackState: PlaybackState = .idle
     @State private var playbackURL: URL
     @State private var hasUsedFallback = false
-    @State private var isVideoReady = false
+    @State private var isPlaying = false
+    @State private var hasReachedEnd = false
+    @State private var isMuted = true
     @State private var thumbnailFailed = false
     @State private var isFullscreenPresented = false
+    @State private var showsFullscreenControls = true
     @State private var playbackFallbackTask: Task<Void, Never>?
     @State private var observationSessionID: String?
     @State private var observationStartedAt: Date?
-    @AppStorage("x.video.isMuted") private var isMuted = false
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.preparedReadingMedia) private var preparedReadingMedia
     private let fallbackURL: URL?
     private let thumbnailURL: URL?
@@ -2720,58 +2728,89 @@ struct XVideoPlayerView: View {
     }
 
     var body: some View {
-        ZStack {
-            Color.black
+        playbackSurface(fullscreen: false)
+            .frame(maxWidth: .infinity)
+            .clipped()
+            .task(id: playbackURL) {
+                if onAspectRatioResolved != nil {
+                    async let thumbnailLoad: Void = loadThumbnail()
+                    async let aspectRatioLoad: Void = loadVideoAspectRatio()
+                    _ = await (thumbnailLoad, aspectRatioLoad)
+                } else {
+                    await loadThumbnail()
+                }
+            }
+            .task(id: "\(isPlaybackActive):\(playbackURL.absoluteString)") {
+                guard chromeStyle == .minimal, isPlaybackActive else { return }
+                await preparePlaybackAsset()
+            }
+            .onDisappear {
+                if !isFullscreenPresented { stopPlayback() }
+            }
+            .onChange(of: isPlaybackActive) { _, isActive in
+                guard !isActive else { return }
+                isFullscreenPresented = false
+                stopPlayback()
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .background { pausePlayback() }
+            }
+            .appFullScreenCover(isPresented: $isFullscreenPresented) {
+                playbackSurface(fullscreen: true)
+                    .statusBarHidden()
+                    .appPresentationBackground(.black)
+            }
+    }
 
-            if !isVideoReady, let displayedThumbnail {
+    private func playbackSurface(fullscreen: Bool) -> some View {
+        ZStack {
+            Color.black.ignoresSafeArea(fullscreen ? .container : [])
+
+            if playbackState != .ready, let displayedThumbnail {
                 Image(uiImage: displayedThumbnail)
                     .resizable()
-                    .aspectRatio(contentMode: contentMode)
-            } else if hasPosterSource, playbackState == .idle, !thumbnailFailed, chromeStyle == .standard {
+                    .aspectRatio(contentMode: fullscreen ? .fit : contentMode)
+                    .accessibilityHidden(true)
+            } else if !fullscreen, hasPosterSource, playbackState == .idle, !thumbnailFailed, chromeStyle == .standard {
                 ProgressView().tint(.white)
             }
 
-            if let player {
-                XPlayerLayerView(
-                    player: player,
-                    videoGravity: contentMode == .fill ? .resizeAspectFill : .resizeAspect,
-                    onReadyForDisplay: markVideoReady,
-                    onFailure: markPlaybackFailed
-                )
-                    .opacity(isVideoReady ? 1 : 0.001)
-                    .allowsHitTesting(false)
+            if let player, fullscreen == isFullscreenPresented {
+                playerLayer(for: player, fullscreen: fullscreen)
             }
 
             switch playbackState {
-            case .idle:
-                VideoIdleControls(
-                    isRetry: false,
+            case .idle, .failed:
+                VideoStartControls(
+                    isRetry: playbackState == .failed,
                     onPlay: startPlayback,
-                    onFullscreen: presentFullscreen
+                    onFullscreen: fullscreen ? nil : presentFullscreen
                 )
             case .preparing:
-                VideoLoadingOverlay()
-            case .failed:
-                VideoIdleControls(
-                    isRetry: true,
-                    onPlay: startPlayback,
-                    onFullscreen: presentFullscreen
-                )
-            case .playing:
-                EmptyView()
+                Button(action: pausePlayback) {
+                    ProgressView()
+                        .tint(.white)
+                        .frame(width: 48, height: 48)
+                        .background(.black.opacity(0.56), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("取消加载视频")
+            case .ready:
+                if let player {
+                    playbackControls(for: player, fullscreen: fullscreen)
+                }
             }
 
-            if playbackState == .playing, let player {
-                MinimalVideoControls(
-                    player: player,
-                    isMuted: $isMuted,
-                    onPause: { stopPlayback() },
-                    onFullscreen: presentFullscreen
+            if fullscreen {
+                VideoControlButton(
+                    symbol: "xmark",
+                    label: "退出全屏",
+                    action: { isFullscreenPresented = false }
                 )
-                .frame(maxHeight: .infinity, alignment: .bottom)
-            }
-
-            if hasPosterSource, thumbnailFailed, playbackState == .idle, chromeStyle == .standard {
+                .background(.black.opacity(0.56), in: Circle())
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(.horizontal, 16)
+            } else if hasPosterSource, thumbnailFailed, playbackState == .idle, chromeStyle == .standard {
                 Button {
                     thumbnailFailed = false
                     Task { await loadThumbnail(ignoringCache: true) }
@@ -2787,48 +2826,127 @@ struct XVideoPlayerView: View {
                 .frame(maxHeight: .infinity, alignment: .bottom)
                 .padding(.bottom, 10)
             }
+        }
+    }
 
+    private func playerLayer(for player: AVPlayer, fullscreen: Bool) -> some View {
+        XPlayerLayerView(
+            player: player,
+            videoGravity: fullscreen || contentMode == .fit ? .resizeAspect : .resizeAspectFill,
+            onReadyForDisplay: {
+                if self.player === player { markVideoReady() }
+            },
+            onFailure: { error in
+                if self.player === player { markPlaybackFailed(error) }
+            }
+        )
+        .id(ObjectIdentifier(player))
+        .opacity(playbackState == .ready ? 1 : 0.001)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .onReceive(player.publisher(for: \.timeControlStatus).receive(on: DispatchQueue.main)) { _ in
+            guard self.player === player else { return }
+            isPlaying = player.timeControlStatus != .paused && !hasReachedEnd
         }
-        .frame(maxWidth: .infinity)
-        .clipped()
-        .task(id: playbackURL) {
-            if onAspectRatioResolved != nil {
-                async let thumbnailLoad: Void = loadThumbnail()
-                async let aspectRatioLoad: Void = loadVideoAspectRatio()
-                _ = await (thumbnailLoad, aspectRatioLoad)
+        .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { notification in
+            guard self.player === player,
+                  let item = notification.object as? AVPlayerItem, item === player.currentItem else { return }
+            hasReachedEnd = true
+            isPlaying = false
+            XVideoPlaybackSession.shared.finish(player, url: playbackURL)
+        }
+    }
+
+    private func playbackControls(for player: AVPlayer, fullscreen: Bool) -> some View {
+        ZStack(alignment: .bottom) {
+            if fullscreen {
+                HStack(spacing: 0) {
+                    fullscreenTapArea(skip: -5)
+                    fullscreenTapArea(skip: 5)
+                }
             } else {
-                await loadThumbnail()
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: presentFullscreen)
+                    .accessibilityHidden(true)
+            }
+
+            if !fullscreen || showsFullscreenControls || !isPlaying {
+                VideoPlaybackControls(
+                    player: player,
+                    isPlaying: isPlaying,
+                    isMuted: isMuted,
+                    hasReachedEnd: hasReachedEnd,
+                    onTogglePlayback: {
+                        if isPlaying { pausePlayback() }
+                        else { startPlayback() }
+                    },
+                    onToggleMute: {
+                        isMuted.toggle()
+                        player.isMuted = isMuted
+                    },
+                    onSeek: seek(to:),
+                    onFullscreen: fullscreen ? nil : presentFullscreen
+                )
             }
         }
-        .task(id: "\(isPlaybackActive):\(playbackURL.absoluteString)") {
-            guard chromeStyle == .minimal, isPlaybackActive else { return }
-            await preparePlaybackAsset()
+        .onChange(of: isPlaying) { _, playing in
+            if fullscreen, !playing { showsFullscreenControls = true }
         }
-        .onDisappear {
-            stopPlayback()
-        }
-        .onChange(of: isPlaybackActive) { _, isActive in
-            if !isActive {
-                stopPlayback()
+    }
+
+    private func fullscreenTapArea(skip seconds: Double) -> some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) { skip(by: seconds) }
+            .onTapGesture {
+                withAnimation(.easeOut(duration: 0.16)) {
+                    showsFullscreenControls.toggle()
+                }
             }
-        }
-        .appFullScreenCover(isPresented: $isFullscreenPresented) {
-            if let player {
-                FullscreenVideoPlayerView(player: player, isMuted: $isMuted)
-            }
-        }
+            .accessibilityHidden(true)
+    }
+
+    private func skip(by seconds: Double) {
+        guard let currentTime = player?.currentTime().seconds, currentTime.isFinite else { return }
+        seek(to: currentTime + seconds)
+    }
+
+    private func seek(to seconds: Double) {
+        guard let player, let duration = player.currentItem?.duration.seconds,
+              duration.isFinite, duration > 0 else { return }
+        let target = min(max(seconds, 0), duration)
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 600))
+        if target < duration { hasReachedEnd = false }
     }
 
     private func presentFullscreen() {
         guard isPlaybackActive else { return }
-        if player == nil {
-            startPlayback()
-        }
+        if player == nil { startPlayback() }
+        showsFullscreenControls = true
         isFullscreenPresented = true
     }
 
     private func startPlayback() {
-        beginPlayback(with: playbackURL)
+        guard isPlaybackActive else { return }
+        if let player {
+            if hasReachedEnd {
+                player.seek(to: .zero)
+                hasReachedEnd = false
+            }
+            XVideoPlaybackSession.shared.play(player, url: playbackURL)
+        } else {
+            beginPlayback(with: playbackURL)
+        }
+    }
+
+    private func pausePlayback() {
+        if playbackState == .preparing {
+            stopPlayback()
+        } else if let player {
+            XVideoPlaybackSession.shared.pause(player, url: playbackURL)
+            isPlaying = false
+        }
     }
 
     private func beginPlayback(with sourceURL: URL) {
@@ -2838,7 +2956,6 @@ struct XVideoPlayerView: View {
             observationStartedAt = Date()
             reportPlaybackEvent("started", route: playbackRoute(for: sourceURL))
         }
-        activateAudioSession()
         let asset = preparedAsset ?? AVURLAsset(url: sourceURL)
         let item = AVPlayerItem(asset: asset)
         item.preferredForwardBufferDuration = 1
@@ -2846,9 +2963,10 @@ struct XVideoPlayerView: View {
         player.automaticallyWaitsToMinimizeStalling = false
         player.isMuted = isMuted
         self.player = player
-        isVideoReady = false
+        hasReachedEnd = false
+        isPlaying = true
         playbackState = .preparing
-        XVideoPlaybackSession.shared.play(player, url: sourceURL)
+        XVideoPlaybackSession.shared.play(player, url: sourceURL, restoringPosition: true)
         scheduleFallbackIfNeeded(from: sourceURL)
     }
 
@@ -2875,9 +2993,11 @@ struct XVideoPlayerView: View {
             XVideoPlaybackSession.shared.pause(player, url: playbackURL)
         }
         self.player = nil
-        isVideoReady = false
+        isPlaying = false
+        hasReachedEnd = false
         playbackState = .idle
         if resetObservation {
+            isMuted = true
             observationSessionID = nil
             observationStartedAt = nil
         }
@@ -2889,13 +3009,12 @@ struct XVideoPlayerView: View {
         playbackFallbackTask?.cancel()
         playbackFallbackTask = nil
         withAnimation(.easeOut(duration: 0.15)) {
-            isVideoReady = true
-            playbackState = .playing
+            playbackState = .ready
         }
     }
 
     private func markPlaybackFailed(_ error: Error?) {
-        guard playbackState == .preparing || playbackState == .playing else { return }
+        guard playbackState == .preparing || playbackState == .ready else { return }
         reportPlaybackEvent(
             "failed",
             route: playbackRoute(for: playbackURL),
@@ -2906,7 +3025,6 @@ struct XVideoPlayerView: View {
             return
         }
         stopPlayback()
-        isVideoReady = false
         playbackState = .failed
     }
 
@@ -2967,14 +3085,6 @@ struct XVideoPlayerView: View {
         }
     }
 
-    private func activateAudioSession() {
-        #if !targetEnvironment(simulator)
-        let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .moviePlayback)
-        try? session.setActive(true)
-        #endif
-    }
-
     @MainActor
     private func loadThumbnail(ignoringCache: Bool = false) async {
         guard hasPosterSource, thumbnail == nil else { return }
@@ -3026,113 +3136,49 @@ struct XVideoPlayerView: View {
     }
 }
 
-private struct VideoLoadingOverlay: View {
-    var body: some View {
-        ZStack {
-            ProgressView()
-                .controlSize(.regular)
-                .tint(.white)
-                .frame(width: 46, height: 46)
-                .background(.black.opacity(0.38), in: Circle())
-                .overlay(Circle().stroke(.white.opacity(0.12)))
-
-            ProgressView()
-                .progressViewStyle(.linear)
-                .tint(.white.opacity(0.92))
-                .scaleEffect(x: 1, y: 0.55, anchor: .bottom)
-                .frame(maxHeight: .infinity, alignment: .bottom)
-        }
-        .accessibilityLabel("正在加载视频")
-    }
-}
-
-private struct VideoIdleControls: View {
+private struct VideoStartControls: View {
     let isRetry: Bool
     let onPlay: () -> Void
-    let onFullscreen: () -> Void
+    let onFullscreen: (() -> Void)?
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .bottomTrailing) {
             Button(action: onPlay) {
                 Image(systemName: isRetry ? "arrow.clockwise" : "play.fill")
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.system(size: 21, weight: .semibold))
                     .foregroundStyle(.white)
-                    .offset(x: isRetry ? 0 : 1)
-                    .frame(width: 58, height: 58)
-                    .background(.black.opacity(0.42), in: Circle())
-                    .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 1))
-                    .shadow(color: .black.opacity(0.28), radius: 8, y: 3)
+                    .frame(width: 52, height: 52)
+                    .background(.black.opacity(0.56), in: Circle())
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel(isRetry ? "重试播放视频" : "播放视频")
 
-            Button(action: onFullscreen) {
-                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(.black.opacity(0.38), in: Circle())
-                    .overlay(Circle().stroke(.white.opacity(0.14), lineWidth: 1))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("全屏播放")
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-            .padding(10)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-private struct MinimalVideoControls: View {
-    let player: AVPlayer
-    @Binding var isMuted: Bool
-    let onPause: () -> Void
-    let onFullscreen: () -> Void
-
-    var body: some View {
-        VStack(spacing: 7) {
-            VideoPlaybackProgress(player: player)
-                .frame(height: 2)
-
-            HStack(spacing: 8) {
-                controlButton("pause.fill", label: "暂停视频", action: onPause)
-                Spacer()
-                controlButton(
-                    isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
-                    label: isMuted ? "打开声音" : "静音"
-                ) {
-                    isMuted.toggle()
-                    player.isMuted = isMuted
-                }
-                controlButton(
-                    "arrow.up.left.and.arrow.down.right",
+            if let onFullscreen {
+                VideoControlButton(
+                    symbol: "arrow.up.left.and.arrow.down.right",
                     label: "全屏播放",
                     action: onFullscreen
                 )
+                .background(.black.opacity(0.56), in: Circle())
+                .padding(8)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 20)
-        .padding(.bottom, 7)
-        .background(
-            LinearGradient(
-                colors: [.clear, .black.opacity(0.58)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
     }
+}
 
-    private func controlButton(
-        _ systemName: String,
-        label: String,
-        action: @escaping () -> Void
-    ) -> some View {
+private struct VideoControlButton: View {
+    let symbol: String
+    let label: String
+    let action: () -> Void
+
+    var body: some View {
         Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 13, weight: .semibold))
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 32, height: 28)
+                .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -3140,77 +3186,98 @@ private struct MinimalVideoControls: View {
     }
 }
 
-private struct VideoPlaybackProgress: View {
+private struct VideoPlaybackControls: View {
     let player: AVPlayer
+    let isPlaying: Bool
+    let isMuted: Bool
+    let hasReachedEnd: Bool
+    let onTogglePlayback: () -> Void
+    let onToggleMute: () -> Void
+    let onSeek: (Double) -> Void
+    let onFullscreen: (() -> Void)?
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.25)) { _ in
-            GeometryReader { proxy in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(.white.opacity(0.28))
-                    Capsule()
-                        .fill(.white.opacity(0.95))
-                        .frame(width: proxy.size.width * progress)
+        VStack(spacing: 0) {
+            VideoSeekBar(player: player, onSeek: onSeek)
+                .padding(.horizontal, 12)
+
+            HStack(spacing: 0) {
+                VideoControlButton(
+                    symbol: hasReachedEnd ? "arrow.counterclockwise" : (isPlaying ? "pause.fill" : "play.fill"),
+                    label: hasReachedEnd ? "重新播放视频" : (isPlaying ? "暂停视频" : "继续播放视频"),
+                    action: onTogglePlayback
+                )
+                Spacer()
+                VideoControlButton(
+                    symbol: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
+                    label: isMuted ? "打开声音" : "静音",
+                    action: onToggleMute
+                )
+
+                if let onFullscreen {
+                    VideoControlButton(
+                        symbol: "arrow.up.left.and.arrow.down.right",
+                        label: "全屏播放",
+                        action: onFullscreen
+                    )
                 }
             }
         }
-    }
-
-    private var progress: CGFloat {
-        let duration = player.currentItem?.duration.seconds ?? 0
-        guard duration.isFinite, duration > 0 else { return 0 }
-        return min(max(player.currentTime().seconds / duration, 0), 1)
+        .padding(.horizontal, 4)
+        .padding(.top, 12)
+        .background(alignment: .bottom) {
+            LinearGradient(colors: [.clear, .black.opacity(0.8)], startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea(edges: .bottom)
+                .allowsHitTesting(false)
+        }
     }
 }
 
-private struct FullscreenVideoPlayerView: View {
+private struct VideoSeekBar: View {
     let player: AVPlayer
-    @Binding var isMuted: Bool
-    @Environment(\.dismiss) private var dismiss
+    let onSeek: (Double) -> Void
+    @State private var scrubTime: Double?
 
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-
-            VideoPlayer(player: player)
-                .ignoresSafeArea()
-
-            HStack(spacing: 10) {
-                Button {
-                    isMuted.toggle()
-                    player.isMuted = isMuted
-                } label: {
-                    Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                        .frame(width: 40, height: 40)
-                        .background(.black.opacity(0.62), in: Circle())
+        TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+            if let duration = player.currentItem?.duration.seconds, duration.isFinite, duration > 0 {
+                let currentTime = player.currentTime().seconds
+                let position = currentTime.isFinite ? min(max(currentTime, 0), duration) : 0
+                HStack(spacing: 8) {
+                    timeLabel(scrubTime ?? position)
+                    Slider(
+                        value: Binding(
+                            get: { scrubTime ?? position },
+                            set: { time in
+                                if scrubTime == nil { onSeek(time) }
+                                else { scrubTime = time }
+                            }
+                        ),
+                        in: 0...duration,
+                        onEditingChanged: { editing in
+                            if editing {
+                                scrubTime = position
+                            } else if let time = scrubTime {
+                                onSeek(time)
+                                scrubTime = nil
+                            }
+                        }
+                    )
+                    .tint(.white)
+                    .environment(\.colorScheme, .dark)
+                    .accessibilityLabel("播放进度")
+                    .accessibilityValue(Duration.seconds(scrubTime ?? position).formatted(.time(pattern: .minuteSecond)))
+                    timeLabel(duration)
                 }
-                .accessibilityLabel(isMuted ? "打开声音" : "静音")
+            }
+        }
+    }
 
-                Spacer()
-            }
-            .font(.system(size: 16, weight: .semibold))
+    private func timeLabel(_ seconds: Double) -> some View {
+        Text(Duration.seconds(seconds).formatted(.time(pattern: .minuteSecond)))
+            .font(.system(size: 11, weight: .semibold).monospacedDigit())
             .foregroundStyle(.white)
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .frame(maxHeight: .infinity, alignment: .top)
-        }
-        .overlay(alignment: .bottomTrailing) {
-            Button(action: dismiss.callAsFunction) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .background(.black.opacity(0.62), in: Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("退出全屏")
-            .padding(16)
-        }
-        .onAppear {
-            player.isMuted = isMuted
-            player.play()
-        }
+            .accessibilityHidden(true)
     }
 }
 
