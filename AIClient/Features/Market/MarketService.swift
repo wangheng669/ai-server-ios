@@ -7,7 +7,7 @@ private let marketServiceLogger = Logger(
     category: "MarketService"
 )
 
-struct MarketService {
+struct MarketService: Sendable {
     let baseURL: URL
     private let session: URLSession
 
