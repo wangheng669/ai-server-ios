@@ -80,9 +80,10 @@ enum TodayOverviewSelection {
     }
 }
 
-private struct TodayCompanyStock: Sendable {
+struct TodayCompanyStock: Identifiable, Sendable {
     let name: String
     let symbol: String
+    var id: String { symbol }
 
     private static let bySystem: [String: Self] = [
         "pichai": .init(name: "Alphabet", symbol: "GOOGL"),
@@ -476,6 +477,7 @@ private struct TodayBriefDeck: View {
     @Environment(\.rootTabIsActive) private var rootTabIsActive
     @Environment(\.scenePhase) private var scenePhase
     @State private var stockQuotes = TodayStockQuoteStore()
+    @State private var presentedStock: TodayCompanyStock?
     @State private var selectedIndex = 0
     @State private var showsOriginals = false
     @State private var showsDirectory = false
@@ -544,7 +546,9 @@ private struct TodayBriefDeck: View {
                 VStack(spacing: 14) {
                     summaryDeck(selection: selection, width: cardWidth, height: cardHeight, maximumHeight: maximumHeight)
                     if let stock, !showsOriginals {
-                        TodayCompanyStockCard(stock: stock, stockQuotes: stockQuotes, marketStore: marketStore)
+                        TodayCompanyStockCard(stock: stock, stockQuotes: stockQuotes, marketStore: marketStore) {
+                            presentedStock = stock
+                        }
                             .frame(width: cardWidth)
                     }
                 }
@@ -579,6 +583,13 @@ private struct TodayBriefDeck: View {
                 }
             }
         }
+        .appSheet(item: $presentedStock) { stock in
+            TodayStockDetailSheet(stock: stock, stockQuotes: stockQuotes, marketStore: marketStore)
+                .appPresentationDetents([.large])
+                .appPresentationCornerRadius(28)
+                .appPresentationBackground(TodayBriefStyle.surface)
+                .appPresentationScrollsWithoutExpanding()
+        }
         .task(id: stockSymbols, priority: .utility) {
             guard !stockSymbols.isEmpty else { return }
             async let closingQuotes: Void = stockQuotes.runUpdates(symbols: stockSymbols)
@@ -606,6 +617,7 @@ private struct TodayBriefDeck: View {
         }
         .onChange(of: rootTabIsActive) { _, active in
             if !active {
+                presentedStock = nil
                 showsDirectory = false
                 settlement = nil
                 endOriginals()
@@ -1042,11 +1054,20 @@ private struct TodayBriefDeckLayers<Layer: View>: View, Animatable {
     }
 }
 
-private struct TodayStockPrice {
+struct TodayStockPrice {
     let amount: Double
     let currency: String?
     let change: Double?
     let label: String
+
+    var changePercent: Double? { change.flatMap { $0.isFinite ? $0 : nil } }
+
+    var changeColor: Color {
+        guard let changePercent else { return .secondary }
+        if changePercent > 0 { return InvestmentDesign.gain }
+        if changePercent < 0 { return InvestmentDesign.loss }
+        return .secondary
+    }
 
     func formattedAmount(symbol: String) -> String {
         let value = amount.formatted(.number.precision(.fractionLength(marketPriceDigits(amount, symbol: symbol))))
@@ -1056,13 +1077,26 @@ private struct TodayStockPrice {
 
 @MainActor
 @Observable
-private final class TodayStockQuoteStore {
+final class TodayStockQuoteStore {
     struct Snapshot {
         let regularQuote: TodayStockPrice?
-        let confirmedClose: TodayStockPrice?
+        let history: TodayStockHistory?
     }
 
     private(set) var snapshots: [String: Snapshot] = [:]
+
+    func currentQuote(for symbol: String, marketStore: MarketStore) -> TodayStockPrice? {
+        if let regularQuote = snapshots[symbol]?.regularQuote { return regularQuote }
+        guard let quote = marketStore.quote(symbol: symbol), quote.stale != true,
+              quote.hasActiveExtendedSessionQuote,
+              quote.marketDisplayPrice.isFinite, quote.marketDisplayPrice > 0,
+              let timestamp = quote.marketAsOfTimestamp, timestamp > 0 else { return nil }
+        let session = quote.hasIndicativeOvernightPrice ? "夜盘参考" : quote.tradingSession.displayLabel
+        let status = marketStore.isShowingCachedSnapshot ? "缓存" : quote.hasDelayedSessionPrice ? "延迟" : nil
+        let label = [session, status, marketShortTimestamp(timestamp)].compactMap { $0 }.joined(separator: " · ")
+        return TodayStockPrice(amount: quote.marketDisplayPrice, currency: quote.currency,
+                               change: quote.marketDisplayPercentValue, label: label)
+    }
 
     func runUpdates(symbols: [String]) async {
         let service = MarketService(baseURL: ServerConfiguration.currentURL, session: .shared)
@@ -1078,34 +1112,36 @@ private final class TodayStockQuoteStore {
     }
 
     private func record(_ chart: MarketChart?, for symbol: String) {
-        guard let chart, chart.symbol == symbol, chart.interval == "1d",
-              let timeZone = TimeZone(identifier: chart.timezone) else {
-            snapshots[symbol] = Snapshot(regularQuote: nil, confirmedClose: snapshots[symbol]?.confirmedClose)
-            return
-        }
-        let currency: String
-        let closingMinute: Int
-        switch chart.market {
-        case "US": (currency, closingMinute) = ("USD", 16 * 60)
-        case "HK": (currency, closingMinute) = ("HKD", 16 * 60 + 10)
-        default:
-            snapshots[symbol] = Snapshot(regularQuote: nil, confirmedClose: nil)
+        guard let chart, chart.symbol == symbol, let history = TodayStockHistory(chart: chart) else {
+            snapshots[symbol] = Snapshot(regularQuote: nil, history: snapshots[symbol]?.history)
             return
         }
         let regularQuote: TodayStockPrice?
         if MarketTradingSession(rawValue: chart.session) == .regular,
            let amount = chart.quote.price, amount.isFinite, amount > 0,
            let timestamp = chart.quote.providerTimestamp, timestamp > 0 {
-            regularQuote = TodayStockPrice(amount: amount, currency: currency, change: chart.quote.changePercent,
+            regularQuote = TodayStockPrice(amount: amount, currency: history.currency, change: chart.quote.changePercent,
                                            label: "盘中报价 · \(marketShortTimestamp(timestamp))")
         } else {
             regularQuote = nil
         }
-        let close = confirmedClose(in: chart, currency: currency, timeZone: timeZone, closingMinute: closingMinute)
-        snapshots[symbol] = Snapshot(regularQuote: regularQuote, confirmedClose: close)
+        snapshots[symbol] = Snapshot(regularQuote: regularQuote, history: history)
     }
+}
 
-    private func confirmedClose(in chart: MarketChart, currency: String, timeZone: TimeZone, closingMinute: Int) -> TodayStockPrice? {
+struct TodayStockHistory {
+    let currency: String
+    let bars: [MarketChartPoint]
+    let isComplete: Bool
+
+    init?(chart: MarketChart) {
+        guard chart.interval == "1d", let timeZone = TimeZone(identifier: chart.timezone) else { return nil }
+        let closingMinute: Int
+        switch chart.market {
+        case "US": (currency, closingMinute) = ("USD", 16 * 60)
+        case "HK": (currency, closingMinute) = ("HKD", 16 * 60 + 10)
+        default: return nil
+        }
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
         let now = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: Date())
@@ -1114,12 +1150,16 @@ private final class TodayStockQuoteStore {
         let localDate = String(format: "%04d-%02d-%02d", year, month, day)
         // Some feeds publish a same-day daily bar while continuous trading is still open.
         let acceptsToday = chart.quality.isFinal && hour * 60 + minute >= closingMinute
-        let bars = chart.candles.filter {
+        bars = chart.candles.filter {
             guard let date = $0.tradingDate, $0.state == "confirmed", $0.close.isFinite, $0.close > 0 else { return false }
             return date < localDate || (date == localDate && acceptsToday)
         }.sorted { $0.timestamp < $1.timestamp }
+        isComplete = chart.quality.status == .complete
+    }
+
+    var confirmedClose: TodayStockPrice? {
         guard let latest = bars.last, let date = latest.tradingDate else { return nil }
-        let previous = chart.quality.status == .complete ? bars.dropLast().last : nil
+        let previous = isComplete ? bars.dropLast().last : nil
         let change = previous.map { (latest.close / $0.close - 1) * 100 }
         return TodayStockPrice(amount: latest.close, currency: currency, change: change, label: "\(date) 收盘")
     }
@@ -1129,8 +1169,34 @@ private struct TodayCompanyStockCard: View {
     let stock: TodayCompanyStock
     let stockQuotes: TodayStockQuoteStore
     let marketStore: MarketStore
+    let onOpen: () -> Void
 
     var body: some View {
+        Button(action: onOpen) {
+            HStack(spacing: 10) {
+                cardContent
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(TodayBriefStyle.accent)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 15)
+            .padding(.vertical, 11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(TodayBriefStyle.accent.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(TodayBriefStyle.surfaceOutline)
+                    .allowsHitTesting(false)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 16))
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("打开股价详情")
+        .accessibilityIdentifier("today-stock-\(stock.symbol)")
+    }
+
+    private var cardContent: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 14) {
                 identity
@@ -1142,17 +1208,6 @@ private struct TodayCompanyStockCard: View {
                 pricing(alignment: .leading)
             }
         }
-        .padding(.horizontal, 15)
-        .padding(.vertical, 11)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(TodayBriefStyle.accent.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(TodayBriefStyle.surfaceOutline)
-                .allowsHitTesting(false)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("today-stock-\(stock.symbol)")
     }
 
     private var identity: some View {
@@ -1166,34 +1221,22 @@ private struct TodayCompanyStockCard: View {
         .fixedSize(horizontal: true, vertical: false)
     }
 
-    private var extendedQuote: TodayStockPrice? {
-        guard let quote = marketStore.quote(symbol: stock.symbol), quote.stale != true,
-              quote.hasActiveExtendedSessionQuote,
-              quote.marketDisplayPrice.isFinite, quote.marketDisplayPrice > 0,
-              let timestamp = quote.marketAsOfTimestamp, timestamp > 0 else { return nil }
-        let session = quote.hasIndicativeOvernightPrice ? "夜盘参考" : quote.tradingSession.displayLabel
-        let status = marketStore.isShowingCachedSnapshot ? "缓存" : quote.hasDelayedSessionPrice ? "延迟" : nil
-        let label = [session, status, marketShortTimestamp(timestamp)].compactMap { $0 }.joined(separator: " · ")
-        return TodayStockPrice(amount: quote.marketDisplayPrice, currency: quote.currency,
-                               change: quote.marketDisplayPercentValue, label: label)
-    }
-
     @ViewBuilder
     private func pricing(alignment: HorizontalAlignment) -> some View {
         let snapshot = stockQuotes.snapshots[stock.symbol]
-        let regular = snapshot?.regularQuote
-        let current = regular ?? extendedQuote
+        let close = snapshot?.history?.confirmedClose
+        let current = stockQuotes.currentQuote(for: stock.symbol, marketStore: marketStore)
         if let current {
             VStack(alignment: alignment, spacing: 5) {
                 priceReading(current, alignment: alignment)
-                if let close = snapshot?.confirmedClose {
+                if let close {
                     Text("\(close.label) · \(close.formattedAmount(symbol: stock.symbol))")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
             }
             .monospacedDigit()
-        } else if let close = snapshot?.confirmedClose {
+        } else if let close {
             priceReading(close, alignment: alignment)
                 .monospacedDigit()
         } else {
@@ -1217,17 +1260,11 @@ private struct TodayCompanyStockCard: View {
     }
 
     private func priceAndChange(_ price: TodayStockPrice) -> some View {
-        let change = price.change.flatMap { $0.isFinite ? $0 : nil }
-        let tint: Color = switch change {
-        case let .some(value) where value > 0: InvestmentDesign.gain
-        case let .some(value) where value < 0: InvestmentDesign.loss
-        default: .secondary
-        }
-        return Group {
+        Group {
             Text(price.formattedAmount(symbol: stock.symbol)).font(.subheadline.weight(.semibold))
-            if let change {
+            if let change = price.changePercent {
                 Text(marketFormattedChangePercent(change))
-                    .font(.caption.weight(.medium)).foregroundStyle(tint)
+                    .font(.caption.weight(.medium)).foregroundStyle(price.changeColor)
             }
         }
     }

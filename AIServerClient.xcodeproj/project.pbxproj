@@ -13,6 +13,7 @@
 		A4B801000000000000000001 /* TodayWorldView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4B801000000000000000002 /* TodayWorldView.swift */; };
 		AE5900000000000000000001 /* LobeIcons-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = AE5900000000000000000002 /* LobeIcons-LICENSE.txt */; };
 		AE5800000000000000000001 /* TodayBriefOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE5800000000000000000002 /* TodayBriefOverviewView.swift */; };
+		AE5800000000000000000041 /* TodayStockDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE5800000000000000000042 /* TodayStockDetailSheet.swift */; };
 		F13F00000000000000000001 /* Sec13FNotificationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F13F00000000000000000002 /* Sec13FNotificationView.swift */; };
 		C17A00000000000000000001 /* CityNewsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C17A00000000000000000002 /* CityNewsView.swift */; };
 		A4B804000000000000000001 /* CityMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4B804000000000000000002 /* CityMap.swift */; };
@@ -116,6 +117,7 @@
 		A4B801000000000000000002 /* TodayWorldView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayWorldView.swift; sourceTree = "<group>"; };
 		AE5900000000000000000002 /* LobeIcons-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "BrandAssets/LobeIcons-LICENSE.txt"; sourceTree = "<group>"; };
 		AE5800000000000000000002 /* TodayBriefOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayBriefOverviewView.swift; sourceTree = "<group>"; };
+		AE5800000000000000000042 /* TodayStockDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayStockDetailSheet.swift; sourceTree = "<group>"; };
 		F13F00000000000000000002 /* Sec13FNotificationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sec13FNotificationView.swift; sourceTree = "<group>"; };
 		C17A00000000000000000002 /* CityNewsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CityNewsView.swift; sourceTree = "<group>"; };
 		A4B804000000000000000002 /* CityMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CityMap.swift; sourceTree = "<group>"; };
@@ -188,6 +190,7 @@
 			isa = PBXGroup;
 			children = (
 				AE5800000000000000000002 /* TodayBriefOverviewView.swift */,
+				AE5800000000000000000042 /* TodayStockDetailSheet.swift */,
 				A4B801000000000000000002 /* TodayWorldView.swift */,
 			);
 			path = Today;
@@ -558,6 +561,7 @@
 				00964D188729A223382D77B6 /* AIServerClientApp.swift in Sources */,
 				A4B801000000000000000001 /* TodayWorldView.swift in Sources */,
 				AE5800000000000000000001 /* TodayBriefOverviewView.swift in Sources */,
+				AE5800000000000000000041 /* TodayStockDetailSheet.swift in Sources */,
 				260E90A29878D779265564DE /* APIClient.swift in Sources */,
 				837F96D7A10C4DD7BCCF8DE3 /* DisplaySnapshotCache.swift in Sources */,
 				FB6100000000000000000001 /* ContentFeedback.swift in Sources */,
