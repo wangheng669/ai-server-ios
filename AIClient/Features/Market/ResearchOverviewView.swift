@@ -154,7 +154,6 @@ struct ResearchHomeView: View {
             .appPresentationDetents([.large])
             .appPresentationCornerRadius(28)
             .appPresentationBackground(ResearchStyle.surface)
-            .appPresentationDragIndicator()
             .appPresentationScrollsWithoutExpanding()
         }
         .task(id: afterHoursSymbols) {
