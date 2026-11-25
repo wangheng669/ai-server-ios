@@ -22,6 +22,7 @@ private struct HoldingDetailRoute: Identifiable {
 
 struct FamousHoldingsView: View {
     let store: FamousHoldingsStore
+    let onClose: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .largeTitle) private var amountSize: CGFloat = 38
@@ -39,7 +40,7 @@ struct FamousHoldingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            ResearchSheetHeading(title: "机构持仓", onClose: onClose)
             if let manager = selectedManager, let holdings = store.holdings {
                 managerPicker(holdings.managers, selected: manager.key)
                 TabView(selection: managerSelection) {
@@ -86,20 +87,10 @@ struct FamousHoldingsView: View {
         }
     }
 
-    private var header: some View {
-        Text("机构持仓")
-            .font(.title2.bold())
-            .accessibilityAddTraits(.isHeader)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 20)
-            .padding(.top, 18)
-            .padding(.bottom, 6)
-    }
-
     private func managerPicker(_ managers: [FamousHoldingsManager], selected: String) -> some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal) {
-                HStack(spacing: 20) {
+                HStack(spacing: 6) {
                     ForEach(managers) { manager in
                         let isSelected = manager.key == selected
                         Button {
@@ -109,17 +100,13 @@ struct FamousHoldingsView: View {
                         } label: {
                             Text(manager.displayName)
                                 .font(.subheadline.weight(isSelected ? .bold : .medium))
-                                .foregroundStyle(isSelected ? HoldingsPalette.blue : Color.secondary)
+                                .foregroundStyle(isSelected ? ResearchDesign.accent : .secondary)
                                 .fixedSize()
-                                .padding(.horizontal, 2)
+                                .padding(.horizontal, 12)
+                                .frame(minHeight: 36)
+                                .background(isSelected ? ResearchDesign.selection : ResearchDesign.fill,
+                                            in: RoundedRectangle(cornerRadius: 8))
                                 .frame(minHeight: 44)
-                                .overlay(alignment: .bottom) {
-                                    if isSelected {
-                                        Capsule()
-                                            .fill(HoldingsPalette.blue)
-                                            .frame(height: 3)
-                                    }
-                                }
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -138,7 +125,7 @@ struct FamousHoldingsView: View {
                 }
             }
         }
-        .background(alignment: .bottom) { Divider() }
+        .background(alignment: .bottom) { ResearchDesign.line.frame(height: 1) }
         .accessibilityIdentifier("holding-manager-picker")
     }
 
@@ -156,26 +143,30 @@ struct FamousHoldingsView: View {
                 }
                 filingCard(manager)
                 topHoldings(manager)
-                Divider()
+                    .padding(14)
+                    .researchPanel()
                 quarterlyActivity(manager)
+                    .padding(14)
+                    .researchPanel()
                 if let detail = store.detail(for: manager),
                    detail.reportIdentity == manager.reportIdentity {
                     if detail.canCompare {
-                        Divider()
                         majorChanges(detail)
+                            .padding(14)
+                            .researchPanel()
                     }
                     if let positions = detail.positions, !positions.isEmpty, detail.totalValueUsd > 0 {
-                        Divider()
                         allocation(positions, total: detail.totalValueUsd)
+                            .padding(14)
+                            .researchPanel()
                     }
                 }
-                Divider()
                 FilingSource(manager: manager, disclaimer: holdings.disclaimer)
             }
             .frame(maxWidth: 660)
             .padding(.horizontal, 20)
             .padding(.top, 16)
-            .padding(.bottom, 80)
+            .padding(.bottom, 28)
             .frame(maxWidth: .infinity)
         }
         .scrollIndicators(.hidden)
@@ -245,12 +236,7 @@ struct FamousHoldingsView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(HoldingsPalette.blue.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(HoldingsPalette.blue.opacity(0.12))
-                .allowsHitTesting(false)
-        }
+        .researchPanel(fill: ResearchDesign.fill)
     }
 
     private func filingAmount(_ amount: String) -> some View {

@@ -336,6 +336,7 @@ struct CompanyResearchView: View {
     @ObservedObject var store: CompanyResearchStore
     @Environment(\.rootTabIsActive) private var rootTabIsActive
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var selectedSection: Section = .overview
     @State private var financialRange: FinancialRange = .quarterly
     @State private var presentedCompany: CompanyResearchProfile?
@@ -361,7 +362,7 @@ struct CompanyResearchView: View {
                     ContentUnavailableView("暂无公司", systemImage: "building.2", description: Text("公司档案将在服务端持续补充"))
                 }
             }
-            .background(Color(uiColor: .systemGroupedBackground))
+            .background(InvestmentDesign.surface)
             .toolbar(.hidden, for: .navigationBar)
             .appSheet(item: $presentedCompany) { route in
                 if let company = store.companies.first(where: { $0.id == route.id }) {
@@ -383,7 +384,7 @@ struct CompanyResearchView: View {
 
     private var companyHub: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
+            LazyVStack(alignment: .leading, spacing: 10) {
                 if let error = store.errorMessage {
                     Button {
                         Task { await store.load(force: true) }
@@ -401,12 +402,12 @@ struct CompanyResearchView: View {
                     companyHubCard(company)
                 }
             }
-            .padding(.horizontal, 11)
-            .padding(.top, 8)
-            .padding(.bottom, 14)
+            .padding(.horizontal, ResearchDesign.inset)
+            .padding(.top, 6)
+            .padding(.bottom, 24)
         }
         .scrollIndicators(.hidden)
-        .background(Color(uiColor: .systemGroupedBackground))
+        .background(InvestmentDesign.surface)
         .background(CompanyScrollBounceConfigurator())
         .accessibilityIdentifier("company-home")
         .appSheet(item: hubValuationBinding) { route in
@@ -417,8 +418,9 @@ struct CompanyResearchView: View {
     private func companyHubCard(_ company: CompanyResearchProfile) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Button { openCompany(company) } label: {
-                HStack(spacing: 12) {
+                HStack(spacing: 10) {
                     companyLogo(company)
+                        .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(company.shortName)
                             .font(.headline)
@@ -429,8 +431,8 @@ struct CompanyResearchView: View {
                     Spacer()
                     VStack(alignment: .trailing, spacing: 3) {
                         Text(marketPrice(company.market))
-                            .font(.headline.monospacedDigit())
-                            .foregroundStyle(companyAccent(company))
+                            .font(.title3.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(.primary)
                         Text(marketChange(company.market))
                             .font(.caption.weight(.medium))
                             .foregroundStyle(marketChangeColor(company.market))
@@ -439,12 +441,12 @@ struct CompanyResearchView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.tertiary)
                 }
+                .frame(minHeight: 48)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            Divider()
-
-            HStack(spacing: 0) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: dynamicTypeSize >= .xxxLarge ? 2 : 4), spacing: 8) {
                 Button { openCompany(company) } label: { hubMetric("总市值", marketCap(company.market)) }
                     .buttonStyle(.plain)
                 hubValuationMetric(company, kind: .staticPE, value: formattedMultiple(company.market?.peStatic))
@@ -452,13 +454,11 @@ struct CompanyResearchView: View {
                 Button { openCompany(company) } label: { hubMetric("ROE", latestROE(company)) }
                     .buttonStyle(.plain)
             }
+            .padding(.horizontal, 10)
+            .background(ResearchDesign.fill, in: RoundedRectangle(cornerRadius: 8))
         }
-        .padding(16)
-        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.primary.opacity(0.045), lineWidth: 0.5)
-        }
+        .padding(12)
+        .researchPanel()
     }
 
     private func hubMetric(_ label: String, _ value: String) -> some View {
@@ -472,7 +472,8 @@ struct CompanyResearchView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     private func hubValuationMetric(_ company: CompanyResearchProfile, kind: CompanyPEKind, value: String) -> some View {
@@ -483,14 +484,15 @@ struct CompanyResearchView: View {
                     Image(systemName: "chart.xyaxis.line")
                 }
                 .font(.caption2)
-                .foregroundStyle(kind.color)
+                .foregroundStyle(ResearchDesign.accent)
                 Text(value)
                     .font(.subheadline.weight(.semibold))
                     .monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityHint("查看历史变化曲线")

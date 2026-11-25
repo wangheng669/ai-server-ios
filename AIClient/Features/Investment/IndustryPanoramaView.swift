@@ -197,11 +197,7 @@ private enum IndustryPalette {
     static let panel = Color(uiColor: .secondarySystemBackground)
     static let line = Color(uiColor: .separator).opacity(0.22)
     static let inset: CGFloat = 18
-    static let accent = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.38, green: 0.84, blue: 0.73, alpha: 1)
-            : UIColor(red: 0.04, green: 0.42, blue: 0.35, alpha: 1)
-    })
+    static let accent = ResearchDesign.accent
     static let negative = Color.orange
 }
 
@@ -294,9 +290,10 @@ struct IndustryPanoramaView: View {
                     .foregroundStyle(IndustryPalette.accent)
                     .accessibilityHidden(true)
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .background(IndustryPalette.panel, in: RoundedRectangle(cornerRadius: 14))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+            .researchPanel()
             .contentShape(Rectangle())
         }
         .accessibilityLabel("切换行业")
@@ -323,7 +320,6 @@ struct IndustryPanoramaView: View {
                 paneButtons
             }
         }
-        .overlay(alignment: .bottom) { IndustryPalette.line.frame(height: 1) }
     }
 
     private var paneButtons: some View {
@@ -334,8 +330,8 @@ struct IndustryPanoramaView: View {
                     Text(item.rawValue)
                         .font(.subheadline.weight(selected ? .semibold : .medium))
                         .foregroundStyle(selected ? IndustryPalette.accent : .secondary)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .padding(.horizontal, 10)
+                        .fixedSize(horizontal: dynamicTypeSize.isAccessibilitySize, vertical: true)
+                        .padding(.horizontal, 4)
                         .frame(maxWidth: .infinity, minHeight: 44)
                         .background {
                             if selected {
@@ -350,8 +346,9 @@ struct IndustryPanoramaView: View {
                 .id(item)
             }
         }
+        .padding(3)
+        .background(ResearchDesign.fill, in: RoundedRectangle(cornerRadius: 10))
         .padding(.horizontal, IndustryPalette.inset)
-        .padding(.bottom, 8)
     }
 
     private func industryPage(_ industry: IndustryPayload, page: IndustryPane) -> some View {
@@ -422,21 +419,17 @@ private struct IndustryOverview: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
+            summary
             if !industry.subtitle.isEmpty {
                 Text(industry.subtitle)
-                    .font(.subheadline)
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-
-            summary
             if !months.isEmpty || history.count > 1 {
                 trendSection
                     .padding(14)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 16)
-                            .strokeBorder(IndustryPalette.line)
-                            .allowsHitTesting(false)
-                    }
+                    .researchPanel()
             } else {
                 Label("暂无连续历史数据", systemImage: "chart.bar.xaxis")
                     .font(.footnote)
@@ -479,7 +472,7 @@ private struct IndustryOverview: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(IndustryPalette.panel, in: RoundedRectangle(cornerRadius: 16))
+        .researchPanel(fill: ResearchDesign.fill)
     }
 
     private func monthlyHeadline(_ sales: IndustryPayload.AutoSales, latest: IndustryPayload.AutoSales.Month) -> some View {

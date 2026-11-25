@@ -227,7 +227,7 @@ struct InstitutionResearchView: View {
     @State private var selectedInstitution: String?
     @State private var scope = ResearchScope.all
     @State private var search = ""
-    private let accent = InvestmentDesign.accent
+    private let accent = ResearchDesign.accent
 
     private enum ResearchScope: String, CaseIterable {
         case all = "全部", recent = "近30天", history = "历史"
@@ -255,7 +255,18 @@ struct InstitutionResearchView: View {
             if let payload = store.payload {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        coverage(payload)
+                        if let message = store.errorMessage {
+                            Button {
+                                Task { await store.load(force: true) }
+                            } label: {
+                                Label("\(message)，正在显示上次载入的报告", systemImage: "arrow.clockwise")
+                                    .font(.caption)
+                                    .foregroundStyle(accent)
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
                         HStack {
                             Text("\(filtered.count) 篇研究")
                             Spacer()
@@ -263,7 +274,7 @@ struct InstitutionResearchView: View {
                         }
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .padding(.vertical, 14)
+                        .padding(.vertical, 11)
                         if filtered.isEmpty {
                             ContentUnavailableView(items.isEmpty ? "暂无公开研究" : "没有符合条件的报告", systemImage: "line.3.horizontal.decrease.circle")
                         }
@@ -273,16 +284,13 @@ struct InstitutionResearchView: View {
                             } label: { row(item) }
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("institution-report-\(item.id)")
-                            Divider().opacity(0.45)
+                            .padding(.bottom, 8)
                         }
                         Text("部分报告提供中文机器翻译。发表超过 30 天的报告标为历史观点。")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .padding(.vertical, 18)
-                        if let message = store.errorMessage {
-                            Text("\(message)，正在显示上次载入的报告")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
+                        coverage(payload)
                     }
                     .padding(.horizontal, 18)
                 }
@@ -331,7 +339,8 @@ struct InstitutionResearchView: View {
             Text("已收录 \(payload.institutionsCount) / \(payload.sources.count) 家机构")
                 .font(.caption.weight(.medium))
         }
-        .padding(.top, 12)
+        .padding(12)
+        .researchPanel(fill: ResearchDesign.fill)
     }
 
     private func coverageStatus(_ source: InstitutionResearchCoverage) -> String {
@@ -367,8 +376,10 @@ struct InstitutionResearchView: View {
                 } label: {
                     Label(scope == .all ? "全部时间" : scope.rawValue, systemImage: "line.3.horizontal.decrease")
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(accent)
+                        .padding(.horizontal, 10)
                         .frame(minHeight: 44)
+                        .background(ResearchDesign.selection, in: RoundedRectangle(cornerRadius: 10))
                 }
                 .accessibilityIdentifier("institution-time-filter")
             }
@@ -383,9 +394,9 @@ struct InstitutionResearchView: View {
                 .padding(.horizontal, 20)
             }
         }
-        .padding(.top, 12)
+        .padding(.top, 4)
         .padding(.bottom, 4)
-        .overlay(alignment: .bottom) { Divider() }
+        .overlay(alignment: .bottom) { ResearchDesign.line.frame(height: 1) }
     }
 
     private func institutionFilter(_ value: String?, title: String) -> some View {
@@ -405,23 +416,19 @@ struct InstitutionResearchView: View {
     private func row(_ item: InstitutionResearchItem) -> some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 7) {
-                Text(item.institutionShortName)
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6).padding(.vertical, 4)
-                    .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 4))
                 Text(institutionChineseName(item.institutionShortName))
-                    .font(.caption.weight(.medium))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(accent)
                 Spacer()
                 Text(item.publishedOn).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
             Text(item.displayTitle)
-                .font(.system(size: 18, weight: .semibold))
+                .font(.headline)
                 .foregroundStyle(.primary)
                 .multilineTextAlignment(.leading)
                 .lineLimit(3)
             Text(item.summary)
-                .font(.system(size: 14))
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .lineSpacing(3)
                 .multilineTextAlignment(.leading)
@@ -436,7 +443,8 @@ struct InstitutionResearchView: View {
             .font(.caption2)
             .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 17)
+        .padding(14)
+        .researchPanel()
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
