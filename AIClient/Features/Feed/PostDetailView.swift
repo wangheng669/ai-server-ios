@@ -263,7 +263,8 @@ struct PostDetailView: View {
     private var newYorkTimesHeader: some View {
         VStack(alignment: .leading, spacing: 10) {
             LocalTranslatedText(
-                original: post.feedOriginalTitle, serverChinese: post.feedChineseTitle, detail: true, field: .title
+                original: post.feedOriginalTitle, serverChinese: post.feedChineseTitle,
+                field: .title, preservesOriginal: true
             )
             .font(.system(.largeTitle, design: .serif, weight: .bold))
             .lineSpacing(3)
@@ -279,18 +280,8 @@ struct PostDetailView: View {
                     .foregroundStyle(.secondary)
             }
 
-            if let link = newYorkTimesOriginalURL {
-                Link(destination: link) {
-                    Label("打开原文", systemImage: "arrow.up.right")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(minHeight: 44)
-                }
-                .environment(\.openURL, OpenURLAction { _ in .systemAction })
-                .accessibilityIdentifier("nytimes-open-original")
-            }
-
             if let lead = post.newYorkTimesLead, lead != post.displayTitle {
-                LocalTranslatedText(original: lead, detail: true)
+                LocalTranslatedText(original: lead)
                     .font(.system(.title3, design: .serif))
                     .foregroundStyle(.secondary)
                     .lineSpacing(5)

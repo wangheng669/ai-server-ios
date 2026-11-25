@@ -246,7 +246,7 @@ struct NewsFeedView: View {
         }
         .appSheet(item: $selectedPost) { post in
             FeedPostSheetContent(post: post, model: model)
-                .readingSheetPresentation(allowsUserExpansion: post.isNewYorkTimes)
+                .readingSheetPresentation()
         }
         .onChange(of: rootTabIsActive, initial: true) { _, isActive in
             if isActive && scenePhase == .active {

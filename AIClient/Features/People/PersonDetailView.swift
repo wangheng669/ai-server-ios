@@ -286,7 +286,7 @@ private struct PersonDetailPage: View {
             NavigationStack {
                 PostDetailView(post: post)
             }
-            .readingSheetPresentation(allowsUserExpansion: post.isNewYorkTimes)
+            .readingSheetPresentation()
         }
         .appSheet(item: $selectedPhoto) { photo in
             PersonPhotoViewer(photos: person.photos, initialPhotoID: photo.id)
