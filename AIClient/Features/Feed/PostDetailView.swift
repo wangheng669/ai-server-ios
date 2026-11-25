@@ -20,7 +20,8 @@ struct PostDetailView: View {
     private let prefersFullOriginal: Bool
     private let loadsStoredDetail: Bool
     private let autoplaysYouTube: Bool
-    private let shouldRefreshNewYorkTimesArticle: Bool
+    private let hasInitialNewYorkTimesDetail: Bool
+    private let initialNewYorkTimesLink: URL?
     private let rssAvatarURL: URL?
     @State private var post: Post
     @State private var player: AVPlayer?
@@ -51,8 +52,8 @@ struct PostDetailView: View {
     @State private var bilibiliInterpretationStepLabel: String?
     @State private var bilibiliInterpretationDetail: String?
     @State private var bilibiliInterpretationTask: Task<Void, Never>?
-    @State private var newYorkTimesArticle: NewYorkTimesArticle?
-    @State private var isLoadingNewYorkTimesBody = true
+    @State private var newYorkTimesBody: NewYorkTimesBody
+    @State private var newYorkTimesLoadAttempt = 0
     @State private var hasFinishedLoadingDetail = false
     @State private var rssOriginalArticleHTML: String?
     @State private var storedRSSArticleBlocks: [RSSArticleBlock]?
@@ -85,7 +86,7 @@ struct PostDetailView: View {
 
     init(
         post: Post,
-        preloadedNewYorkTimesArticle: NewYorkTimesArticle? = nil,
+        preloadedNewYorkTimesPost: Post? = nil,
         rssAvatarURL: URL? = nil,
         loadsStoredDetail: Bool = true,
         prefersFullOriginal: Bool = false,
@@ -95,13 +96,13 @@ struct PostDetailView: View {
         self.loadsStoredDetail = loadsStoredDetail
         self.autoplaysYouTube = autoplaysYouTube
         self.rssAvatarURL = rssAvatarURL
-        self.shouldRefreshNewYorkTimesArticle = post.isNewYorkTimes && preloadedNewYorkTimesArticle == nil
-        let storedArticle = preloadedNewYorkTimesArticle ?? (post.isNewYorkTimes
-            ? (post.contentZH ?? post.content).flatMap(NewYorkTimesArticle.storedText)
-            : nil)
-        _post = State(initialValue: post)
-        _newYorkTimesArticle = State(initialValue: storedArticle)
-        _isLoadingNewYorkTimesBody = State(initialValue: post.isNewYorkTimes && storedArticle == nil)
+        let initialPost = preloadedNewYorkTimesPost ?? post
+        let hasStoredDetail = post.isNewYorkTimes && (preloadedNewYorkTimesPost != nil || !loadsStoredDetail)
+        self.hasInitialNewYorkTimesDetail = hasStoredDetail
+        self.initialNewYorkTimesLink = post.isNewYorkTimes ? post.linkURL : nil
+        let storedArticle = hasStoredDetail ? NewYorkTimesArticle(storedPost: initialPost) : nil
+        _post = State(initialValue: initialPost)
+        _newYorkTimesBody = State(initialValue: storedArticle.map(NewYorkTimesBody.ready) ?? .loading)
         _isRSSBookmarked = State(initialValue: RSSBookmarkStore.contains(post.id))
         _isLoadingXFullText = State(initialValue:
             post.sourceName == "X"
@@ -125,7 +126,7 @@ struct PostDetailView: View {
             else { standardDetail }
         }
         .floatingSheetClose(
-            post.isBilibili ? "关闭视频详情" : "关闭动态详情",
+            post.isNewYorkTimes ? "关闭文章" : post.isBilibili ? "关闭视频详情" : "关闭动态详情",
             isVisible: !post.isYouTube && post.sourceName != "X",
             action: dismiss.callAsFunction
         )
@@ -177,12 +178,13 @@ struct PostDetailView: View {
                 await loadWeiboComments()
             }
         }
+        .task(id: newYorkTimesLoadAttempt) {
+            guard post.isNewYorkTimes else { return }
+            await loadNewYorkTimesDetail()
+        }
         .task {
-            if post.isNewYorkTimes {
-                await loadNewYorkTimesDetail()
-            } else {
-                await loadDetail()
-            }
+            guard !post.isNewYorkTimes else { return }
+            await loadDetail()
             guard !Task.isCancelled else { return }
             hasFinishedLoadingDetail = true
             if post.isBilibili {
@@ -226,133 +228,156 @@ struct PostDetailView: View {
             || post.isYouTube
     }
 
-    @ViewBuilder
+    private enum NewYorkTimesBody {
+        case loading
+        case ready(NewYorkTimesArticle)
+        case unavailable
+        case failed
+    }
+
     private var newYorkTimesDetail: some View {
-        VStack(spacing: 0) {
-            if isLoadingNewYorkTimesBody {
-                VStack(spacing: 12) {
-                    ProgressView()
-                    Text("正在加载完整文章…")
-                        .font(.system(size: 16, design: .serif))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                newYorkTimesHeader
+                switch newYorkTimesBody {
+                case .loading:
+                    ProgressView("正在加载完整文章…")
                         .foregroundStyle(.secondary)
+                case .ready(let article):
+                    newYorkTimesContent(article)
+                case .unavailable:
+                    newYorkTimesLoadFailure("暂时没有可在此阅读的正文。")
+                case .failed:
+                    newYorkTimesLoadFailure("正文加载失败。")
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        LocalTranslatedText(original: post.rssOriginalTitle ?? post.title?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? post.displayTitle, detail: true)
-                            .font(.system(size: 30, weight: .bold, design: .serif))
-                            .lineSpacing(3)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 18)
+            .padding(.bottom, 60)
+            .frame(maxWidth: 680, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
+        .accessibilityIdentifier("nytimes-article")
+    }
 
-                        if let lead = post.newYorkTimesLead, lead != post.displayTitle {
-                            LocalTranslatedText(original: lead, detail: true)
-                                .font(.system(size: 18, design: .serif))
-                                .foregroundStyle(.secondary)
-                                .lineSpacing(5)
-                        }
+    private var newYorkTimesHeader: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            LocalTranslatedText(
+                original: post.feedOriginalTitle, serverChinese: post.feedChineseTitle, detail: true, field: .title
+            )
+            .font(.system(.largeTitle, design: .serif, weight: .bold))
+            .lineSpacing(3)
+            .accessibilityAddTraits(.isHeader)
 
-                        HStack(spacing: 5) {
-                            if post.authorName != "RSS" && post.authorName != "纽约时报中文网 国际纵览" {
-                                Text(post.authorName.uppercased())
-                            }
-                            if let time = post.formattedTime { Text("· \(time)") }
-                        }
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.secondary)
+            let byline = [
+                post.authorName == "RSS" || post.authorName == "纽约时报中文网 国际纵览" ? nil : post.authorName,
+                post.formattedTime
+            ].compactMap { $0 }.joined(separator: " · ")
+            if !byline.isEmpty {
+                Text(byline)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
 
-                        ForEach(post.imageURLs.prefix(1), id: \.self) {
-                            NewYorkTimesArticleImage(url: $0, height: 245)
-                        }
+            if let link = newYorkTimesOriginalURL {
+                Link(destination: link) {
+                    Label("打开原文", systemImage: "arrow.up.right")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(minHeight: 44)
+                }
+                .environment(\.openURL, OpenURLAction { _ in .systemAction })
+                .accessibilityIdentifier("nytimes-open-original")
+            }
 
-                        Divider()
+            if let lead = post.newYorkTimesLead, lead != post.displayTitle {
+                LocalTranslatedText(original: lead, detail: true)
+                    .font(.system(.title3, design: .serif))
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(5)
+            }
+        }
+    }
 
-                        if let article = newYorkTimesArticle {
-                            LazyVStack(alignment: .leading, spacing: 22) {
-                                ForEach(Array(article.blocks.enumerated()), id: \.offset) { index, block in
-                                    switch block {
-                                    case .paragraph(let text):
-                                        VStack(alignment: .leading, spacing: 12) {
-                                            if LocalTranslatedText.sourceLanguage(text) != nil {
-                                                LocalTranslatedText(original: text, detail: true, translationOnly: true)
-                                            }
-                                            WikipediaLinkedParagraph(
-                                                text: text,
-                                                entities: wikipediaEntitiesByParagraph[index] ?? []
-                                            ) { entity in
-                                                withAnimation(.easeOut(duration: 0.18)) {
-                                                    selectedWikipediaEntity = WikipediaSelection(
-                                                        paragraphIndex: index,
-                                                        entity: entity
-                                                    )
-                                                }
-                                            }
-                                            if let selection = selectedWikipediaEntity,
-                                               selection.paragraphIndex == index {
-                                                WikipediaEntityCard(entity: selection.entity) {
-                                                    presentedWikipediaEntity = selection.entity
-                                                } close: {
-                                                    withAnimation(.easeOut(duration: 0.15)) {
-                                                        selectedWikipediaEntity = nil
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    case .linkedParagraph(let text, let links):
-                                        VStack(alignment: .leading, spacing: 12) {
-                                            if LocalTranslatedText.sourceLanguage(text) != nil {
-                                                LocalTranslatedText(original: text, detail: true, translationOnly: true)
-                                            }
-                                            WikipediaLinkedParagraph(
-                                                text: text,
-                                                entities: wikipediaEntitiesByParagraph[index] ?? [],
-                                                articleLinks: links,
-                                                openArticleLink: { url in
-                                                    presentedArticleLink = InAppBrowserDestination(url: url)
-                                                }
-                                            ) { entity in
-                                                withAnimation(.easeOut(duration: 0.18)) {
-                                                    selectedWikipediaEntity = WikipediaSelection(
-                                                        paragraphIndex: index,
-                                                        entity: entity
-                                                    )
-                                                }
-                                            }
-                                            if let selection = selectedWikipediaEntity,
-                                               selection.paragraphIndex == index {
-                                                WikipediaEntityCard(entity: selection.entity) {
-                                                    presentedWikipediaEntity = selection.entity
-                                                } close: {
-                                                    withAnimation(.easeOut(duration: 0.15)) {
-                                                        selectedWikipediaEntity = nil
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    case .image(let url, let caption, let credit):
-                                        if !NewYorkTimesArticle.isSameImageAsset(url, post.imageURLs.first) {
-                                            NewYorkTimesArticleImage(
-                                                url: url,
-                                                caption: caption,
-                                                credit: credit,
-                                                height: 230
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            Text("正文暂未收录，请打开原文阅读。")
-                                .font(.system(size: 17, design: .serif))
-                                .foregroundStyle(.secondary)
-                        }
+    private var newYorkTimesOriginalURL: URL? {
+        guard let url = post.linkURL ?? initialNewYorkTimesLink,
+              let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) else { return nil }
+        return url
+    }
 
+    private func newYorkTimesLoadFailure(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(message)
+                .foregroundStyle(.secondary)
+            Button("重新加载") { newYorkTimesLoadAttempt += 1 }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("nytimes-retry")
+        }
+    }
+
+    private func newYorkTimesContent(_ article: NewYorkTimesArticle) -> some View {
+        let cover = newYorkTimesCover(in: article)
+        return LazyVStack(alignment: .leading, spacing: 22) {
+            if let cover {
+                NewYorkTimesArticleImage(photo: cover, height: 245)
+            }
+
+            ForEach(article.blocks.indices, id: \.self) { index in
+                switch article.blocks[index] {
+                case .paragraph(let text):
+                    newYorkTimesParagraph(text, index: index)
+                case .linkedParagraph(let text, let links):
+                    newYorkTimesParagraph(text, index: index, links: links)
+                case .image(let photo):
+                    if cover.map({ photo.matches($0.url) }) != true {
+                        NewYorkTimesArticleImage(photo: photo, height: 230)
                     }
-                    .padding(.horizontal, 18)
-                    .padding(.top, 14)
-                    .padding(.bottom, 60)
-                    .measureReadingSheetContent(
-                        when: newYorkTimesArticle != nil && (!shouldRefreshNewYorkTimesArticle || hasFinishedLoadingDetail)
-                    )
+                }
+            }
+        }
+    }
+
+    private func newYorkTimesCover(in article: NewYorkTimesArticle) -> NewYorkTimesArticlePhoto? {
+        guard let url = article.cover?.url ?? post.imageURLs.first else { return nil }
+        let inlineCover = article.blocks.lazy.compactMap { block -> NewYorkTimesArticlePhoto? in
+            guard case .image(let photo) = block, photo.matches(url) else { return nil }
+            return photo
+        }.first
+        let cover = NewYorkTimesArticlePhoto(url: url)
+        let storedCaption = post.images?.first { image in
+            MediaURL.image(image.url).map(cover.matches) == true
+        }?.altText
+        let storedCredit = post.imageURLs.first.flatMap { cover.matches($0) ? post.meta?.photoCredit : nil }
+        return NewYorkTimesArticlePhoto(
+            url: article.cover?.url ?? inlineCover?.url ?? url,
+            caption: article.cover?.caption ?? inlineCover?.caption ?? storedCaption,
+            credit: article.cover?.credit ?? inlineCover?.credit ?? storedCredit
+        )
+    }
+
+    private func newYorkTimesParagraph(
+        _ text: String, index: Int, links: [NewYorkTimesArticleLink] = []
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if LocalTranslatedText.sourceLanguage(text) != nil {
+                LocalTranslatedText(original: text, detail: true, translationOnly: true)
+            }
+            WikipediaLinkedParagraph(
+                text: text,
+                entities: wikipediaEntitiesByParagraph[index] ?? [],
+                articleLinks: links,
+                openArticleLink: openArticleLink
+            ) { entity in
+                withAnimation(.easeOut(duration: 0.18)) {
+                    selectedWikipediaEntity = WikipediaSelection(paragraphIndex: index, entity: entity)
+                }
+            }
+            if let selection = selectedWikipediaEntity, selection.paragraphIndex == index {
+                WikipediaEntityCard(entity: selection.entity) {
+                    presentedWikipediaEntity = selection.entity
+                } close: {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        selectedWikipediaEntity = nil
+                    }
                 }
             }
         }
@@ -2517,34 +2542,71 @@ struct PostDetailView: View {
 
     private func loadNewYorkTimesDetail() async {
         guard !post.isSynthetic else {
-            isLoadingNewYorkTimesBody = false
+            newYorkTimesBody = .unavailable
             return
         }
         let client = APIClient(baseURL: ServerConfiguration.currentURL)
+        let initialLink = newYorkTimesOriginalURL
+        async let initialSource = loadNewYorkTimesSource(initialLink, using: client)
 
-        // A preloaded article has already gone through the remote NYT parser.
-        // Direct/deep-link navigation may only have database text, so show that
-        // immediately and replace it with the structured article when available.
-        if !shouldRefreshNewYorkTimesArticle {
-            isLoadingNewYorkTimesBody = false
-        } else {
-            if loadsStoredDetail, let detail = try? await client.fetchPost(id: post.id) { post = detail }
-            guard !Task.isCancelled else { return }
-
-            if newYorkTimesArticle == nil {
-                newYorkTimesArticle = (post.contentZH ?? post.content).flatMap(NewYorkTimesArticle.storedText)
-            }
-            isLoadingNewYorkTimesBody = false
-
-            if let link = post.linkURL,
-               let remoteArticle = try? await client.fetchNewYorkTimesArticle(url: link),
-               !Task.isCancelled {
-                newYorkTimesArticle = remoteArticle
+        var hasStoredDetail = hasInitialNewYorkTimesDetail
+        var storedLookupFailed = false
+        if !hasStoredDetail || newYorkTimesLoadAttempt > 0 {
+            newYorkTimesBody = .loading
+            do {
+                let detail = try await client.fetchPost(id: post.id)
+                guard !Task.isCancelled else { return }
+                post = detail
+                hasStoredDetail = true
+            } catch {
+                guard !Task.isCancelled else { return }
+                storedLookupFailed = true
             }
         }
 
-        guard !Task.isCancelled, let article = newYorkTimesArticle else { return }
-        await enrichNewYorkTimesArticle(article)
+        let stored = hasStoredDetail ? NewYorkTimesArticle(storedPost: post) : nil
+        if let stored { newYorkTimesBody = .ready(stored) }
+
+        let source: Result<NewYorkTimesArticle, Error>?
+        if let updatedLink = newYorkTimesOriginalURL, updatedLink != initialLink {
+            source = await loadNewYorkTimesSource(updatedLink, using: client)
+        } else {
+            source = await initialSource
+        }
+        guard !Task.isCancelled else { return }
+
+        switch source {
+        case .success(let article) where stored.map({ article.containsStoredBody($0) }) != false:
+            selectedWikipediaEntity = nil
+            wikipediaEntitiesByParagraph = [:]
+            newYorkTimesBody = .ready(article)
+        case .failure(let error) where stored == nil:
+            switch error {
+            case NewYorkTimesArticleError.bodyMissing, APIError.httpStatus(404), APIError.httpStatus(410):
+                newYorkTimesBody = storedLookupFailed ? .failed : .unavailable
+            default:
+                newYorkTimesBody = .failed
+            }
+        case nil where stored == nil:
+            newYorkTimesBody = storedLookupFailed ? .failed : .unavailable
+        default:
+            break
+        }
+
+        if case .ready(let article) = newYorkTimesBody {
+            await enrichNewYorkTimesArticle(article)
+        }
+    }
+
+    private func loadNewYorkTimesSource(
+        _ url: URL?, using client: APIClient
+    ) async -> Result<NewYorkTimesArticle, Error>? {
+        guard let url else { return nil }
+        do {
+            return .success(try await client.fetchNewYorkTimesArticle(url: url))
+        } catch {
+            return .failure(error)
+        }
     }
 
     private func enrichNewYorkTimesArticle(_ article: NewYorkTimesArticle) async {
@@ -2554,12 +2616,7 @@ struct PostDetailView: View {
         }
         ServerArticlePreviewCache.shared.prefetch(linkedURLs)
 
-        let paragraphs = article.blocks.compactMap { block -> String? in
-            switch block {
-            case .paragraph(let text), .linkedParagraph(let text, _): text
-            case .image: nil
-            }
-        }
+        let paragraphs = article.blocks.compactMap(\.paragraphText)
         let paragraphEntities = await WikipediaEntityResolver.shared.resolve(paragraphs: paragraphs)
         guard !Task.isCancelled else { return }
         var blockEntities: [Int: [WikipediaEntity]] = [:]
@@ -3706,30 +3763,31 @@ private struct WeiboDetailImage: View {
 }
 
 private struct NewYorkTimesArticleImage: View {
-    let url: URL
-    var caption: String? = nil
-    var credit: String? = nil
-    var height: CGFloat
+    let photo: NewYorkTimesArticlePhoto
+    let height: CGFloat
     @State private var gallerySelection: ImageGallerySelection?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            RemoteImage(url: url, height: height, contentMode: .fit)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    gallerySelection = ImageGallerySelection(urls: [url], initialIndex: 0)
-                }
+            Button {
+                gallerySelection = ImageGallerySelection(urls: [photo.url], initialIndex: 0)
+            } label: {
+                RemoteImage(url: photo.url, height: height, contentMode: .fit)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("查看文章配图")
 
-            if let caption, !caption.isEmpty {
+            if let caption = photo.caption, !caption.isEmpty {
                 Text(caption)
-                    .font(.system(size: 13, design: .serif))
+                    .font(.system(.footnote, design: .serif))
                     .foregroundStyle(.secondary)
                     .lineSpacing(3)
             }
-            if let credit, !credit.isEmpty {
+            if let credit = photo.credit, !credit.isEmpty {
                 Text(credit)
-                    .font(.system(size: 11, weight: .medium, design: .serif))
-                    .foregroundStyle(.tertiary)
+                    .font(.system(.caption, design: .serif, weight: .medium))
+                    .foregroundStyle(.secondary)
             }
         }
         .imageGallery(item: $gallerySelection)
