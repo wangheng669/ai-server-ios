@@ -125,6 +125,13 @@ struct ResearchHomeView: View {
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
+            .frame(maxHeight: .infinity)
+
+            researchShortcuts
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, ResearchStyle.inset)
+                .padding(.top, 6)
+                .padding(.bottom, 8)
         }
         .background(ResearchStyle.surface)
         .accessibilityIdentifier("research-overview")
@@ -215,7 +222,6 @@ struct ResearchHomeView: View {
                 case .industries:
                     industries
                 }
-                researchShortcuts
             }
             .padding(.horizontal, ResearchStyle.inset)
             .padding(.top, 8)
