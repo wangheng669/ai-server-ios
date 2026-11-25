@@ -244,12 +244,14 @@ private struct AppModalPresenter<Sheet: View>: UIViewControllerRepresentable {
 
         private func applyOptions(to sheet: UISheetPresentationController, animateReadingResize: Bool = false) {
             var supportedDetents = options.detents ?? [.large]
+            var scrollExpandsSheet = !options.scrollsWithoutExpanding
             // The window height keeps the cutoff stable after the sheet resizes.
             if supportedDetents == [.large], let height = options.readingContentHeight,
                sheet.presentingViewController.traitCollection.verticalSizeClass != .compact,
                let windowHeight = sheet.presentingViewController.viewIfLoaded?.window?.bounds.height,
                height <= windowHeight * 0.45 {
                 supportedDetents.insert(.medium)
+                scrollExpandsSheet = true
             }
             let detents = supportedDetents.sorted { $0.rawValue < $1.rawValue }
             let identifiers = detents.map(\.identifier)
@@ -265,7 +267,7 @@ private struct AppModalPresenter<Sheet: View>: UIViewControllerRepresentable {
                 sheet.selectedDetentIdentifier = selected.identifier
             }
             if let radius = options.cornerRadius { sheet.preferredCornerRadius = radius }
-            sheet.prefersScrollingExpandsWhenScrolledToEdge = !options.scrollsWithoutExpanding
+            sheet.prefersScrollingExpandsWhenScrolledToEdge = scrollExpandsSheet
         }
 
         func presentationController(forPresented presented: UIViewController, presenting: UIViewController?, source: UIViewController) -> UIPresentationController? {
