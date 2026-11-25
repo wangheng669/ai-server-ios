@@ -78,24 +78,25 @@ struct FamousHoldingDetailView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(HoldingsPalette.canvas.ignoresSafeArea())
+        .background(HoldingsPalette.card.ignoresSafeArea())
         .floatingSheetClose("关闭持仓明细", action: dismiss.callAsFunction)
         .task(id: manager.reportIdentity) { await store.loadDetail(for: manager) }
     }
 
     private func header(_ manager: FamousHoldingsManager) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 5) {
             Text(manager.institutionName)
                 .font(.title2.bold())
                 .accessibilityAddTraits(.isHeader)
-            Text("\(quarterLabel(manager.reportDate)) · 截至 \(manager.reportDate)")
+            Text("\(quarterLabel(manager.reportDate)) · 报告期末 \(manager.reportDate)")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
             Text("\(manager.positionsCount) 项持仓 · \(holdingUSD(manager.totalValueUsd))")
-                .monospacedDigit()
+                .font(.subheadline.weight(.medium).monospacedDigit())
         }
-        .font(.subheadline)
-        .foregroundStyle(.primary)
         .padding(.horizontal, 20)
-        .padding(.vertical, 16)
+        .padding(.top, 18)
+        .padding(.bottom, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(HoldingsPalette.card)
     }
@@ -175,7 +176,7 @@ struct FamousHoldingDetailView: View {
                 || $0.titleOfClass.localizedStandardContains(term) || $0.cusip.localizedStandardContains(term)
         }
         return ScrollView {
-            LazyVStack(alignment: .leading, spacing: 12) {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .firstTextBaseline) {
                     Text("\(rows.count) 项").font(.subheadline.weight(.semibold))
                     Spacer()
@@ -183,7 +184,7 @@ struct FamousHoldingDetailView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
-                .padding(.horizontal, 4)
+                .padding(.bottom, 10)
                 if rows.isEmpty {
                     ContentUnavailableView(
                         term.isEmpty ? "该分类没有持仓" : "未找到匹配的证券",
@@ -191,15 +192,16 @@ struct FamousHoldingDetailView: View {
                     )
                 }
                 ForEach(rows) { row in
-                    HoldingsPanel {
-                        HoldingPositionRow(position: row, isDetail: true, showsChanges: detail.canCompare)
-                    }
+                    HoldingPositionRow(position: row, isDetail: true, showsChanges: detail.canCompare)
+                        .padding(.vertical, 12)
+                    if row.id != rows.last?.id { Divider() }
                 }
+                Divider().padding(.top, 8)
                 FilingSource(manager: detail, disclaimer: disclaimer)
-                    .padding(.horizontal, 4)
+                    .padding(.top, 8)
             }
             .frame(maxWidth: 660)
-            .padding(.horizontal, InvestmentDesign.pageInset)
+            .padding(.horizontal, 20)
             .padding(.top, 12)
             .padding(.bottom, 82)
             .frame(maxWidth: .infinity)
