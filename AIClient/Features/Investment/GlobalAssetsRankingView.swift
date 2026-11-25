@@ -20,7 +20,7 @@ struct GlobalAssetsRankingView: View {
                         rankingSection(ranking)
                         sourceFooter(ranking)
                     }
-                    .padding(.bottom, 28)
+                    .padding(.bottom, 64)
                 }
                 .scrollIndicators(.hidden)
             } else if store.isLoadingGlobalAssets || !store.globalAssetsLoadFailed {

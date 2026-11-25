@@ -250,8 +250,8 @@ struct CountryGDPRankingView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ResearchSheetHeading(title: "资产排行", onClose: onClose)
             categoryPicker
+                .padding(.top, 12)
 
             switch category {
             case .countryGDP:
@@ -263,7 +263,7 @@ struct CountryGDPRankingView: View {
                                 rankingSection(ranking)
                                 sourceFooter(ranking)
                             }
-                            .padding(.bottom, 28)
+                            .padding(.bottom, 64)
                         }
                         .background(InvestmentDesign.surface)
                         .scrollIndicators(.hidden)
@@ -278,7 +278,10 @@ struct CountryGDPRankingView: View {
                 GlobalAssetsRankingView(store: store)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(InvestmentDesign.surface)
+        .floatingSheetClose("关闭资产排行", action: onClose)
+        .accessibilityAction(.escape) { onClose() }
         .appSheet(item: $selectedCountry) { route in
             CountryGDPDetailView(route: route)
                 .appPresentationDetents([.large])

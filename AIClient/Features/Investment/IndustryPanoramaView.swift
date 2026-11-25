@@ -251,7 +251,6 @@ struct IndustryPanoramaView: View {
                         .frame(minHeight: 360)
                     }
                 }
-                .refreshable { await load() }
             }
         }
         .background(IndustryPalette.canvas)
@@ -355,17 +354,25 @@ struct IndustryPanoramaView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 if let errorMessage {
-                    Label(errorMessage, systemImage: "exclamationmark.circle")
-                        .font(.subheadline).foregroundStyle(.secondary)
+                    Button {
+                        Task { await load() }
+                    } label: {
+                        Label(isLoading ? "正在重新加载" : "\(errorMessage) · 重试", systemImage: "arrow.clockwise")
+                            .font(.footnote.weight(.medium))
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(IndustryPalette.accent)
+                    .disabled(isLoading)
                 }
                 paneContent(industry, page: page)
             }
             .padding(.horizontal, IndustryPalette.inset)
             .padding(.top, 14)
-            .padding(.bottom, 32)
+            .padding(.bottom, 64)
         }
         .scrollIndicators(.hidden)
-        .refreshable { await load() }
         .accessibilityIdentifier("industry-page-\(page.rawValue)")
     }
 

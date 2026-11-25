@@ -131,7 +131,7 @@ struct ResearchHomeView: View {
         .background(InvestmentDesign.surface)
         .accessibilityIdentifier("research-overview")
         .appSheet(item: $presentedTopic) { topic in
-            ResearchTopicSheet(title: topic.title, onClose: { presentedTopic = nil }) {
+            ResearchTopicSheet(closeLabel: "关闭\(topic.title)", onClose: { presentedTopic = nil }) {
                 switch topic {
                 case .company:
                     CompanyResearchView(store: companyStore)
@@ -223,11 +223,6 @@ struct ResearchHomeView: View {
             .padding(.bottom, 16)
         }
         .scrollIndicators(.hidden)
-        .refreshable {
-            async let dashboard: Void = store.refresh()
-            async let industryQuotes: Void = store.refreshAShareIndustryQuotes(force: true)
-            _ = await (dashboard, industryQuotes)
-        }
     }
 
     @ViewBuilder
@@ -800,12 +795,12 @@ private struct ResearchIndustryRanking: View {
                     ResearchIndustryQuoteCaption(snapshot: snapshot)
                 }
                 .padding(ResearchDesign.inset)
+                .padding(.bottom, 48)
             } else {
                 ResearchIndustryQuoteStatus(store: store)
                     .padding(ResearchDesign.inset)
             }
         }
-        .refreshable { await store.refreshAShareIndustryQuotes(force: true) }
         .accessibilityIdentifier("ashare-industry-ranking")
     }
 }
@@ -949,17 +944,16 @@ private extension MarketQuote {
 }
 
 private struct ResearchTopicSheet<Content: View>: View {
-    let title: String
+    let closeLabel: String
     let onClose: () -> Void
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(spacing: 0) {
-            ResearchSheetHeading(title: title, onClose: onClose)
-            content
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        }
-        .background(InvestmentDesign.surface)
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(InvestmentDesign.surface)
+            .floatingSheetClose(closeLabel, action: onClose)
+            .accessibilityAction(.escape) { onClose() }
     }
 }
 

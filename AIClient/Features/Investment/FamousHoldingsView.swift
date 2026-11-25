@@ -40,9 +40,9 @@ struct FamousHoldingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ResearchSheetHeading(title: "机构持仓", onClose: onClose)
             if let manager = selectedManager, let holdings = store.holdings {
                 managerPicker(holdings.managers, selected: manager.key)
+                    .padding(.top, 10)
                 TabView(selection: managerSelection) {
                     ForEach(holdings.managers) { page in
                         overview(page, holdings: holdings)
@@ -69,6 +69,8 @@ struct FamousHoldingsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(HoldingsPalette.card.ignoresSafeArea())
+        .floatingSheetClose("关闭机构持仓", action: onClose)
+        .accessibilityAction(.escape) { onClose() }
         .task {
             await store.load()
             #if DEBUG
@@ -166,11 +168,10 @@ struct FamousHoldingsView: View {
             .frame(maxWidth: 660)
             .padding(.horizontal, 20)
             .padding(.top, 16)
-            .padding(.bottom, 28)
+            .padding(.bottom, 64)
             .frame(maxWidth: .infinity)
         }
         .scrollIndicators(.hidden)
-        .refreshable { await store.load(force: true) }
         .accessibilityIdentifier("holdings-overview-scroll")
     }
 

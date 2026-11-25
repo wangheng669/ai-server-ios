@@ -31,8 +31,8 @@ struct ResearchSentimentView: View {
                 .tint(InvestmentDesign.accent)
             }
             .padding(18)
+            .padding(.bottom, 48)
         }
-        .refreshable { await store.refresh() }
         .accessibilityIdentifier("research-sentiment-detail")
     }
 
@@ -55,7 +55,19 @@ struct ResearchSentimentView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            if sentiment?.stale == true || store.isShowingCachedSnapshot || store.errorMessage != nil {
+            if store.errorMessage != nil {
+                Button {
+                    Task { await store.refresh() }
+                } label: {
+                    Label(store.isRetrying ? "正在重试" : "数据待更新 · 重试", systemImage: "arrow.clockwise")
+                        .font(.footnote)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(ResearchDesign.accent)
+                .disabled(store.isRetrying)
+            } else if sentiment?.stale == true || store.isShowingCachedSnapshot {
                 Label("数据待更新", systemImage: "clock")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
