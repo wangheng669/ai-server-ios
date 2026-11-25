@@ -1,7 +1,7 @@
 import SwiftUI
 
 private enum ResearchTopic: String, Identifiable {
-    case company = "公司", industry = "行业", macro = "宏观", viewpoints = "观点", sentiment = "市场情绪"
+    case company = "公司", industry = "行业", macro = "宏观", viewpoints = "机构观点", sentiment = "市场情绪"
 
     case industryQuotes = "全部行业"
 
@@ -215,8 +215,7 @@ struct ResearchHomeView: View {
                 case .industries:
                     industries
                 }
-                researchTopics
-                utilities
+                researchShortcuts
             }
             .padding(.horizontal, ResearchStyle.inset)
             .padding(.top, 8)
@@ -257,24 +256,44 @@ struct ResearchHomeView: View {
         }
     }
 
-    private var researchTopics: some View {
+    private var researchShortcuts: some View {
         let columns = dynamicTypeSize.isAccessibilitySize ? 2 : 4
         return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: columns), spacing: 4) {
             ForEach(ResearchTopic.shortcuts) { topic in
-                Button { presentedTopic = topic } label: {
-                    Label(topic.rawValue, systemImage: topic.icon)
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(ResearchStyle.accent)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .contentShape(Rectangle())
+                researchShortcut(topic.rawValue, icon: topic.icon, accessibilityLabel: topic.title) {
+                    presentedTopic = topic
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(topic.title)
-                .accessibilityIdentifier("research-topic-\(topic.rawValue)")
             }
+            researchShortcut("机构持仓", icon: "person.2", action: onOpenInvestors)
+            researchShortcut("资产排行", icon: "list.number", action: onOpenGlobalRanking)
+            researchShortcut("散户观点", icon: "bubble.left.and.bubble.right", action: onOpenRetailInvestors)
         }
-        .padding(4)
+        .padding(6)
         .background(ResearchStyle.marketSurface, in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("研究快捷入口")
+    }
+
+    private func researchShortcut(
+        _ title: String, icon: String, accessibilityLabel: String? = nil, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.subheadline.weight(.medium))
+                Text(title)
+                    .font(.footnote.weight(.medium))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(ResearchStyle.accent)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 52)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel ?? title)
+        .accessibilityIdentifier("research-shortcut-\(title)")
     }
 
     private var globalMarkets: some View {
@@ -344,31 +363,6 @@ struct ResearchHomeView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("股票市场")
         .accessibilityIdentifier("research-stock-region")
-    }
-
-    private var utilities: some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(spacing: 0))
-            : AnyLayout(HStackLayout(spacing: 0))
-        return layout {
-            utility("机构持仓", icon: "person.2", action: onOpenInvestors)
-            utility("资产排行", icon: "list.number", action: onOpenGlobalRanking)
-            utility("散户观点", icon: "bubble.left.and.bubble.right", action: onOpenRetailInvestors)
-        }
-        .padding(.horizontal, 6)
-        .background(ResearchStyle.marketSurface, in: RoundedRectangle(cornerRadius: 12))
-    }
-
-    private func utility(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: icon)
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(ResearchStyle.accent)
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("research-utility-\(title)")
     }
 
     private func sectionHeading(
