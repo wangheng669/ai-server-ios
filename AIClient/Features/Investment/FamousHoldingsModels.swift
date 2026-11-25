@@ -35,7 +35,7 @@ struct FamousHoldingsManager: Codable, Identifiable {
     let totalValueUsd: Double
     let summary: FamousHoldingsSummary
     let analytics: FamousHoldingsAnalytics
-    let topPositions: [FamousHoldingWeight]?
+    let topPositions: [FamousHoldingPositionSummary]?
     let positions: [FamousHoldingChange]?
     let exitedPositions: [FamousHoldingChange]?
 
@@ -50,15 +50,6 @@ struct FamousHoldingsManager: Codable, Identifiable {
     }
 
     var canCompare: Bool { analytics.previousReportDate != nil }
-
-    var leadingWeights: [FamousHoldingWeight] {
-        if let positions {
-            return positions.prefix(5).map {
-                FamousHoldingWeight(id: $0.id, name: $0.name, symbol: $0.symbol, weightPct: $0.weightPct)
-            }
-        }
-        return Array((topPositions ?? []).prefix(5))
-    }
 }
 
 struct FamousHoldingsReportIdentity: Hashable {
@@ -82,11 +73,21 @@ struct FamousHoldingsAnalytics: Codable {
     let totalValueChangePct: Double
 }
 
-struct FamousHoldingWeight: Codable, Identifiable {
+struct FamousHoldingPositionSummary: Codable, Identifiable {
     let id: String
     let name: String
     let symbol: String?
     let weightPct: Double
+    let valueUsd: Double
+
+    init(_ position: FamousHoldingChange) {
+        let isExited = position.action == .exited
+        id = position.id
+        name = position.name
+        symbol = position.symbol
+        weightPct = isExited ? position.previousWeightPct : position.weightPct
+        valueUsd = isExited ? position.previousValueUsd : position.valueUsd
+    }
 }
 
 struct FamousHoldingChange: Codable, Identifiable {

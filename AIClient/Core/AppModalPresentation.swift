@@ -268,13 +268,13 @@ private struct AppModalPresenter<Sheet: View>: UIViewControllerRepresentable {
             }
             if let radius = options.cornerRadius { sheet.preferredCornerRadius = radius }
             sheet.prefersScrollingExpandsWhenScrolledToEdge = scrollExpandsSheet
+            sheet.prefersGrabberVisible = options.showsGrabber
         }
 
         func presentationController(forPresented presented: UIViewController, presenting: UIViewController?, source: UIViewController) -> UIPresentationController? {
             if fullscreen { return AppFullScreenPresentationController(presentedViewController: presented, presenting: presenting) }
             let sheet = UISheetPresentationController(presentedViewController: presented, presenting: presenting)
             sheet.delegate = self
-            sheet.prefersGrabberVisible = false
             applyOptions(to: sheet)
             return sheet
         }
@@ -381,6 +381,7 @@ private struct AppModalOptions: Equatable {
     var onSelectionChange: ((AppModalDetent) -> Void)?
     var cornerRadius: CGFloat?
     var scrollsWithoutExpanding = false
+    var showsGrabber = false
     var readingContentHeight: CGFloat?
     var background: Color?
 
@@ -388,6 +389,7 @@ private struct AppModalOptions: Equatable {
         lhs.detents == rhs.detents && lhs.selection == rhs.selection
             && lhs.cornerRadius == rhs.cornerRadius
             && lhs.scrollsWithoutExpanding == rhs.scrollsWithoutExpanding
+            && lhs.showsGrabber == rhs.showsGrabber
             && lhs.readingContentHeight == rhs.readingContentHeight
             && lhs.background == rhs.background
     }
@@ -395,6 +397,7 @@ private struct AppModalOptions: Equatable {
         if let value = other.detents { detents = value; selection = other.selection; onSelectionChange = other.onSelectionChange }
         if let value = other.cornerRadius { cornerRadius = value }
         scrollsWithoutExpanding = scrollsWithoutExpanding || other.scrollsWithoutExpanding
+        showsGrabber = showsGrabber || other.showsGrabber
         if let height = other.readingContentHeight { readingContentHeight = height }
         if let value = other.background { background = value }
     }
@@ -416,6 +419,9 @@ extension View {
     }
     func appPresentationBackground(_ color: Color) -> some View {
         transformPreference(AppModalOptionsKey.self) { $0.background = color }
+    }
+    func appPresentationGrabber() -> some View {
+        transformPreference(AppModalOptionsKey.self) { $0.showsGrabber = true }
     }
     func appPresentationScrollsWithoutExpanding() -> some View {
         transformPreference(AppModalOptionsKey.self) { $0.scrollsWithoutExpanding = true }
