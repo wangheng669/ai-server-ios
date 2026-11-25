@@ -1226,8 +1226,8 @@ struct NewsFeedView: View {
                                 let upcoming = Array(posts.dropFirst(index + 1).prefix(7))
                                 model.prefetchXTimelineImages(for: upcoming)
                             }
-                            .task(id: isActive) {
-                                guard isActive, post.needsXTranslation || post.needsXQuotedTranslation else { return }
+                            .task(id: isActive ? post : nil) {
+                                guard isActive else { return }
                                 await model.translateXPostIfNeeded(post)
                             }
                             .task(id: isPaginationRow ? nextPage : nil) {

@@ -76,7 +76,7 @@ struct PostDetailView: View {
     @State private var selectedXAuthor: XAuthorDestination?
     @State private var selectedXContextPost: Post?
     @State private var xLiveDetail: XTweetDetailItem?
-    @State private var xLiveTranslationText: String?
+    @State private var xLiveTranslation: (input: XTranslationInput, text: String)?
     @State private var xLiveReplyContext: XReplyContext?
     @State private var isLoadingXReplyContext = false
     @State private var isLoadingXFullText: Bool
@@ -181,6 +181,14 @@ struct PostDetailView: View {
             } else if post.isWeiboRSS {
                 await loadWeiboComments()
             }
+        }
+        .task(id: xDetailTranslationInput) { [input = xDetailTranslationInput] in
+            await loadXDetailTranslation(input)
+        }
+        .task(id: xLiveDetail?.videoURL) { [videoURL = xLiveDetail?.videoURL] in
+            guard let videoURL, post.videoURLs.isEmpty, detectedVideoAspectRatio == nil,
+                  xVideoMetadataAspectRatio == nil else { return }
+            await detectVideoAspectRatio(url: videoURL)
         }
         .task(id: newYorkTimesLoadAttempt) {
             guard post.isNewYorkTimes else { return }
@@ -1982,13 +1990,12 @@ struct PostDetailView: View {
                         .textSelection(.enabled)
                         .padding(.top, 20)
 
-                        if !isLoadingXFullText, !showsOriginal, post.needsXTranslation, let tweetID = post.xTweetID {
+                        if !showsOriginal, let input = xDetailTranslationInput {
                             XDeviceTranslation(
-                                tweetID: tweetID, original: xLiveDetail?.fullText ?? post.xStoredOriginalContent,
-                                sourceLanguage: XDeviceTranslation.declaredLanguage(xLiveDetail?.lang) ?? post.meta?.lang,
-                                replyContext: xResolvedReplyContext?.text, showsControls: true
+                                tweetID: input.tweetID, original: input.original, sourceLanguage: input.sourceLanguage,
+                                replyContext: input.replyContext, showsControls: true
                             ) { text in
-                                xLiveTranslationText = text
+                                xLiveTranslation = (input, text)
                             }
                         }
 
@@ -2126,13 +2133,29 @@ struct PostDetailView: View {
         }
     }
 
+    private var xDetailTranslationInput: XTranslationInput? {
+        guard !isLoadingXFullText, post.needsXTranslation, let tweetID = post.xTweetID else { return nil }
+        return XTranslationInput(
+            tweetID: tweetID, original: xLiveDetail?.fullText ?? post.xStoredOriginalContent,
+            sourceLanguage: XDeviceTranslation.declaredLanguage(xLiveDetail?.lang) ?? post.meta?.lang,
+            replyContext: post.xReplyContext?.text
+        )
+    }
+
     private var xDisplayedDetailText: String {
         let value: String
         if showsOriginal || post.isChineseXSource {
             value = xLiveDetail?.fullText ?? post.xStoredOriginalContent
         } else {
+            let liveTranslation: String? = if let current = xDetailTranslationInput, let translated = xLiveTranslation,
+                                              current.tweetID == translated.input.tweetID,
+                                              current.original == translated.input.original {
+                translated.text
+            } else {
+                nil
+            }
             value = XPostTextFormatter.longestText(
-                xLiveTranslationText,
+                liveTranslation,
                 post.hasTranslation ? post.displayContent : nil
             ) ?? post.displayContent
         }
@@ -2461,18 +2484,9 @@ struct PostDetailView: View {
             nil
         }
         if post.sourceName == "X", let tweetID = post.xTweetID {
-            if #available(iOS 26.0, *), let input = post.xBodyTranslationInput {
-                FeedTranslationCache.shared.warmXTranslations([input])
-            }
             if let liveDetail = try? await client.fetchXTweetDetail(tweetID: tweetID) {
                 verificationStore.recordLive(handle: liveDetail.author?.screenName, verified: liveDetail.author?.verified)
                 xLiveDetail = liveDetail
-                if post.videoURLs.isEmpty,
-                   let videoURL = liveDetail.videoURL,
-                   detectedVideoAspectRatio == nil,
-                   xVideoMetadataAspectRatio == nil {
-                    await detectVideoAspectRatio(url: videoURL)
-                }
                 if prefersFullOriginal,
                    XPostTextFormatter.shouldPreferFullOriginal(
                     displayed: xDisplayedDetailText,
@@ -2482,14 +2496,6 @@ struct PostDetailView: View {
                 }
             }
             isLoadingXFullText = false
-            if post.needsXTranslation,
-               let translation = try? await FeedTranslationCache.shared.translateXPost(
-                   tweetID: tweetID, original: xLiveDetail?.fullText ?? post.xStoredOriginalContent,
-                   sourceLanguage: xLiveDetail?.lang ?? post.meta?.lang, replyContext: post.xReplyContext?.text,
-                   using: client.fetchXTranslation
-               ), !Task.isCancelled {
-                xLiveTranslationText = translation
-            }
         } else if post.sourceName == "X" {
             isLoadingXFullText = false
         }
@@ -2746,6 +2752,18 @@ struct PostDetailView: View {
     }
 
     @MainActor
+    private func loadXDetailTranslation(_ input: XTranslationInput?) async {
+        guard !post.isSynthetic, let input else { return }
+        let client = APIClient(baseURL: ServerConfiguration.currentURL)
+        if let text = try? await FeedTranslationCache.shared.translateXPost(
+            tweetID: input.tweetID, original: input.original, sourceLanguage: input.sourceLanguage,
+            replyContext: input.replyContext, using: client.fetchXTranslation
+        ), !Task.isCancelled {
+            xLiveTranslation = (input, text)
+        }
+    }
+
+    @MainActor
     private func loadXTranslation(for comment: XComment) async {
         guard !["zh", "zh-cn", "zh-tw"].contains(comment.lang?.lowercased() ?? "") else { return }
         guard xTranslations[comment.id] == nil,
@@ -2753,10 +2771,13 @@ struct PostDetailView: View {
         loadingXTranslationIDs.insert(comment.id)
         defer { loadingXTranslationIDs.remove(comment.id) }
         do {
-            let value = try await APIClient(baseURL: ServerConfiguration.currentURL)
-                .fetchXTranslation(tweetID: comment.id)
+            let client = APIClient(baseURL: ServerConfiguration.currentURL)
+            let value = try await FeedTranslationCache.shared.translateXPost(
+                tweetID: comment.id, original: comment.text, sourceLanguage: comment.lang,
+                using: client.fetchXTranslation
+            )
             guard !Task.isCancelled else { return }
-            xTranslations[comment.id] = value.text
+            xTranslations[comment.id] = value
         } catch is CancellationError {
             return
         } catch {

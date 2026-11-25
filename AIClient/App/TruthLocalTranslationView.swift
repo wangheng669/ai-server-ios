@@ -3,7 +3,7 @@ import Translation
 import NaturalLanguage
 import CryptoKit
 
-struct XTranslationInput {
+struct XTranslationInput: Equatable {
     let tweetID: String
     let original: String
     var sourceLanguage: String? = nil
@@ -110,7 +110,7 @@ final class FeedTranslationCache {
             let keys = warmXTranslations([.init(
                 tweetID: tweetID, original: original, sourceLanguage: sourceLanguage, replyContext: replyContext
             )])
-            await waitForXTranslations(keys, upTo: .milliseconds(800))
+            await waitForXTranslations(keys, upTo: .milliseconds(150))
         }
         let retryDeadline = xTranslationClock.now.advanced(by: .seconds(45))
         while true {
@@ -123,9 +123,12 @@ final class FeedTranslationCache {
             let now = xTranslationClock.now
             let nextRequest = max(xPostRetryAt[tweetID] ?? now, xTranslationRetryAt ?? now)
             if nextRequest > now {
-                guard nextRequest <= retryDeadline else {
-                    requestXDeviceTranslation(key: key, sourceLanguage: sourceLanguage)
-                    throw APIError.invalidResponse
+                requestXDeviceTranslation(key: key, sourceLanguage: sourceLanguage)
+                guard nextRequest <= retryDeadline else { throw APIError.invalidResponse }
+                await waitForXTranslations([key], upTo: now.duration(to: nextRequest))
+                try Task.checkCancellation()
+                if let saved = text(key), let value = LocalTranslatedText.validTranslation(saved, original: original) {
+                    return value
                 }
                 try await xTranslationClock.sleep(until: nextRequest)
                 continue
@@ -165,7 +168,7 @@ final class FeedTranslationCache {
                    [404, 502, 503, 504].contains(status) {
                     requestXDeviceTranslation(key: key)
                 }
-                failed(key)
+                if !warmingXTranslations.contains(key) { failed(key) }
                 throw error
             }
         }
