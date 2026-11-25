@@ -1433,6 +1433,7 @@ private struct PersonArticleDetailView: View {
                 .padding(.vertical, 26)
                 .background(Color(uiColor: .systemBackground))
             }
+            .measureReadingSheetContent(when: article.id == self.article.id, additionalHeight: 48)
             }
             .accessibilityIdentifier("person-article-scroll")
 

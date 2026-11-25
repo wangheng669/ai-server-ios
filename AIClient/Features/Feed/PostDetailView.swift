@@ -53,8 +53,10 @@ struct PostDetailView: View {
     @State private var bilibiliInterpretationTask: Task<Void, Never>?
     @State private var newYorkTimesArticle: NewYorkTimesArticle?
     @State private var isLoadingNewYorkTimesBody = true
+    @State private var hasFinishedLoadingDetail = false
     @State private var rssOriginalArticleHTML: String?
     @State private var storedRSSArticleBlocks: [RSSArticleBlock]?
+    @State private var storedRSSArticleInput: RSSReaderInput?
     @State private var qbitAIArticleBlocks: [RSSArticleBlock]?
     @State private var wikipediaEntitiesByParagraph: [Int: [WikipediaEntity]] = [:]
     @State private var selectedWikipediaEntity: WikipediaSelection?
@@ -181,6 +183,8 @@ struct PostDetailView: View {
             } else {
                 await loadDetail()
             }
+            guard !Task.isCancelled else { return }
+            hasFinishedLoadingDetail = true
             if post.isBilibili {
                 await loadBilibiliSubtitles()
                 await loadBilibiliSummary()
@@ -200,6 +204,7 @@ struct PostDetailView: View {
             }.value
             guard !Task.isCancelled else { return }
             storedRSSArticleBlocks = blocks
+            storedRSSArticleInput = readerInput
             _ = await preparedImage
         }
         .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime)) { notification in
@@ -345,6 +350,9 @@ struct PostDetailView: View {
                     .padding(.horizontal, 18)
                     .padding(.top, 14)
                     .padding(.bottom, 60)
+                    .measureReadingSheetContent(
+                        when: newYorkTimesArticle != nil && (!shouldRefreshNewYorkTimesArticle || hasFinishedLoadingDetail)
+                    )
                 }
             }
         }
@@ -377,6 +385,7 @@ struct PostDetailView: View {
             .padding(.horizontal, 16)
             .padding(.top, 14)
             .padding(.bottom, 60)
+            .measureReadingSheetContent(when: hasFinishedLoadingDetail && post.videoURLs.isEmpty)
         }
     }
 
@@ -424,6 +433,7 @@ struct PostDetailView: View {
                 .padding(.horizontal, 22)
                 .padding(.top, 22)
                 .padding(.bottom, 60)
+                .measureReadingSheetContent(when: hasFinishedLoadingDetail && hasParsedCurrentArticle)
             }
             .task(id: post.id) {
                 await Task.yield()
@@ -491,6 +501,7 @@ struct PostDetailView: View {
                 .padding(.horizontal, 18)
                 .padding(.top, 24)
                 .padding(.bottom, 60)
+                .measureReadingSheetContent(when: hasFinishedLoadingDetail && (qbitAIArticleBlocks != nil || hasParsedCurrentArticle))
             }
         }
         .background(Color(uiColor: .systemBackground))
@@ -499,6 +510,10 @@ struct PostDetailView: View {
     private struct RSSReaderInput: Equatable {
         let post: Post
         let originalHTML: String?
+    }
+
+    private var hasParsedCurrentArticle: Bool {
+        storedRSSArticleBlocks != nil && storedRSSArticleInput == rssReaderInput
     }
 
     private var rssReaderInput: RSSReaderInput? {
@@ -1268,6 +1283,11 @@ struct PostDetailView: View {
             .padding(.horizontal, 18)
             .padding(.top, 2)
             .padding(.bottom, 60)
+            .measureReadingSheetContent(
+                when: hasFinishedLoadingDetail && post.hasFullZhihuAnswer
+                    && (post.zhihuAnswerHTML == nil || hasParsedCurrentArticle),
+                additionalHeight: 52
+            )
         }
     }
 
@@ -2000,6 +2020,9 @@ struct PostDetailView: View {
                     }
                 }
                 .padding(.bottom, 76)
+                .measureReadingSheetContent(
+                    when: hasFinishedLoadingDetail && !isLoadingXFullText && !isLoadingXComments && !xDetailHasMedia
+                )
             }
             // Keep scrolled content inside the viewport, below the status bar.
             .clipped()

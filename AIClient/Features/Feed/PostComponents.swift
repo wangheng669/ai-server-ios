@@ -138,6 +138,24 @@ extension View {
             .appPresentationCornerRadius(28)
             .appPresentationScrollsWithoutExpanding()
     }
+
+    func measureReadingSheetContent(when isReady: Bool, additionalHeight: CGFloat = 0) -> some View {
+        modifier(ReadingSheetContentHeight(isReady: isReady, additionalHeight: additionalHeight))
+    }
+}
+
+private struct ReadingSheetContentHeight: ViewModifier {
+    let isReady: Bool
+    let additionalHeight: CGFloat
+    @State private var height: CGFloat?
+
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.height.rounded(.up) }) { measuredHeight in
+                height = measuredHeight > 0 ? measuredHeight + additionalHeight : nil
+            }
+            .appReadingContentHeight(isReady ? height : nil)
+    }
 }
 
 struct InAppBrowserDestination: Identifiable, Equatable {
