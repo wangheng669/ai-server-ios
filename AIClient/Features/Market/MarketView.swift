@@ -144,7 +144,7 @@ struct MarketView: View {
         .environment(\.rootTabIsActive, isResearchVisible)
         .appSheet(isPresented: $showsRetailInvestors) {
             RetailInvestorView(store: investorMoodStore)
-                .appPresentationDetents([.large])
+                .appPresentationDetents([.medium, .large])
                 .appPresentationCornerRadius(28)
                 .appPresentationBackground(InvestmentDesign.surface)
                 .appPresentationScrollsWithoutExpanding()

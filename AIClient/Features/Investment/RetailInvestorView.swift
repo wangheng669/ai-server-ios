@@ -1,36 +1,45 @@
 import AVKit
 import Observation
 import SwiftUI
+import UIKit
 
 struct RetailInvestorView: View {
-    private let store: InvestorMoodStore
-    @State private var playbackItem: InvestorMoodItem?
+    let store: InvestorMoodStore
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var selectedID: InvestorMoodItem.ID?
+    @State private var playbackItem: InvestorMoodItem?
 
-    @MainActor
-    init(store: InvestorMoodStore) {
-        self.store = store
+    private var items: [InvestorMoodItem] {
+        store.investorMood?.items ?? []
+    }
+
+    private var selectedIndex: Int {
+        items.firstIndex { $0.id == selectedID } ?? 0
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                investorMoodContent
-                    .padding(.horizontal, InvestmentDesign.pageInset)
-                    .padding(.top, 20)
-                    .padding(.bottom, 64)
+        VStack(spacing: 8) {
+            header
+                .frame(maxWidth: TodayBriefStyle.maximumCardWidth)
+                .padding(.horizontal, TodayBriefStyle.horizontalInset)
+
+            if items.isEmpty {
+                emptyState
+            } else {
+                pager
             }
-            .background(InvestmentDesign.canvas)
-            .task {
-                await store.refreshInvestorMood(force: true)
-            }
-            .toolbar(.hidden, for: .navigationBar)
-            .overlay(alignment: .bottomTrailing) {
-                DetailSheetCloseButton(
-                    action: dismiss.callAsFunction,
-                    accessibilityLabel: "关闭散户观点"
-                )
-                .padding(16)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+        .background(TodayBriefStyle.surface)
+        .task {
+            await store.refreshInvestorMood(force: true)
+        }
+        .onChange(of: items.map(\.id)) { _, ids in
+            if let selectedID, !ids.contains(selectedID) {
+                self.selectedID = ids.first
             }
         }
         .appSheet(item: $playbackItem) { item in
@@ -38,28 +47,70 @@ struct RetailInvestorView: View {
         }
     }
 
-    private var investorMoodContent: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
+    private var header: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text("散户观点")
-                    .font(.title2.bold())
+                    .font(.headline)
                     .accessibilityAddTraits(.isHeader)
-                Text("视频观点由 AI 自动解读")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 2)
 
-            if let items = store.investorMood?.items, !items.isEmpty {
-                LazyVStack(spacing: 10) {
-                    ForEach(items) { item in
-                        InvestorMoodVideoCard(item: item, onPlay: { playbackItem = item })
-                    }
+                if items.count > 1 {
+                    pageProgress
                 }
-            } else {
-                emptyState
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            DetailSheetCloseButton(
+                action: dismiss.callAsFunction,
+                accessibilityLabel: "关闭散户观点"
+            )
+        }
+    }
+
+    private var pageProgress: some View {
+        HStack(spacing: 8) {
+            Text("\(selectedIndex + 1) / \(items.count)")
+                .font(.caption.weight(.semibold).monospacedDigit())
+                .foregroundStyle(TodayBriefStyle.accent)
+                .fixedSize()
+
+            ProgressView(value: Double(selectedIndex + 1), total: Double(items.count))
+                .tint(TodayBriefStyle.accent)
+                .accessibilityHidden(true)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("散户观点进度")
+        .accessibilityValue("第 \(selectedIndex + 1) 张，共 \(items.count) 张")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: advance(by: 1)
+            case .decrement: advance(by: -1)
+            @unknown default: break
             }
         }
+    }
+
+    private var pager: some View {
+        GeometryReader { viewport in
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 0) {
+                    ForEach(items) { item in
+                        InvestorMoodVideoCard(item: item) { playbackItem = item }
+                            .frame(maxWidth: TodayBriefStyle.maximumCardWidth)
+                            .padding(.horizontal, TodayBriefStyle.horizontalInset)
+                            .padding(.bottom, 6)
+                            .containerRelativeFrame(.horizontal)
+                            .frame(height: viewport.size.height)
+                    }
+                }
+                .scrollTargetLayout()
+            }
+            .scrollIndicators(.hidden)
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: $selectedID, anchor: .center)
+            .scrollBounceBehavior(.basedOnSize)
+        }
+        .accessibilityIdentifier("retail-investor-pager")
     }
 
     private var emptyState: some View {
@@ -72,9 +123,15 @@ struct RetailInvestorView: View {
         }
         .font(.subheadline)
         .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(InvestmentDesign.surface, in: RoundedRectangle(cornerRadius: 16))
+        .padding(20)
+    }
+
+    private func advance(by offset: Int) {
+        let destination = selectedIndex + offset
+        guard items.indices.contains(destination) else { return }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) {
+            selectedID = items[destination].id
+        }
     }
 }
 
@@ -84,76 +141,133 @@ private struct InvestorMoodVideoCard: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        let contentLayout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
-            : AnyLayout(HStackLayout(alignment: .top, spacing: 14))
-        let shape = RoundedRectangle(cornerRadius: 16)
-
-        Button(action: onPlay) {
-            VStack(alignment: .leading, spacing: 12) {
-                header
-                contentLayout {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(summary)
-                            .font(.subheadline)
-                            .foregroundStyle(.primary)
-                            .lineSpacing(3)
-                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 4)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        Label("播放原视频", systemImage: "play.fill")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    thumbnail
-                        .frame(width: 76, height: 100)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .accessibilityHidden(true)
+        let shape = RoundedRectangle(cornerRadius: TodayBriefStyle.cardCornerRadius)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    header
+                    interpretation
                 }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(InvestmentDesign.surface, in: shape)
-            .overlay {
-                shape.strokeBorder(InvestmentDesign.divider, lineWidth: 1)
-                    .allowsHitTesting(false)
-            }
-            .contentShape(shape)
+            .scrollBounceBehavior(.basedOnSize)
+
+            Divider()
+                .padding(.horizontal, 16)
+            originalVideoButton
+                .padding(.horizontal, 16)
+                .padding(.vertical, 4)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(item.nickname)，\(item.label)，\(publication)")
-        .accessibilityValue(summary)
-        .accessibilityHint("播放原视频")
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(TodayBriefStyle.surface, in: shape)
+        .clipShape(shape)
+        .overlay {
+            shape.strokeBorder(TodayBriefStyle.surfaceOutline)
+                .allowsHitTesting(false)
+        }
+        .shadow(color: TodayBriefStyle.accent.opacity(0.06), radius: 6, x: 0, y: 2)
+        .accessibilityIdentifier("retail-investor-card-\(item.id)")
     }
 
     private var header: some View {
         let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
-            : AnyLayout(HStackLayout(alignment: .top, spacing: 8))
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 14))
 
         return layout {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(item.nickname)
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                Text(publication)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.nickname)
+                        .font(.subheadline.weight(.semibold))
+                    Text(publication)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                moodBadge
+
+                if let description = item.description.nonEmpty {
+                    Text(description)
+                        .font(.headline)
+                        .accessibilityAddTraits(.isHeader)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            moodBadge
+
+            if item.directPlaybackURL != nil {
+                Button(action: onPlay) {
+                    thumbnail
+                        .frame(width: 84, height: 112)
+                        .clipped()
+                        .overlay {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 32, height: 32)
+                                .background(.black.opacity(0.54), in: Circle())
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("在焦点内播放视频")
+            }
         }
+    }
+
+    @ViewBuilder
+    private var interpretation: some View {
+        if let analysis = item.analysis.nonEmpty, item.analysisSource.nonEmpty != nil {
+            readingSection("AI 解读", text: analysis)
+        } else if let transcript = item.transcript.nonEmpty {
+            readingSection("视频字幕", text: transcript)
+        } else {
+            Text(item.analysis.nonEmpty ?? "当前视频暂无解读")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func readingSection(_ title: String, text: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(TodayBriefStyle.accent)
+                .accessibilityAddTraits(.isHeader)
+            Text(text)
+                .font(.body)
+                .lineSpacing(4)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var originalVideoButton: some View {
+        let url = item.originalVideoURL
+        return Button {
+            guard let url else { return }
+            UIApplication.shared.open(url)
+        } label: {
+            HStack(spacing: 8) {
+                Image("TikTokMark")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 20, height: 20)
+                    .accessibilityHidden(true)
+                Text(url == nil ? "暂无原视频链接" : "抖音原视频")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(url == nil)
+        .accessibilityHint(url == nil ? "" : "打开当前卡片对应的抖音视频")
+        .accessibilityIdentifier("retail-investor-open-douyin")
     }
 
     private var publication: String {
         let time = InvestorMoodFormat.compactRelativeTime(item.createdAt)
         return item.stale ? "\(time) · 旧样本" : time
-    }
-
-    private var summary: String {
-        item.analysis.nonEmpty ?? item.transcript.nonEmpty ?? item.description.nonEmpty ?? "当前视频暂无可用内容"
     }
 
     private var thumbnail: some View {
@@ -163,7 +277,7 @@ private struct InvestorMoodVideoCard: View {
             } else if phase.error != nil {
                 proxyCoverImage
             } else {
-                coverPlaceholder
+                InvestmentDesign.secondarySurface
             }
         }
     }
@@ -173,18 +287,9 @@ private struct InvestorMoodVideoCard: View {
             if let image = phase.image {
                 image.resizable().scaledToFill()
             } else {
-                coverPlaceholder
+                InvestmentDesign.secondarySurface
             }
         }
-    }
-
-    private var coverPlaceholder: some View {
-        InvestmentDesign.secondarySurface
-            .overlay {
-                Image(systemName: "video")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-            }
     }
 
     private var moodBadge: some View {

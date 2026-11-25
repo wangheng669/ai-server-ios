@@ -926,6 +926,14 @@ struct InvestorMoodItem: Decodable, Identifiable {
         ageHours = try values.decodeIfPresent(Double.self, forKey: .ageHours)
     }
 
+    var originalVideoURL: URL? {
+        guard let source = URL(string: url.trimmingCharacters(in: .whitespacesAndNewlines)),
+              source.scheme?.lowercased() == "https",
+              let host = source.host?.lowercased(),
+              host == "douyin.com" || host.hasSuffix(".douyin.com") else { return nil }
+        return source
+    }
+
     var playbackURL: URL? {
         proxiedMediaURL(from: videoUrl)
     }
