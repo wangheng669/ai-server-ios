@@ -215,6 +215,7 @@ private struct AppModalPresenter<Sheet: View>: UIViewControllerRepresentable {
                 guard let self else { return }
                 self.host = nil
                 self.closing = false
+                self.options.readingContentHeight = nil
                 self.onDismiss?()
             }
             self.host = host
@@ -232,17 +233,33 @@ private struct AppModalPresenter<Sheet: View>: UIViewControllerRepresentable {
             options = updated
             guard updated != previous, let host else { return }
             if let sheet = host.presentationController as? UISheetPresentationController {
-                applyOptions(to: sheet)
+                applyOptions(
+                    to: sheet,
+                    animateReadingResize: updated.readingContentHeight != previous.readingContentHeight
+                        && host.viewIfLoaded?.window != nil && !host.isBeingPresented
+                )
             }
             host.view.backgroundColor = updated.background.map(UIColor.init) ?? .systemBackground
         }
 
-        private func applyOptions(to sheet: UISheetPresentationController) {
-            let detents = (options.detents ?? [.large]).sorted { $0.rawValue < $1.rawValue }
+        private func applyOptions(to sheet: UISheetPresentationController, animateReadingResize: Bool = false) {
+            var supportedDetents = options.detents ?? [.large]
+            // The window height keeps the cutoff stable after the sheet resizes.
+            if supportedDetents == [.large], let height = options.readingContentHeight,
+               sheet.presentingViewController.traitCollection.verticalSizeClass != .compact,
+               let windowHeight = sheet.presentingViewController.viewIfLoaded?.window?.bounds.height,
+               height <= windowHeight * 0.45 {
+                supportedDetents.insert(.medium)
+            }
+            let detents = supportedDetents.sorted { $0.rawValue < $1.rawValue }
             let identifiers = detents.map(\.identifier)
             if sheet.detents.map(\.identifier) != identifiers {
-                sheet.detents = detents.map(\.native)
-                if options.selection == nil { sheet.selectedDetentIdentifier = detents.first?.identifier }
+                let updateDetents = {
+                    sheet.detents = detents.map(\.native)
+                    if self.options.selection == nil { sheet.selectedDetentIdentifier = detents.first?.identifier }
+                }
+                if animateReadingResize { sheet.animateChanges(updateDetents) }
+                else { updateDetents() }
             }
             if let selected = options.selection, sheet.selectedDetentIdentifier != selected.identifier {
                 sheet.selectedDetentIdentifier = selected.identifier
@@ -362,18 +379,21 @@ private struct AppModalOptions: Equatable {
     var onSelectionChange: ((AppModalDetent) -> Void)?
     var cornerRadius: CGFloat?
     var scrollsWithoutExpanding = false
+    var readingContentHeight: CGFloat?
     var background: Color?
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.detents == rhs.detents && lhs.selection == rhs.selection
             && lhs.cornerRadius == rhs.cornerRadius
             && lhs.scrollsWithoutExpanding == rhs.scrollsWithoutExpanding
+            && lhs.readingContentHeight == rhs.readingContentHeight
             && lhs.background == rhs.background
     }
     mutating func merge(_ other: Self) {
         if let value = other.detents { detents = value; selection = other.selection; onSelectionChange = other.onSelectionChange }
         if let value = other.cornerRadius { cornerRadius = value }
         scrollsWithoutExpanding = scrollsWithoutExpanding || other.scrollsWithoutExpanding
+        if let height = other.readingContentHeight { readingContentHeight = height }
         if let value = other.background { background = value }
     }
 }
@@ -397,6 +417,9 @@ extension View {
     }
     func appPresentationScrollsWithoutExpanding() -> some View {
         transformPreference(AppModalOptionsKey.self) { $0.scrollsWithoutExpanding = true }
+    }
+    func appReadingContentHeight(_ height: CGFloat?) -> some View {
+        transformPreference(AppModalOptionsKey.self) { $0.readingContentHeight = height }
     }
 }
 
