@@ -368,9 +368,14 @@ final class MarketStore {
     }
 
     func lastSessionTrade(for quote: MarketQuote) -> MarketLastSessionTrade? {
-        guard quote.stale == true, !isShowingCachedSnapshot,
-              let trade = dashboard?.symbolHealth.first(where: { $0.symbol == quote.symbol })?.lastSessionTrade,
-              trade.timestamp == quote.quality?.asOfTimestamp else { return nil }
+        guard quote.stale == true else { return nil }
+        return lastSessionTrade(symbol: quote.symbol, asOf: quote.quality?.asOfTimestamp)
+    }
+
+    func lastSessionTrade(symbol: String, asOf: Int64?) -> MarketLastSessionTrade? {
+        guard !isShowingCachedSnapshot,
+              let trade = dashboard?.symbolHealth.first(where: { $0.symbol == symbol })?.lastSessionTrade,
+              trade.timestamp == asOf else { return nil }
         return trade
     }
 
@@ -563,7 +568,7 @@ func marketTrendBackfillSymbols(for dashboard: MarketDashboard, limit: Int = 24)
     // Regional lead indices drive both the hero and index rows, so protect them from the bounded
     // queue before filling gaps in the larger stock lists.
     let quotes = dashboard.coreIndices
-        + (dashboard.componentsByRegion["us"] ?? [])
+        + (dashboard.regionalStockEntries["us"] ?? []).compactMap(\.quote)
         + dashboard.allRegionalComponents
         + dashboard.referenceIndices
         + dashboard.metrics

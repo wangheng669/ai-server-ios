@@ -443,9 +443,9 @@ private struct MarketQuotesPage: View {
         indexSymbols.compactMap { store.quote(symbol: $0) }
     }
 
-    private var stocks: [MarketQuote] {
+    private var stocks: [MarketDashboardQuoteEntry] {
         guard let region else { return [] }
-        return store.dashboard?.componentsByRegion[region.dashboardID] ?? []
+        return store.dashboard?.regionalStockEntries[region.dashboardID] ?? []
     }
 
     private var stocksTitle: String {
@@ -453,7 +453,7 @@ private struct MarketQuotesPage: View {
     }
 
     private var requestedQuotes: [MarketQuote] {
-        (indices + stocks).reduce(into: [MarketQuote]()) { result, quote in
+        (indices + stocks.compactMap(\.quote)).reduce(into: [MarketQuote]()) { result, quote in
             guard !result.contains(where: { $0.symbol == quote.symbol }) else { return }
             result.append(quote)
         }
@@ -520,9 +520,19 @@ private struct MarketQuotesPage: View {
                         .padding(.horizontal, 18)
 
                         LazyVStack(spacing: 0) {
-                            ForEach(stocks, id: \.symbol) { quote in
-                                quoteRow(quote)
-                                if quote.symbol != stocks.last?.symbol {
+                            ForEach(stocks) { entry in
+                                switch entry {
+                                case let .quote(quote):
+                                    quoteRow(quote)
+                                case let .unavailable(stock):
+                                    Button { onSelectQuote(stock.symbol) } label: {
+                                        MarketUnavailableStockRow(stock: stock, store: store)
+                                            .padding(.horizontal, 18)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityIdentifier("market-quote-\(stock.symbol)")
+                                }
+                                if entry.id != stocks.last?.id {
                                     Divider().padding(.leading, 66).padding(.trailing, 18)
                                 }
                             }
@@ -1537,7 +1547,14 @@ private struct MarketIndexDetailView: View {
 
     private var detailHeader: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let quote, showsStockSessionQuotes {
+            if quote == nil, let stock = store.dashboard?.unavailableStock(symbol: symbol) {
+                Text("当前报价暂缺")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if let trade = store.lastSessionTrade(symbol: symbol, asOf: stock.quality.asOfTimestamp) {
+                    MarketLastSessionTradeNote(trade: trade, symbol: symbol)
+                }
+            } else if let quote, showsStockSessionQuotes {
                 stockSessionHeader(quote)
                 if selectedRange != .day { detailChange }
             } else {
@@ -1570,8 +1587,8 @@ private struct MarketIndexDetailView: View {
 
     private var showsStockSessionQuotes: Bool {
         guard !isIndex, !isCrypto, !isCommodity else { return false }
-        let usStocks = store.dashboard?.componentsByRegion[MarketRegion.unitedStates.dashboardID]
-        return usStocks?.contains(where: { $0.symbol == symbol }) == true
+        let usStocks = store.dashboard?.regionalStockEntries[MarketRegion.unitedStates.dashboardID]
+        return usStocks?.contains(where: { $0.id == symbol }) == true
             || (showsCompanyProfile && store.chart(symbol: chartSymbol, range: .day)?.market == "US")
     }
 

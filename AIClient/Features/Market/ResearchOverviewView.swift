@@ -34,7 +34,11 @@ enum ResearchHomeContent {
     static var chartSymbols: [String] { primaryMarkets.map(\.1) }
 
     static func stocks(in dashboard: MarketDashboard?, region: MarketRegion) -> [MarketQuote] {
-        Array((dashboard?.componentsByRegion[region.dashboardID] ?? []).prefix(4))
+        stockEntries(in: dashboard, region: region).compactMap(\.quote)
+    }
+
+    static func stockEntries(in dashboard: MarketDashboard?, region: MarketRegion) -> [MarketDashboardQuoteEntry] {
+        Array((dashboard?.regionalStockEntries[region.dashboardID] ?? []).prefix(4))
     }
 
     static func afterHoursSymbols(for stocks: [MarketQuote]) -> [String] {
@@ -449,13 +453,14 @@ struct ResearchHomeView: View {
                 onOpenMarketQuotes(.region(stockRegion))
             }
             stockRegionSelector
-            if stocks.isEmpty {
+            let entries = ResearchHomeContent.stockEntries(in: store.dashboard, region: stockRegion)
+            if entries.isEmpty {
                 Text("暂无股票行情")
                     .font(.subheadline).foregroundStyle(ResearchStyle.muted)
                     .frame(maxWidth: .infinity, minHeight: 60)
             } else {
                 ResearchStockQuotes(
-                    quotes: stocks,
+                    entries: entries,
                     region: stockRegion,
                     store: store,
                     onOpen: onOpenMarketDetail
@@ -603,11 +608,12 @@ private struct ResearchTopicSheet<Content: View>: View {
 }
 
 private struct ResearchStockQuotes: View {
-    let quotes: [MarketQuote]
+    let entries: [MarketDashboardQuoteEntry]
     let region: MarketRegion
     let store: MarketStore
     let onOpen: (String) -> Void
 
+    private var quotes: [MarketQuote] { entries.compactMap(\.quote) }
     private var showsExtendedHours: Bool { region == .unitedStates }
     private var extendedSession: MarketTradingSession {
         quotes.contains { $0.tradingSession == .premarket } ? .premarket : .overnight
@@ -634,11 +640,21 @@ private struct ResearchStockQuotes: View {
             .padding(.vertical, 8)
             .background(ResearchStyle.marketSurface, in: RoundedRectangle(cornerRadius: 8))
 
-            ForEach(quotes) { quote in
-                if quote.id != quotes.first?.id {
+            ForEach(entries) { entry in
+                if entry.id != entries.first?.id {
                     ResearchStyle.divider.frame(height: 0.5)
                 }
-                stockRow(quote)
+                switch entry {
+                case let .quote(quote):
+                    stockRow(quote)
+                case let .unavailable(stock):
+                    Button { onOpen(stock.symbol) } label: {
+                        MarketUnavailableStockRow(stock: stock, store: store)
+                            .padding(.horizontal, 8)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("research-stock-\(stock.symbol)")
+                }
             }
 
             if showsExtendedHours {
@@ -727,6 +743,34 @@ private struct ResearchStockQuotes: View {
         return showsExtendedHours ? code : "\(code)\n\(quote.researchStatus)"
     }
 }
+struct MarketUnavailableStockRow: View {
+    let stock: MarketDashboardQuoteEntry.Unavailable
+    let store: MarketStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(stock.presentationName).font(.subheadline.weight(.semibold))
+                    Text([stock.symbol, stock.currency].compactMap { $0 }.joined(separator: " · "))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+                Text("当前报价暂缺")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let trade = store.lastSessionTrade(symbol: stock.symbol, asOf: stock.quality.asOfTimestamp) {
+                MarketLastSessionTradeNote(trade: trade, symbol: stock.symbol)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+}
+
 
 private struct ResearchSparkline: View, Equatable {
     let values: [Double]
