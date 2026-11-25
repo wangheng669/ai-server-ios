@@ -2173,49 +2173,134 @@ func marketActiveIndexSession(_ quote: MarketQuote?) -> MarketQuote? {
     return quote.tradingSession.isActivelyTrading && quote.tradingSession != .alwaysOpen ? quote : nil
 }
 
-struct MarketStockLinks {
-    let xueqiu: URL
-    let longbridge: URL
-    let eastmoney: URL
+enum MarketStockApp: String, CaseIterable, Identifiable {
+    case xueqiu, longbridge, eastmoney
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .xueqiu: "雪球"
+        case .longbridge: "长桥"
+        case .eastmoney: "东方财富"
+        }
+    }
+
+    var requiresUniversalLink: Bool { self == .xueqiu }
+}
+
+struct MarketStockAppLinks {
+    private let xueqiu: URL
+    private let longbridge: URL
+    private let eastmoneyCode: String
+    private let eastmoneyMarket: String?
 
     init?(symbol: String) {
         let normalized = symbol.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         let xueqiuCode: String
         let longbridgeCode: String
-        let eastmoneyPath: String
 
         if normalized.hasSuffix(".SS") || normalized.hasSuffix(".SZ") {
             let code = String(normalized.dropLast(3))
             guard code.count == 6, code.allSatisfy(\.isNumber) else { return nil }
-            let exchange = normalized.hasSuffix(".SS") ? "SH" : "SZ"
+            let isShanghai = normalized.hasSuffix(".SS")
+            let exchange = isShanghai ? "SH" : "SZ"
             xueqiuCode = exchange + code
             longbridgeCode = "\(code).\(exchange)"
-            eastmoneyPath = "\(exchange.lowercased())\(code)"
+            eastmoneyCode = code
+            eastmoneyMarket = isShanghai ? "1" : "0"
         } else if normalized.hasSuffix(".HK") {
             let code = normalized.dropLast(3)
             guard (1...5).contains(code.count), code.allSatisfy(\.isNumber) else { return nil }
             let paddedCode = String(repeating: "0", count: 5 - code.count) + code
             xueqiuCode = paddedCode
             longbridgeCode = "\(paddedCode).HK"
-            eastmoneyPath = "hk/\(paddedCode)"
+            eastmoneyCode = paddedCode
+            eastmoneyMarket = "116"
         } else {
             let supportedCharacters = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-")
             let unsupportedMarketSuffixes = [".T", ".KS", ".KQ"]
             guard !unsupportedMarketSuffixes.contains(where: normalized.hasSuffix),
                   normalized.unicodeScalars.allSatisfy(supportedCharacters.contains),
                   normalized.unicodeScalars.contains(where: CharacterSet.uppercaseLetters.contains) else { return nil }
-            let quoteCode = normalized.replacingOccurrences(of: "-", with: ".")
             xueqiuCode = normalized
-            longbridgeCode = "\(quoteCode).US"
-            eastmoneyPath = "us/\(quoteCode.lowercased())"
+            longbridgeCode = normalized.replacingOccurrences(of: "-", with: ".") + ".US"
+            eastmoneyCode = normalized.replacingOccurrences(of: ".", with: "_").replacingOccurrences(of: "-", with: "_")
+            eastmoneyMarket = nil
         }
 
         guard let xueqiu = URL(string: "https://xueqiu.com/S/\(xueqiuCode)"),
-              let longbridge = URL(string: "https://longbridge.com/zh-CN/quote/\(longbridgeCode)"),
-              let eastmoney = URL(string: "https://quote.eastmoney.com/\(eastmoneyPath).html") else { return nil }
+              let longbridge = URL(string: "lb://page/stock/detail?id=\(longbridgeCode)") else { return nil }
         self.xueqiu = xueqiu
         self.longbridge = longbridge
-        self.eastmoney = eastmoney
+    }
+
+    func url(for app: MarketStockApp) async throws -> URL? {
+        switch app {
+        case .xueqiu: return xueqiu
+        case .longbridge: return longbridge
+        case .eastmoney:
+            let market: String?
+            if let eastmoneyMarket {
+                market = eastmoneyMarket
+            } else {
+                market = try await fetchEastmoneyUSMarket()
+            }
+            guard let market else { return nil }
+            return URL(string: "eastmoney://page/stockpage?code=\(eastmoneyCode)&market=\(market)")
+        }
+    }
+
+    private func fetchEastmoneyUSMarket() async throws -> String? {
+        // US stocks and ETFs trade on different exchanges with distinct Eastmoney market IDs.
+        var search = URLComponents()
+        search.scheme = "https"
+        search.host = "searchapi.eastmoney.com"
+        search.path = "/api/suggest/get"
+        search.queryItems = [
+            URLQueryItem(name: "input", value: eastmoneyCode),
+            URLQueryItem(name: "type", value: "14"),
+            URLQueryItem(name: "count", value: "10")
+        ]
+        guard let url = search.url else { return nil }
+        let (data, response) = try await URLSession.shared.data(for: URLRequest(url: url, timeoutInterval: 5))
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        let result = try JSONDecoder().decode(EastmoneySymbolSearch.self, from: data)
+        return result.quotes.matches?.first { $0.code == eastmoneyCode && $0.category == "UsStock" }?.market
+    }
+
+    private struct EastmoneySymbolSearch: Decodable {
+        let quotes: Quotes
+
+        enum CodingKeys: String, CodingKey {
+            case quotes = "QuotationCodeTable"
+        }
+
+        struct Quotes: Decodable {
+            let matches: [Match]?
+
+            enum CodingKeys: String, CodingKey {
+                case matches = "Data"
+            }
+        }
+
+        struct Match: Decodable {
+            let code: String
+            let quoteID: String
+            let category: String
+
+            enum CodingKeys: String, CodingKey {
+                case code = "Code"
+                case quoteID = "QuoteID"
+                case category = "Classify"
+            }
+
+            var market: String? {
+                let fields = quoteID.split(separator: ".", maxSplits: 1)
+                guard fields.count == 2, fields[1] == code, Int(fields[0]) != nil else { return nil }
+                return String(fields[0])
+            }
+        }
     }
 }
 
