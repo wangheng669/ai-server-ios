@@ -995,7 +995,6 @@ final class NewsFeedViewModel: ObservableObject {
             cache[next] = prepared.snapshot
         }
         let saved = cache[next] ?? prepared?.snapshot
-        if next == .x, let saved { seedCachedXTranslations(for: saved.posts) }
         posts = saved?.posts ?? []
         page = saved?.page ?? 1
         canLoadMore = saved?.canLoadMore ?? true
@@ -1091,6 +1090,8 @@ final class NewsFeedViewModel: ObservableObject {
                 try Task.checkCancellation()
                 let snapshot = Snapshot(posts: posts, page: 1, canLoadMore: hasMorePages(source, count: posts.count))
                 if self.source != source || firstPageTask == nil {
+                    // Publish the prepared rows with their cached translations before a swipe selects them.
+                    if source == .x { seedCachedXTranslations(for: posts) }
                     preparedPages[source] = PreparedPage(snapshot: snapshot, fetchedAt: Date())
                     schedulePresentationPrewarm(for: posts, source: source)
                 }
@@ -1114,8 +1115,11 @@ final class NewsFeedViewModel: ObservableObject {
               let saved = await diskCache.load(source: source, flashCategory: nil, serverURL: serverURL),
               !Task.isCancelled, preparedPages[source] == nil else { return }
         let snapshot = Snapshot(posts: saved.posts, page: saved.page, canLoadMore: saved.canLoadMore)
-        if source == .x, #available(iOS 26.0, *) {
-            FeedTranslationCache.shared.warmXTranslations(snapshot.posts.prefix(10).flatMap(\.xTranslationInputs))
+        if source == .x {
+            seedCachedXTranslations(for: snapshot.posts)
+            if #available(iOS 26.0, *) {
+                FeedTranslationCache.shared.warmXTranslations(snapshot.posts.prefix(10).flatMap(\.xTranslationInputs))
+            }
         }
         if source == self.source, posts.isEmpty, isLoading, usesDefaultFeed(source) {
             showPreparedSnapshot(snapshot)
@@ -1125,7 +1129,6 @@ final class NewsFeedViewModel: ObservableObject {
     }
 
     private func showPreparedSnapshot(_ snapshot: Snapshot) {
-        if source == .x { seedCachedXTranslations(for: snapshot.posts) }
         posts = snapshot.posts
         page = snapshot.page
         canLoadMore = snapshot.canLoadMore
@@ -1391,11 +1394,11 @@ final class NewsFeedViewModel: ObservableObject {
     private func pretranslateTimeline(_ posts: [Post]) {
         guard source == .x, !posts.isEmpty else { return }
         let candidates = Array(posts.prefix(10))
-        if #available(iOS 26.0, *) {
-            FeedTranslationCache.shared.warmXTranslations(candidates.flatMap(\.xTranslationInputs))
-        }
         Task(priority: .utility) { [weak self] in
-            guard let self else { return }
+            guard let self, self.source == .x else { return }
+            if #available(iOS 26.0, *) {
+                FeedTranslationCache.shared.warmXTranslations(candidates.flatMap(\.xTranslationInputs))
+            }
             await runWithLimitedConcurrency(candidates, maximumConcurrentRequests: 2) { post in
                 await self.translateXPostIfNeeded(post)
             }
