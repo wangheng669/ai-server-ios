@@ -161,7 +161,8 @@ private struct ReadingSheetContentHeight: ViewModifier {
 struct InAppBrowserDestination: Identifiable, Equatable {
     let url: URL
     var embeddedWebsiteSource: FeedSource?
-    var id: String { url.absoluteString }
+    var opensXueqiuQuote = false
+    var id: String { (opensXueqiuQuote ? "xueqiu-quote:" : "") + url.absoluteString }
 }
 
 struct InAppBrowserSheet: View {
@@ -659,7 +660,9 @@ private struct InAppBrowserCoverModifier: ViewModifier {
 
     @ViewBuilder
     private func browser(for destination: InAppBrowserDestination) -> some View {
-        if let source = destination.embeddedWebsiteSource {
+        if destination.opensXueqiuQuote {
+            XueqiuQuotedPostBrowser(parentURL: destination.url)
+        } else if let source = destination.embeddedWebsiteSource {
             EmbeddedWebPage(url: destination.url, source: source)
         } else {
             InAppBrowserSheet(url: destination.url)
@@ -670,6 +673,160 @@ private struct InAppBrowserCoverModifier: ViewModifier {
 extension View {
     func inAppBrowserCover(item: Binding<InAppBrowserDestination?>) -> some View {
         modifier(InAppBrowserCoverModifier(destination: item))
+    }
+}
+
+struct XueqiuQuotedPostBrowser: View {
+    let parentURL: URL
+    @Environment(\.dismiss) private var dismiss
+    @State private var phase: Phase = .loading
+    @State private var attempt = 0
+
+    private enum Phase {
+        case loading, ready, failed
+    }
+
+    var body: some View {
+        ZStack {
+            if phase != .failed {
+                XueqiuQuoteWebView(parentURL: parentURL) { loaded in
+                    guard phase == .loading else { return }
+                    phase = loaded ? .ready : .failed
+                }
+                .id(attempt)
+                .opacity(phase == .ready ? 1 : 0)
+                .allowsHitTesting(phase == .ready)
+                .accessibilityHidden(phase != .ready)
+            }
+
+            switch phase {
+            case .loading:
+                ProgressView("正在打开雪球原帖")
+            case .ready:
+                EmptyView()
+            case .failed:
+                ContentUnavailableView {
+                    Label("无法打开雪球原帖", systemImage: "link")
+                } actions: {
+                    Button("重试") {
+                        attempt += 1
+                        phase = .loading
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(uiColor: .systemBackground))
+        .floatingSheetClose("关闭网页详情", action: dismiss.callAsFunction)
+        .task(id: attempt) {
+            do { try await Task.sleep(for: .seconds(20)) } catch { return }
+            if phase == .loading { phase = .failed }
+        }
+    }
+
+    static func isPostURL(_ url: URL) -> Bool {
+        url.scheme == "https"
+            && (url.host == "xueqiu.com" || url.host == "www.xueqiu.com")
+            && url.path.range(of: #"^/[0-9]+/[0-9]+$"#, options: .regularExpression) != nil
+    }
+}
+
+private struct XueqiuQuoteWebView: UIViewRepresentable {
+    let parentURL: URL
+    let onLoad: (Bool) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(parentURL: parentURL, onLoad: onLoad) }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        let content = configuration.userContentController
+        content.add(context.coordinator, contentWorld: .defaultClient, name: Coordinator.linkMessage)
+        content.addUserScript(WKUserScript(
+            source: #"""
+            (() => {
+              const quote = document.querySelector('.article__bd > .timeline__item__forward > a.fake-anchor');
+              if (quote) window.webkit.messageHandlers.xueqiuQuoteLink.postMessage(quote.href);
+            })();
+            """#,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true,
+            in: .defaultClient
+        ))
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
+        webView.allowsLinkPreview = false
+        webView.load(URLRequest(url: parentURL, timeoutInterval: 15))
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {}
+
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
+        webView.configuration.userContentController.removeScriptMessageHandler(
+            forName: Coordinator.linkMessage,
+            contentWorld: .defaultClient
+        )
+        webView.stopLoading()
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
+        static let linkMessage = "xueqiuQuoteLink"
+        let parentURL: URL
+        let onLoad: (Bool) -> Void
+        private var quotedURL: URL?
+        private var didFinishQuote = false
+
+        init(parentURL: URL, onLoad: @escaping (Bool) -> Void) {
+            self.parentURL = parentURL
+            self.onLoad = onLoad
+        }
+
+        func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard quotedURL == nil, message.name == Self.linkMessage, message.frameInfo.isMainFrame,
+                  let source = message.frameInfo.request.url, XueqiuQuotedPostBrowser.isPostURL(source),
+                  source.path == parentURL.path,
+                  let href = message.body as? String, let target = URL(string: href),
+                  XueqiuQuotedPostBrowser.isPostURL(target), target.path != parentURL.path,
+                  let webView = message.webView else { return }
+            quotedURL = target
+            webView.load(URLRequest(url: target, timeoutInterval: 15))
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            preferences: WKWebpagePreferences,
+            decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void
+        ) {
+            // The desktop status page exposes the link on its quoted card.
+            if quotedURL == nil { preferences.preferredContentMode = .desktop }
+            let scheme = navigationAction.request.url?.scheme
+            decisionHandler(scheme == "https" || scheme == "http" ? .allow : .cancel, preferences)
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            guard !didFinishQuote, let quotedURL, let current = webView.url,
+                  XueqiuQuotedPostBrowser.isPostURL(current), current.path == quotedURL.path else { return }
+            didFinishQuote = true
+            onLoad(true)
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            if (error as NSError).code != NSURLErrorCancelled { onLoad(false) }
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            createWebViewWith configuration: WKWebViewConfiguration,
+            for navigationAction: WKNavigationAction,
+            windowFeatures: WKWindowFeatures
+        ) -> WKWebView? {
+            if didFinishQuote { webView.load(navigationAction.request) }
+            return nil
+        }
     }
 }
 
