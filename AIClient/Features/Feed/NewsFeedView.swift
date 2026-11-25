@@ -331,42 +331,10 @@ struct NewsFeedView: View {
     }
 
     private var sourceSelector: some View {
-        HStack(alignment: .center, spacing: 8) {
+        VStack(alignment: .trailing, spacing: 8) {
             if isSourceSelectorExpanded {
-                ScrollViewReader { proxy in
-                    ScrollView(.horizontal) {
-                        LazyHStack(spacing: 1) {
-                            ForEach(FeedSource.allCases) { source in
-                                sourceOption(source)
-                                    .id(source)
-                            }
-                        }
-                        .padding(4)
-                    }
-                    .scrollIndicators(.hidden)
-                    .onAppear {
-                        Task { @MainActor in
-                            await Task.yield()
-                            proxy.scrollTo(model.source, anchor: .center)
-                        }
-                    }
-                }
-                .frame(width: sourceSelectorExpandedWidth, height: 54)
-                .background(
-                    Color(uiColor: .systemBackground),
-                    in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-                )
-                .overlay {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(InvestmentDesign.divider.opacity(0.8), lineWidth: 0.5)
-                }
-                .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
-                .transition(
-                    .asymmetric(
-                        insertion: .scale(scale: 0.94, anchor: .trailing).combined(with: .opacity),
-                        removal: .scale(scale: 0.97, anchor: .trailing).combined(with: .opacity)
-                    )
-                )
+                sourceMenu
+                    .transition(.scale(scale: 0.94, anchor: .bottomTrailing).combined(with: .opacity))
             }
 
             Button {
@@ -384,7 +352,7 @@ struct NewsFeedView: View {
                         .scaleEffect(isSourceSelectorExpanded ? 0.90 : 1)
 
                     if isSourceSelectorExpanded {
-                        Image(systemName: "chevron.up")
+                        Image(systemName: "chevron.down")
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundStyle(.secondary)
                             .frame(height: 8)
@@ -405,10 +373,33 @@ struct NewsFeedView: View {
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: model.source)
     }
 
-    private var sourceSelectorExpandedWidth: CGFloat {
-        let contentWidth = CGFloat(FeedSource.allCases.count) * 45 + 8
-        let availableWidth = UIScreen.main.bounds.width - 16 - 44 - 8
-        return min(contentWidth, max(54, availableWidth))
+    private var sourceMenu: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 2) {
+                    ForEach(FeedSource.allCases) { source in
+                        sourceOption(source)
+                            .id(source)
+                    }
+                }
+                .padding(4)
+            }
+            .task {
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+                proxy.scrollTo(model.source, anchor: .center)
+            }
+        }
+        .frame(width: 176)
+        .frame(maxHeight: 344)
+        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 16))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(InvestmentDesign.divider.opacity(0.8), lineWidth: 0.5)
+                .allowsHitTesting(false)
+        }
+        .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
     }
 
     private var userSelectorTransition: AnyTransition {
@@ -915,18 +906,15 @@ struct NewsFeedView: View {
                 selectSourceFromTap(source)
             }
         } label: {
-            ZStack(alignment: .topTrailing) {
-                ZStack(alignment: .bottom) {
-                    sourceIcon(source)
-                        .frame(width: 24, height: 24)
+            HStack(spacing: 10) {
+                sourceIcon(source)
+                    .frame(width: 30, height: 30)
 
-                    Capsule()
-                        .fill(InvestmentDesign.accent)
-                        .frame(width: 24, height: 3)
-                        .padding(.bottom, 1)
-                        .opacity(isSelected ? 1 : 0)
-                }
-                .frame(width: 44, height: 44)
+                Text(source.title)
+                    .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                    .foregroundStyle(.primary)
+
+                Spacer(minLength: 0)
 
                 if source == .bilibili {
                     Text("6")
@@ -934,12 +922,24 @@ struct NewsFeedView: View {
                         .foregroundStyle(.white)
                         .frame(width: 16, height: 16)
                         .background(Color.red, in: Circle())
-                        .offset(x: 1, y: 1)
+                        .accessibilityHidden(true)
+                }
+
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(InvestmentDesign.accent)
                         .accessibilityHidden(true)
                 }
             }
-                .frame(width: 44, height: 44)
-                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .frame(minHeight: 44)
+            .background(
+                isSelected ? InvestmentDesign.accent.opacity(0.08) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 12)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(source.title)
