@@ -81,6 +81,7 @@ struct PostDetailView: View {
     @State private var isLoadingXReplyContext = false
     @State private var isLoadingXFullText: Bool
     @State private var imageGallerySelection: ImageGallerySelection?
+    @State private var xueqiuQuoteLink: XueqiuQuoteLink?
     @State private var xueqiuQuoteLinkUnavailable = false
     @State private var xueqiuOpenFailed = false
     @State private var presentedArticleLink: InAppBrowserDestination?
@@ -1001,6 +1002,8 @@ struct PostDetailView: View {
 
     private var xueqiuDetail: some View {
         let presentation = post.xueqiuPresentation
+        let hasQuote = presentation.quoteBody != nil || !presentation.quoteImageURLs.isEmpty
+        let parentURL = hasQuote ? post.linkURL.flatMap(XueqiuQuoteLink.postURL) : nil
         return VStack(spacing: 0) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 22) {
@@ -1036,8 +1039,8 @@ struct PostDetailView: View {
                         )
                     }
 
-                    if presentation.quoteBody != nil || !presentation.quoteImageURLs.isEmpty {
-                        xueqiuQuoteCard(presentation)
+                    if hasQuote {
+                        xueqiuQuoteCard(presentation, parentURL: parentURL)
                     }
 
                     if !post.videoURLs.isEmpty || !presentation.unplacedImageURLs.isEmpty {
@@ -1063,6 +1066,10 @@ struct PostDetailView: View {
             openArticleLink(url)
             return .handled
         })
+        .task(id: parentURL) {
+            guard let parentURL else { return }
+            quoteLink(for: parentURL).prepare()
+        }
         .alert("缺少雪球帖子链接", isPresented: $xueqiuQuoteLinkUnavailable) {
             Button("知道了", role: .cancel) {}
         }
@@ -1073,13 +1080,21 @@ struct PostDetailView: View {
         }
     }
 
-    private func xueqiuQuoteCard(_ presentation: XueqiuPresentation) -> some View {
+    private func quoteLink(for parentURL: URL) -> XueqiuQuoteLink {
+        if let xueqiuQuoteLink, xueqiuQuoteLink.parentURL == parentURL { return xueqiuQuoteLink }
+        let quote = XueqiuQuoteLink(parentURL: parentURL)
+        xueqiuQuoteLink = quote
+        return quote
+    }
+
+    private func xueqiuQuoteCard(_ presentation: XueqiuPresentation, parentURL: URL?) -> some View {
         Button {
-            guard let url = post.linkURL, XueqiuQuotedPostBrowser.isPostURL(url) else {
+            guard let parentURL else {
                 xueqiuQuoteLinkUnavailable = true
                 return
             }
-            presentedArticleLink = InAppBrowserDestination(url: url, opensXueqiuQuote: true)
+            let quote = quoteLink(for: parentURL)
+            presentedArticleLink = InAppBrowserDestination(url: parentURL, xueqiuQuote: quote)
         } label: {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
