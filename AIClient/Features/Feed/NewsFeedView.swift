@@ -1890,6 +1890,9 @@ struct EmbeddedWebPage: View {
     }
 
     var body: some View {
+        let showsWeiboAccountToolbar = source == .weibo && !hidesWeiboAccountToolbar
+        let showsNavigationBar = showsWeiboAccountToolbar || !showsCloseButton
+
         ZStack(alignment: .top) {
             EmbeddedWebView(url: requestURL, model: model)
 
@@ -1920,7 +1923,7 @@ struct EmbeddedWebPage: View {
         .background(Color(uiColor: .systemBackground))
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(hidesWeiboAccountToolbar ? .hidden : .visible, for: .navigationBar)
+        .toolbar(showsNavigationBar ? .visible : .hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .overlay(alignment: .bottomTrailing) {
             if showsCloseButton {
@@ -1945,7 +1948,7 @@ struct EmbeddedWebPage: View {
             }
         }
         .toolbar {
-            if source == .weibo, !hidesWeiboAccountToolbar {
+            if showsWeiboAccountToolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         if model.isAuthenticating {
