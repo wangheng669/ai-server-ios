@@ -33,12 +33,20 @@ struct MarketService {
     }
 
     func chart(symbol: String, range: MarketRange, refresh: Bool = false) async throws -> MarketChart {
+        try await chart(symbol: symbol, interval: range.apiInterval, range: range.apiRange, limit: range.apiLimit, refresh: refresh)
+    }
+
+    func recentDailyCloses(symbol: String) async throws -> MarketChart {
+        try await chart(symbol: symbol, interval: "1d", range: "5d", limit: 5, refresh: false)
+    }
+
+    private func chart(symbol: String, interval: String, range: String, limit: Int, refresh: Bool) async throws -> MarketChart {
         var components = URLComponents(url: baseURL.appending(path: "api/ios/v1/market/chart"), resolvingAgainstBaseURL: false)
         var queryItems: [URLQueryItem] = [
             .init(name: "symbol", value: symbol),
-            .init(name: "interval", value: range.apiInterval),
-            .init(name: "range", value: range.apiRange),
-            .init(name: "limit", value: String(range.apiLimit))
+            .init(name: "interval", value: interval),
+            .init(name: "range", value: range),
+            .init(name: "limit", value: String(limit))
         ]
         if refresh { queryItems.append(.init(name: "refresh", value: "true")) }
         components?.queryItems = queryItems

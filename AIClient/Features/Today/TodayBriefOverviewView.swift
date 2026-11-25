@@ -85,6 +85,7 @@ private struct TodayCompanyStock: Sendable {
         case dashboard
         case index(String)
         case chart(String)
+        case dailyClose(String)
     }
 
     let name: String
@@ -101,6 +102,7 @@ private struct TodayCompanyStock: Sendable {
         "pichai": .init(name: "Alphabet", symbol: "GOOGL"),
         "nadella": .init(name: "微软", symbol: "MSFT"),
         "huang": .init(name: "英伟达", symbol: "NVDA"),
+        "amodei": .init(name: "Anthropic", symbol: "ANT", source: .dailyClose("ANT")),
         "zuckerberg": .init(name: "Meta", symbol: "META"),
         "apple": .init(name: "苹果", symbol: "AAPL"),
         "amazon": .init(name: "亚马逊", symbol: "AMZN"),
@@ -487,7 +489,6 @@ private struct TodayReportRetryButton: View {
 private struct TodayBriefDeck: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.rootTabIsActive) private var rootTabIsActive
-    @Environment(\.scenePhase) private var scenePhase
     @State private var selectedIndex = 0
     @State private var showsOriginals = false
     @State private var showsDirectory = false
@@ -544,7 +545,6 @@ private struct TodayBriefDeck: View {
         let selection = min(selectedIndex, brief.cards.count - 1)
         let cardHeight = summaryHeights[brief.cards[selection].id] ?? min(350, maximumHeight)
         let stock = brief.cards[selection].stock
-        let quoteSource = rootTabIsActive && scenePhase == .active ? stock?.source : nil
         VStack(spacing: 8) {
             readingProgress(selection: selection, width: cardWidth)
             ZStack(alignment: .top) {
@@ -591,10 +591,6 @@ private struct TodayBriefDeck: View {
                 }
             }
         }
-        .task(id: quoteSource, priority: .utility) {
-            guard let quoteSource else { return }
-            await loadStockQuotes(from: quoteSource)
-        }
         .onChange(of: brief.cards.map(\.id)) { previous, current in
             if let id = previous.indices.contains(selectedIndex) ? previous[selectedIndex] : nil,
                let index = current.firstIndex(of: id) {
@@ -617,30 +613,6 @@ private struct TodayBriefDeck: View {
             }
         }
         .accessibilityIdentifier("today-card-pager")
-    }
-
-    private func loadStockQuotes(from source: TodayCompanyStock.QuoteSource) async {
-        if source == .dashboard {
-            await marketStore.preloadDashboard()
-        } else {
-            await refreshStockQuotes(from: source)
-        }
-        while !Task.isCancelled {
-            do { try await Task.sleep(for: .seconds(30)) }
-            catch { return }
-            await refreshStockQuotes(from: source)
-        }
-    }
-
-    private func refreshStockQuotes(from source: TodayCompanyStock.QuoteSource) async {
-        switch source {
-        case .dashboard:
-            await marketStore.refresh(force: false)
-        case .index(let symbol):
-            await marketStore.loadIndexConstituents(symbol: symbol, maximumAge: 300)
-        case .chart(let symbol):
-            await marketStore.loadChart(symbol: symbol, range: .day)
-        }
     }
 
     private func summaryDeck(selection: Int, width: CGFloat, height: CGFloat, maximumHeight: CGFloat) -> some View {
@@ -1072,6 +1044,10 @@ private struct TodayBriefDeckLayers<Layer: View>: View, Animatable {
 }
 
 private struct TodayCompanyStockCard: View {
+    @Environment(\.rootTabIsActive) private var rootTabIsActive
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var dailyClose: (symbol: String, price: Price?)?
+
     private struct Price {
         let amount: Double
         let currency: String?
@@ -1091,6 +1067,8 @@ private struct TodayCompanyStockCard: View {
             quote = marketStore.indexConstituents[symbol]?.items.first { $0.id == stock.symbol }?.quote
         case .chart(let symbol):
             return chartPrice(symbol: symbol)
+        case .dailyClose(let symbol):
+            return dailyClose?.symbol == symbol ? dailyClose?.price : nil
         }
         guard let quote, quote.stale != true, quote.marketDisplayPrice.isFinite, quote.marketDisplayPrice > 0 else { return nil }
         return Price(amount: quote.marketDisplayPrice, currency: quote.currency,
@@ -1104,10 +1082,13 @@ private struct TodayCompanyStockCard: View {
             marketStore.indexConstituents[symbol] == nil && marketStore.constituentErrors[symbol] == nil
         case .chart(let symbol):
             marketStore.chart(symbol: symbol, range: .day) == nil && marketStore.chartError(symbol: symbol, range: .day) == nil
+        case .dailyClose(let symbol):
+            dailyClose?.symbol != symbol
         }
     }
 
     var body: some View {
+        let source = rootTabIsActive && scenePhase == .active ? stock.source : nil
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 14) {
                 identity
@@ -1130,6 +1111,57 @@ private struct TodayCompanyStockCard: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("today-stock-\(stock.symbol)")
+        .task(id: source, priority: .utility) {
+            guard let source else { return }
+            await loadStockQuotes(from: source)
+        }
+    }
+
+    private func loadStockQuotes(from source: TodayCompanyStock.QuoteSource) async {
+        let interval: Duration
+        if case .dailyClose = source { interval = .seconds(300) }
+        else { interval = .seconds(30) }
+
+        if source == .dashboard { await marketStore.preloadDashboard() }
+        else { await refreshStockQuotes(from: source) }
+
+        while !Task.isCancelled {
+            do { try await Task.sleep(for: interval) }
+            catch { return }
+            await refreshStockQuotes(from: source)
+        }
+    }
+
+    private func refreshStockQuotes(from source: TodayCompanyStock.QuoteSource) async {
+        switch source {
+        case .dashboard:
+            await marketStore.refresh(force: false)
+        case .index(let symbol):
+            await marketStore.loadIndexConstituents(symbol: symbol, maximumAge: 300)
+        case .chart(let symbol):
+            await marketStore.loadChart(symbol: symbol, range: .day)
+        case .dailyClose(let symbol):
+            let service = MarketService(baseURL: ServerConfiguration.currentURL, session: .shared)
+            do {
+                let chart = try await service.recentDailyCloses(symbol: symbol)
+                guard !Task.isCancelled else { return }
+                dailyClose = (symbol, chart.symbol == symbol ? confirmedClose(in: chart) : nil)
+            } catch {
+                guard !Task.isCancelled, dailyClose?.symbol != symbol else { return }
+                dailyClose = (symbol, nil)
+            }
+        }
+    }
+
+    private func confirmedClose(in chart: MarketChart) -> Price? {
+        guard chart.interval == "1d", chart.market == "US" else { return nil }
+        let bars = chart.candles.filter {
+            $0.state == "confirmed" && $0.close.isFinite && $0.close > 0 && $0.tradingDate != nil
+        }.sorted { $0.timestamp < $1.timestamp }
+        guard let latest = bars.last, let date = latest.tradingDate else { return nil }
+        let previous = chart.quality.status == .complete ? bars.dropLast().last : nil
+        let change = previous.map { (latest.close / $0.close - 1) * 100 }
+        return Price(amount: latest.close, currency: "USD", change: change, context: "\(date) 收盘")
     }
 
     private var identity: some View {
@@ -1213,7 +1245,7 @@ private struct TodayCompanyStockCard: View {
             marketStore.isShowingCachedSnapshot ? "缓存" : (marketStore.errorMessage == nil ? nil : "未更新")
         case .index(let symbol):
             marketStore.constituentErrors[symbol] == nil ? nil : "未更新"
-        case .chart:
+        case .chart, .dailyClose:
             nil
         }
         let delay = quote.hasDelayedSessionPrice ? "延迟" : nil
