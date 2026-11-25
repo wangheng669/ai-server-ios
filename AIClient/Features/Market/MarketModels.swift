@@ -2198,7 +2198,7 @@ struct MarketStockAppLinks {
     init?(symbol: String) {
         let normalized = symbol.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         let xueqiuCode: String
-        let longbridgeCode: String
+        let longbridgeSecurityID: String
 
         if normalized.hasSuffix(".SS") || normalized.hasSuffix(".SZ") {
             let code = String(normalized.dropLast(3))
@@ -2206,15 +2206,16 @@ struct MarketStockAppLinks {
             let isShanghai = normalized.hasSuffix(".SS")
             let exchange = isShanghai ? "SH" : "SZ"
             xueqiuCode = exchange + code
-            longbridgeCode = "\(code).\(exchange)"
+            longbridgeSecurityID = "ST/\(exchange)/\(code)"
             eastmoneyCode = code
             eastmoneyMarket = isShanghai ? "1" : "0"
         } else if normalized.hasSuffix(".HK") {
             let code = normalized.dropLast(3)
-            guard (1...5).contains(code.count), code.allSatisfy(\.isNumber) else { return nil }
+            guard (1...5).contains(code.count), code.allSatisfy(\.isNumber),
+                  let longbridgeCode = Int(code) else { return nil }
             let paddedCode = String(repeating: "0", count: 5 - code.count) + code
             xueqiuCode = paddedCode
-            longbridgeCode = "\(paddedCode).HK"
+            longbridgeSecurityID = "ST/HK/\(longbridgeCode)"
             eastmoneyCode = paddedCode
             eastmoneyMarket = "116"
         } else {
@@ -2224,13 +2225,14 @@ struct MarketStockAppLinks {
                   normalized.unicodeScalars.allSatisfy(supportedCharacters.contains),
                   normalized.unicodeScalars.contains(where: CharacterSet.uppercaseLetters.contains) else { return nil }
             xueqiuCode = normalized
-            longbridgeCode = normalized.replacingOccurrences(of: "-", with: ".") + ".US"
+            let longbridgeCode = normalized.replacingOccurrences(of: "-", with: ".")
+            longbridgeSecurityID = "ST/US/\(longbridgeCode)"
             eastmoneyCode = normalized.replacingOccurrences(of: ".", with: "_").replacingOccurrences(of: "-", with: "_")
             eastmoneyMarket = nil
         }
 
         guard let xueqiu = URL(string: "https://xueqiu.com/S/\(xueqiuCode)"),
-              let longbridge = URL(string: "lb://page/stock/detail?id=\(longbridgeCode)") else { return nil }
+              let longbridge = URL(string: "lb://page/stock/detail?id=\(longbridgeSecurityID)") else { return nil }
         self.xueqiu = xueqiu
         self.longbridge = longbridge
     }
