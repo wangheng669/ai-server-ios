@@ -2766,11 +2766,6 @@ struct PostDetailView: View {
 
     private func startVideoPlayback(url: URL) {
         if post.isBilibili { bilibiliPlaybackStartedAt = Date() }
-        #if !targetEnvironment(simulator)
-        let audioSession = AVAudioSession.sharedInstance()
-        try? audioSession.setCategory(.playback, mode: .moviePlayback)
-        try? audioSession.setActive(true)
-        #endif
         let item = AVPlayerItem(url: url)
         item.preferredForwardBufferDuration = 1
         let newPlayer = AVPlayer(playerItem: item)

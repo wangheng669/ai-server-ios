@@ -1,3 +1,4 @@
+import AVFAudio
 import SwiftUI
 import UIKit
 import UserNotifications
@@ -448,6 +449,11 @@ struct AIServerClientApp: App {
 
     init() {
         URLCache.shared = URLCache(memoryCapacity: 48_000_000, diskCapacity: 240_000_000)
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: .mixWithOthers)
+        } catch {
+            print("Could not configure video audio: \(error.localizedDescription)")
+        }
     }
 
     var body: some Scene {
