@@ -513,21 +513,26 @@ struct NewsFeedView: View {
         }
     }
 
+    private func xFeedEntityChoices(for users: ArraySlice<XFeedUser>) -> [FeedEntityChoice] {
+        let posts = model.posts(for: .x)
+        return users.map { user in
+            FeedEntityChoice(
+                id: "x:\(user.id)",
+                name: user.name,
+                subtitle: "@\(user.screenName.trimmingCharacters(in: CharacterSet(charactersIn: "@")))",
+                avatarURL: XFeedSelectorAvatarPolicy.resolvedAvatarURL(
+                    directoryAvatarURL: user.avatarURL,
+                    screenName: user.screenName,
+                    posts: posts
+                ),
+                feedID: nil
+            )
+        }
+    }
+
     private var feedEntityChoices: [FeedEntityChoice] {
         if model.source == .x {
-            return model.xFeedUsers.map { user in
-                FeedEntityChoice(
-                    id: "x:\(user.id)",
-                    name: user.name,
-                    subtitle: "@\(user.screenName.trimmingCharacters(in: CharacterSet(charactersIn: "@")))",
-                    avatarURL: XFeedSelectorAvatarPolicy.resolvedAvatarURL(
-                        directoryAvatarURL: user.avatarURL,
-                        screenName: user.screenName,
-                        posts: model.posts(for: .x)
-                    ),
-                    feedID: nil
-                )
-            }
+            return xFeedEntityChoices(for: model.xFeedUsers[...])
         }
         if model.source == .wechat {
             return weChatAccounts.map { account in
@@ -608,17 +613,11 @@ struct NewsFeedView: View {
         return nil
     }
 
-    private var filteredFeedEntityChoices: [FeedEntityChoice] {
-        let query = feedEntitySearch.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return feedEntityChoices }
-        return feedEntityChoices.filter {
-            $0.name.localizedCaseInsensitiveContains(query)
-                || ($0.subtitle?.localizedCaseInsensitiveContains(query) ?? false)
-        }
-    }
-
     private var feedEntitySelector: some View {
-        Button {
+        let selectedID = selectedFeedEntityID
+        let previewChoices = feedEntityPreviewChoices(selectedID: selectedID)
+        let selectedChoice = previewChoices.first { $0.id == selectedID }
+        return Button {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             withAnimation(.smooth(duration: 0.22)) {
                 isSourceSelectorExpanded = false
@@ -627,21 +626,21 @@ struct NewsFeedView: View {
                 if !isFeedEntitySelectorExpanded { feedEntitySearch = "" }
             }
         } label: {
-            feedEntityAvatar(selectedFeedEntityID, size: 38)
+            feedEntityAvatar(selectedChoice, previewChoices: previewChoices, size: 38)
                 .frame(width: 44, height: 44)
                 .background(.regularMaterial, in: Circle())
                 .overlay {
                     Circle().stroke(
-                        selectedFeedEntityID == nil
+                        selectedID == nil
                             ? InvestmentDesign.divider.opacity(0.9)
                             : InvestmentDesign.accent.opacity(0.65),
-                        lineWidth: selectedFeedEntityID == nil ? 0.5 : 1.5
+                        lineWidth: selectedID == nil ? 0.5 : 1.5
                     )
                 }
                 .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("选择账号，当前\(selectedFeedEntityChoice?.name ?? "全部账号")")
+        .accessibilityLabel("选择账号，当前\(selectedChoice?.name ?? "全部账号")")
         .accessibilityValue(isFeedEntitySelectorExpanded ? "已展开" : "已收起")
         .overlay(alignment: .bottomTrailing) {
             if isFeedEntitySelectorExpanded {
@@ -653,26 +652,50 @@ struct NewsFeedView: View {
         .animation(reduceMotion ? nil : .smooth(duration: 0.22), value: isFeedEntitySelectorExpanded)
     }
 
-    private var selectedFeedEntityChoice: FeedEntityChoice? {
-        guard let selectedFeedEntityID else { return nil }
-        return feedEntityChoices.first { $0.id == selectedFeedEntityID }
+    private func feedEntityPreviewChoices(selectedID: String?) -> [FeedEntityChoice] {
+        if model.source == .x {
+            let users = model.xFeedUsers
+            if let selectedID, let index = users.firstIndex(where: { "x:\($0.id)" == selectedID }) {
+                return xFeedEntityChoices(for: users[index...index])
+            }
+            return xFeedEntityChoices(for: users.prefix(3))
+        }
+        let choices = feedEntityChoices
+        if let selectedID, let choice = choices.first(where: { $0.id == selectedID }) {
+            return [choice]
+        }
+        return Array(choices.prefix(3))
     }
 
     private var feedEntityMenu: some View {
-        VStack(spacing: 0) {
+        let choices = feedEntityChoices
+        let query = feedEntitySearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        let filteredChoices = query.isEmpty ? choices : choices.filter {
+            $0.name.localizedCaseInsensitiveContains(query)
+                || ($0.subtitle?.localizedCaseInsensitiveContains(query) ?? false)
+        }
+        let directHandle = filteredChoices.isEmpty ? directXAuthorHandle : nil
+        let scrollTargetID = FeedEntitySelectorPositionPolicy.targetID(
+            selectedID: selectedFeedEntityID,
+            visibleChoiceIDs: filteredChoices.map(\.id)
+        )
+        let showsSearch = choices.count > 8
+        let visibleRows = min(filteredChoices.count + 1 + (directHandle == nil ? 0 : 1), 5)
+        let height = min(344, 32 + (showsSearch ? 42 : 0) + CGFloat(visibleRows * 52) + 8)
+        return VStack(spacing: 0) {
             HStack {
                 Text("选择账号")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text("\(feedEntityChoices.count)")
+                Text("\(choices.count)")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 12)
             .frame(height: 32)
 
-            if feedEntityChoices.count > 8 {
+            if showsSearch {
                 HStack(spacing: 7) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 12, weight: .medium))
@@ -695,9 +718,9 @@ struct NewsFeedView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 3) {
-                        feedEntityMenuRow(nil)
+                        feedEntityMenuRow(nil, previewChoices: Array(choices.prefix(3)))
                             .id(FeedEntitySelectorPositionPolicy.allAccountsID)
-                        if let handle = directXAuthorHandle {
+                        if let handle = directHandle {
                             Button {
                                 isFeedEntitySelectorExpanded = false
                                 feedEntitySearch = ""
@@ -715,24 +738,24 @@ struct NewsFeedView: View {
                             }
                             .buttonStyle(.plain)
                         }
-                        ForEach(filteredFeedEntityChoices) { choice in
+                        ForEach(filteredChoices) { choice in
                             feedEntityMenuRow(choice)
                                 .id(choice.id)
                         }
                     }
                     .padding(4)
                 }
-                .scrollIndicators(feedEntityChoices.count > 6 ? .visible : .hidden)
+                .scrollIndicators(choices.count > 6 ? .visible : .hidden)
                 .scrollDismissesKeyboard(.interactively)
-                .task(id: feedEntityMenuScrollTargetID) {
+                .task(id: scrollTargetID) {
                     await Task.yield()
-                    proxy.scrollTo(feedEntityMenuScrollTargetID, anchor: .center)
+                    proxy.scrollTo(scrollTargetID, anchor: .center)
                 }
             }
         }
         .frame(
-            width: feedEntityChoices.count > 8 ? 224 : 196,
-            height: feedEntityMenuHeight
+            width: showsSearch ? 224 : 196,
+            height: height
         )
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
@@ -742,35 +765,21 @@ struct NewsFeedView: View {
         .shadow(color: .black.opacity(0.12), radius: 18, y: 8)
     }
 
-    private var feedEntityMenuScrollTargetID: String {
-        FeedEntitySelectorPositionPolicy.targetID(
-            selectedID: selectedFeedEntityID,
-            visibleChoiceIDs: filteredFeedEntityChoices.map(\.id)
-        )
-    }
-
     private var directXAuthorHandle: String? {
-        guard model.source == .x, filteredFeedEntityChoices.isEmpty else { return nil }
+        guard model.source == .x else { return nil }
         let value = feedEntitySearch.trimmingCharacters(in: CharacterSet(charactersIn: "@ \n\t"))
         guard value.range(of: #"^[A-Za-z0-9_]{1,15}$"#, options: .regularExpression) != nil else { return nil }
         return value
     }
 
-    private var feedEntityMenuHeight: CGFloat {
-        let headerHeight: CGFloat = 32
-        let searchHeight: CGFloat = feedEntityChoices.count > 8 ? 42 : 0
-        let visibleRows = min(filteredFeedEntityChoices.count + 1 + (directXAuthorHandle == nil ? 0 : 1), 5)
-        return min(344, headerHeight + searchHeight + CGFloat(visibleRows * 52) + 8)
-    }
-
-    private func feedEntityMenuRow(_ choice: FeedEntityChoice?) -> some View {
+    private func feedEntityMenuRow(_ choice: FeedEntityChoice?, previewChoices: [FeedEntityChoice] = []) -> some View {
         let isSelected = selectedFeedEntityID == choice?.id
         return Button {
             UISelectionFeedbackGenerator().selectionChanged()
             selectFeedEntity(choice)
         } label: {
             HStack(spacing: 10) {
-                feedEntityAvatar(choice?.id, size: 34)
+                feedEntityAvatar(choice, previewChoices: previewChoices, size: 34)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(choice?.name ?? "全部账号")
                         .font(.system(size: 14, weight: isSelected ? .semibold : .regular))
@@ -805,30 +814,27 @@ struct NewsFeedView: View {
     }
 
     @ViewBuilder
-    private func feedEntityAvatar(_ id: String?, size: CGFloat) -> some View {
-        if let id, let choice = feedEntityChoices.first(where: { $0.id == id }) {
+    private func feedEntityAvatar(_ choice: FeedEntityChoice?, previewChoices: [FeedEntityChoice], size: CGFloat) -> some View {
+        if let choice {
             AvatarView(url: choice.avatarURL, name: choice.name, size: size)
                 .clipShape(Circle())
-        } else {
-            let choices = Array(feedEntityChoices.prefix(3))
-            if choices.isEmpty {
-                Image(systemName: "person.2.fill")
-                    .font(.system(size: size * 0.42, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: size, height: size)
-                    .background(Color(uiColor: .secondarySystemBackground), in: Circle())
-            } else {
-                ZStack {
-                    ForEach(Array(choices.enumerated()), id: \.element.id) { index, choice in
-                        AvatarView(url: choice.avatarURL, name: choice.name, size: size * 0.58)
-                            .clipShape(Circle())
-                            .overlay(Circle().stroke(Color.white.opacity(0.9), lineWidth: 1))
-                            .offset(entityAvatarOffset(index: index, size: size))
-                    }
-                }
+        } else if previewChoices.isEmpty {
+            Image(systemName: "person.2.fill")
+                .font(.system(size: size * 0.42, weight: .semibold))
+                .foregroundStyle(.secondary)
                 .frame(width: size, height: size)
                 .background(Color(uiColor: .secondarySystemBackground), in: Circle())
+        } else {
+            ZStack {
+                ForEach(Array(previewChoices.enumerated()), id: \.element.id) { index, choice in
+                    AvatarView(url: choice.avatarURL, name: choice.name, size: size * 0.58)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(Color.white.opacity(0.9), lineWidth: 1))
+                        .offset(entityAvatarOffset(index: index, size: size))
+                }
             }
+            .frame(width: size, height: size)
+            .background(Color(uiColor: .secondarySystemBackground), in: Circle())
         }
     }
 
@@ -947,6 +953,8 @@ struct NewsFeedView: View {
     }
 
     private func closeSelectors() {
+        guard isSourceSelectorExpanded || isYouTubePersonSelectorExpanded
+                || isFeedEntitySelectorExpanded || !feedEntitySearch.isEmpty || feedEntitySearchIsFocused else { return }
         feedEntitySearchIsFocused = false
         withAnimation(.smooth(duration: 0.20)) {
             isSourceSelectorExpanded = false
@@ -1295,7 +1303,6 @@ struct NewsFeedView: View {
     private func virtualizedFeedList(source: FeedSource, posts: [Post], truthWidth: CGFloat? = nil) -> some View {
         let isActive = rootTabIsActive && model.source == source
         let canPaginate = isActive && !model.isLoading && !model.isSwitchingSource
-        let truthDates = truthWidth == nil ? [] : posts.map(\.truthPublicationDate)
         return ScrollViewReader { proxy in
             List {
                 if let truthWidth, let first = posts.first {
@@ -1305,8 +1312,10 @@ struct NewsFeedView: View {
                     Group {
                         if let truthWidth {
                             truthTimelineCell(
-                                post: post, date: truthDates[index],
-                                previousDate: index > 0 ? truthDates[index - 1] : nil, width: truthWidth
+                                post: post,
+                                date: post.truthPublicationDate,
+                                previousDate: index > 0 ? posts[index - 1].truthPublicationDate : nil,
+                                width: truthWidth
                             )
                         } else {
                             feedPostCell(source: source, post: post, index: index, posts: posts)
@@ -1349,12 +1358,13 @@ struct NewsFeedView: View {
             .onChange(of: model.source) { previous, current in
                 if previous == source { scrollPositionStore.setRestoring(true, source: source) }
                 guard current == source else { return }
-                let anchor = scrollPositionStore.anchor(for: source)
                 Task { @MainActor in
                     await Task.yield()
                     guard model.source == source else { return }
-                    if let anchor { proxy.scrollTo(anchor, anchor: .top) }
-                    await Task.yield()
+                    if let anchor = scrollPositionStore.anchorToRestore(for: source) {
+                        proxy.scrollTo(anchor, anchor: .top)
+                        await Task.yield()
+                    }
                     if model.source == source { scrollPositionStore.setRestoring(false, source: source) }
                 }
             }
@@ -2707,14 +2717,22 @@ private final class FeedScrollPositionStore: ObservableObject {
         updateAnchor(for: source)
     }
 
+    private func firstVisibleRow(for source: FeedSource) -> Int? {
+        rowsBelowTop[source]?.min(by: { $0.value < $1.value })?.key
+    }
+
     private func updateAnchor(for source: FeedSource) {
-        if let first = rowsBelowTop[source]?.min(by: { $0.value < $1.value }) {
-            anchors[source] = first.key
-        }
+        if let first = firstVisibleRow(for: source) { anchors[source] = first }
     }
 
     func removeRow(_ id: Int, source: FeedSource) { rowsBelowTop[source]?[id] = nil }
-    func anchor(for source: FeedSource) -> Int? { anchors[source] }
+
+    func anchorToRestore(for source: FeedSource) -> Int? {
+        // The mounted list can retain both its first row and its exact offset.
+        guard let anchor = anchors[source], firstVisibleRow(for: source) != anchor else { return nil }
+        return anchor
+    }
+
     func setRestoring(_ restoring: Bool, source: FeedSource) {
         if restoring { restoringSources.insert(source) }
         else {
