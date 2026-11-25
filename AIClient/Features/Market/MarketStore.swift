@@ -233,12 +233,8 @@ final class MarketStore {
         chartErrors[ChartKey(symbol: symbol, range: range)]
     }
 
-    func loadIndexConstituents(symbol: String, force: Bool = false, maximumAge: TimeInterval? = nil) async {
-        if !force, let snapshot = indexConstituents[symbol] {
-            guard let maximumAge else { return }
-            if let generatedAt = marketISODate(snapshot.generatedAt),
-               Date().timeIntervalSince(generatedAt) < maximumAge { return }
-        }
+    func loadIndexConstituents(symbol: String, force: Bool = false) async {
+        if !force, indexConstituents[symbol] != nil { return }
         guard loadingConstituentSymbols.insert(symbol).inserted else { return }
         constituentErrors[symbol] = nil
         defer { loadingConstituentSymbols.remove(symbol) }
