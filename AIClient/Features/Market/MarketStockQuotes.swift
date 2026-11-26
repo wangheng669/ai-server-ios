@@ -21,6 +21,53 @@ struct MarketStockPrice {
     }
 }
 
+extension MarketStore {
+    func coreStockPrice(for entry: MarketDashboardQuoteEntry, includesExtendedHours: Bool) -> MarketStockPrice? {
+        guard let quote = entry.quote, quote.stale != true else {
+            let context: (quality: MarketQuoteQuality?, currency: String?)
+            switch entry {
+            case let .quote(quote): context = (quote.quality, quote.currency)
+            case let .unavailable(stock): context = (stock.quality, stock.currency)
+            }
+            guard let trade = lastSessionTrade(symbol: entry.id, asOf: context.quality?.asOfTimestamp),
+                  trade.price.isFinite, trade.price > 0 else { return nil }
+            return MarketStockPrice(amount: trade.price, currency: context.currency, change: nil,
+                                    label: "最近成交 \(marketShortTimestamp(trade.timestamp))")
+        }
+
+        let sessionPrice = quote.coreStockSessionPrice
+        if includesExtendedHours, !isShowingCachedSnapshot,
+           quote.tradingSession == .closed || quote.tradingSession.isExtended,
+           let point = chart(symbol: entry.id, range: .day)?.latestStockExtendedTrade(for: quote),
+           sessionPrice == nil || point.timestamp > (quote.marketAsOfTimestamp ?? 0) {
+            let session = MarketTradingSession(rawValue: point.session).displayLabel
+            let change = (point.close / quote.price - 1) * 100
+            return MarketStockPrice(amount: point.close, currency: quote.currency, change: change,
+                                    label: "\(session) \(marketShortTimestamp(point.timestamp))")
+        }
+
+        let amount = sessionPrice ?? quote.price
+        guard amount.isFinite, amount > 0 else { return nil }
+        let change = sessionPrice == nil ? quote.percentValue : quote.marketDisplayPercentValue
+        let label: String
+        if sessionPrice != nil || (quote.quality?.fallbackUsed == true && quote.tradingSession.isExtended) {
+            let session = sessionPrice != nil ? quote.researchStatus : quote.tradingSession.displayLabel
+            label = [session, quote.marketAsOfTimestamp.map(marketShortTimestamp)]
+                .compactMap { $0 }.joined(separator: " ")
+        } else {
+            label = quote.tradingSession.isExtended ? "常规收盘" : quote.researchStatus
+        }
+        return MarketStockPrice(amount: amount, currency: quote.currency, change: change, label: label)
+    }
+}
+
+extension MarketQuote {
+    var coreStockSessionPrice: Double? {
+        guard tradingSession.isExtended, let sessionPrice, sessionPrice.isFinite, sessionPrice > 0 else { return nil }
+        return sessionPrice
+    }
+}
+
 @MainActor
 @Observable
 final class MarketStockQuoteStore {
