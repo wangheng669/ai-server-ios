@@ -68,8 +68,39 @@ struct TodayActivityItem: Identifiable, Equatable {
     }
 }
 
-private struct TodayActivitySnapshot: Equatable {
+struct TodayActivityReportReferences: Equatable, Sendable {
+    private let postIDs: Set<Int>
+    private var textKeys: Set<String>
+
+    init(postIDs: [Int], cardTexts: [String]) {
+        self.postIDs = Set(postIDs)
+        textKeys = Set(cardTexts.compactMap(Self.textKey))
+    }
+
+    mutating func include(_ source: TodaySourcePresentation) {
+        guard postIDs.contains(source.id) else { return }
+        if let original = Self.textKey(source.originalText) { textKeys.insert(original) }
+        if let chinese = source.chineseText.flatMap(Self.textKey) { textKeys.insert(chinese) }
+    }
+
+    func contains(_ post: Post) -> Bool {
+        postIDs.contains(post.id) || Self.textKey(post.xStoredOriginalContent).map(textKeys.contains) == true
+    }
+
+    private static func textKey(_ text: String) -> String? {
+        let key = TodayReadingEvent.canonical(text)
+        guard !key.isEmpty, key != "无标题" else { return nil }
+        return key
+    }
+}
+
+struct TodayActivityQuery: Equatable {
     let source: TodayActivitySource
+    let reportReferences: TodayActivityReportReferences
+}
+
+private struct TodayActivitySnapshot: Equatable {
+    let query: TodayActivityQuery
     let dayStart: Date
     var items: [TodayActivityItem] = []
     var refreshFailed = false
@@ -79,25 +110,25 @@ private struct TodayActivitySnapshot: Equatable {
 final class TodayActivityStore {
     private var snapshot: TodayActivitySnapshot?
 
-    func items(for source: TodayActivitySource?) -> [TodayActivityItem] {
-        current(for: source)?.items ?? []
+    func items(for query: TodayActivityQuery?) -> [TodayActivityItem] {
+        current(for: query)?.items ?? []
     }
 
-    func refreshFailed(for source: TodayActivitySource?) -> Bool {
-        current(for: source)?.refreshFailed ?? false
+    func refreshFailed(for query: TodayActivityQuery?) -> Bool {
+        current(for: query)?.refreshFailed ?? false
     }
 
-    private func current(for source: TodayActivitySource?) -> TodayActivitySnapshot? {
-        guard let snapshot, snapshot.source == source,
+    private func current(for query: TodayActivityQuery?) -> TodayActivitySnapshot? {
+        guard let snapshot, snapshot.query == query,
               snapshot.dayStart == TodayBriefDate.shanghaiCalendar.startOfDay(for: .now) else { return nil }
         return snapshot
     }
 
-    func observe(source: TodayActivitySource, client: APIClient) async {
+    func observe(query: TodayActivityQuery, client: APIClient) async {
         let (updates, trigger) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let realtime = RealtimeFeedClient(baseURL: client.baseURL)
         realtime.onEvent = { event in
-            if source.shouldRefresh(for: event) { trigger.yield() }
+            if query.source.shouldRefresh(for: event) { trigger.yield() }
         }
         realtime.start()
         trigger.yield()
@@ -109,7 +140,7 @@ final class TodayActivityStore {
                 do { try await Task.sleep(for: .seconds(seconds)) }
                 catch { return }
                 guard !Task.isCancelled else { return }
-                if let snapshot, snapshot.source == source, current(for: source) == nil {
+                if let snapshot, snapshot.query == query, current(for: query) == nil {
                     self.snapshot = nil
                 }
                 trigger.yield()
@@ -124,18 +155,18 @@ final class TodayActivityStore {
         for await _ in updates {
             guard !Task.isCancelled,
                   let day = TodayBriefDate.shanghaiCalendar.dateInterval(of: .day, for: .now) else { return }
-            if current(for: source) == nil {
-                snapshot = TodayActivitySnapshot(source: source, dayStart: day.start)
+            if current(for: query) == nil {
+                snapshot = TodayActivitySnapshot(query: query, dayStart: day.start)
             }
             do {
-                let items = try await Self.fetchToday(source: source, day: day, client: client)
+                let items = try await Self.fetchToday(query: query, day: day, client: client)
                 guard !Task.isCancelled else { return }
-                guard current(for: source)?.dayStart == day.start else { continue }
-                let updated = TodayActivitySnapshot(source: source, dayStart: day.start, items: items)
+                guard current(for: query)?.dayStart == day.start else { continue }
+                let updated = TodayActivitySnapshot(query: query, dayStart: day.start, items: items)
                 if snapshot != updated { snapshot = updated }
             } catch {
                 guard !Task.isCancelled else { return }
-                if let current = current(for: source), current.dayStart == day.start, !current.refreshFailed {
+                if let current = current(for: query), current.dayStart == day.start, !current.refreshFailed {
                     snapshot?.refreshFailed = true
                 }
             }
@@ -143,7 +174,7 @@ final class TodayActivityStore {
     }
 
     private static func fetchToday(
-        source: TodayActivitySource, day: DateInterval, client: APIClient
+        query: TodayActivityQuery, day: DateInterval, client: APIClient
     ) async throws -> [TodayActivityItem] {
         let pageSize = 12
         var page = 1
@@ -151,7 +182,7 @@ final class TodayActivityStore {
         var seen = Set<Int>()
         while items.count < 2 {
             try Task.checkCancellation()
-            let posts = try await source.fetchPage(page, limit: pageSize, client: client)
+            let posts = try await query.source.fetchPage(page, limit: pageSize, client: client)
             let newPosts = posts.filter { seen.insert($0.id).inserted }
             let dated = newPosts.compactMap { post -> TodayActivityItem? in
                 guard let publishedAt = post.articlePostAt.flatMap(TodayBriefDate.parseTimestamp) else { return nil }
@@ -159,7 +190,8 @@ final class TodayActivityStore {
             }
             items.append(contentsOf: dated.filter {
                 $0.publishedAt >= day.start && $0.publishedAt < day.end && $0.publishedAt <= .now
-                    && TodayActivitySource(post: $0.post) == source && !$0.post.isXRetweetWrapper
+                    && TodayActivitySource(post: $0.post) == query.source && !$0.post.isXRetweetWrapper
+                    && !query.reportReferences.contains($0.post)
             })
             if posts.count < pageSize || newPosts.isEmpty || dated.contains(where: { $0.publishedAt < day.start }) { break }
             page += 1
