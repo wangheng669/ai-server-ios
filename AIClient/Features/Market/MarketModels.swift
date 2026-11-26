@@ -879,59 +879,17 @@ struct InvestorMoodBoard: Decodable {
 
 struct InvestorMoodItem: Decodable, Identifiable {
     var id: String { awemeId }
+    let authorId: String
     let nickname: String
     let awemeId: String
     let description: String
     let coverUrl: String
     let videoUrl: String
-    let createdAt: String?
+    let createdAt: String
     let label: String
-    let reasons: [String]
     let transcript: String
-    let transcriptStatus: String
     let analysis: String
-    let evidence: [String]
     let analysisSource: String
-    let model: String
-    let stale: Bool
-    let ageHours: Double?
-
-    private enum CodingKeys: String, CodingKey {
-        case nickname, awemeId, description, coverUrl, createdAt, label, reasons
-        case transcript, transcriptStatus, analysis, evidence, analysisSource, model, stale, ageHours
-        case videoUrl, videoURL, playUrl, playURL
-        case videoUrlSnake = "video_url"
-        case playUrlSnake = "play_url"
-    }
-
-    init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        nickname = try values.decode(String.self, forKey: .nickname)
-        awemeId = try values.decode(String.self, forKey: .awemeId)
-        description = try values.decodeIfPresent(String.self, forKey: .description) ?? ""
-        coverUrl = try values.decodeIfPresent(String.self, forKey: .coverUrl) ?? ""
-        videoUrl = [
-            try values.decodeIfPresent(String.self, forKey: .videoUrl),
-            try values.decodeIfPresent(String.self, forKey: .videoURL),
-            try values.decodeIfPresent(String.self, forKey: .playUrl),
-            try values.decodeIfPresent(String.self, forKey: .playURL),
-            try values.decodeIfPresent(String.self, forKey: .videoUrlSnake),
-            try values.decodeIfPresent(String.self, forKey: .playUrlSnake),
-        ]
-        .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-        .first(where: { !$0.isEmpty }) ?? ""
-        createdAt = try values.decodeIfPresent(String.self, forKey: .createdAt)
-        label = try values.decodeIfPresent(String.self, forKey: .label) ?? "中性"
-        reasons = try values.decodeIfPresent([String].self, forKey: .reasons) ?? []
-        transcript = try values.decodeIfPresent(String.self, forKey: .transcript) ?? ""
-        transcriptStatus = try values.decodeIfPresent(String.self, forKey: .transcriptStatus) ?? ""
-        analysis = try values.decodeIfPresent(String.self, forKey: .analysis) ?? ""
-        evidence = try values.decodeIfPresent([String].self, forKey: .evidence) ?? []
-        analysisSource = try values.decodeIfPresent(String.self, forKey: .analysisSource) ?? ""
-        model = try values.decodeIfPresent(String.self, forKey: .model) ?? ""
-        stale = try values.decodeIfPresent(Bool.self, forKey: .stale) ?? false
-        ageHours = try values.decodeIfPresent(Double.self, forKey: .ageHours)
-    }
 
     var douyinAppVideoURL: URL? {
         guard !awemeId.isEmpty, awemeId.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }

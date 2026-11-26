@@ -7,27 +7,23 @@ struct RetailInvestorView: View {
     let store: InvestorMoodStore
     let onClose: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var selectedID: InvestorMoodItem.ID?
+    @State private var selectedID: InvestorMoodAuthor.ID?
     @State private var playbackItem: InvestorMoodItem?
 
-    private var items: [InvestorMoodItem] {
-        store.investorMood?.items ?? []
-    }
-
     private var selectedIndex: Int {
-        items.firstIndex { $0.id == selectedID } ?? 0
+        store.authors.firstIndex { $0.id == selectedID } ?? 0
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            if items.count > 1 {
+            if store.authors.count > 1 {
                 pageProgress
                     .frame(maxWidth: TodayBriefStyle.maximumCardWidth)
                     .padding(.horizontal, ResearchDesign.inset)
                     .padding(.top, 12)
             }
 
-            if items.isEmpty {
+            if store.authors.isEmpty {
                 emptyState
             } else {
                 pager
@@ -40,7 +36,7 @@ struct RetailInvestorView: View {
         .task {
             await store.refreshInvestorMood(force: true)
         }
-        .onChange(of: items.map(\.id)) { _, ids in
+        .onChange(of: store.authors.map(\.id)) { _, ids in
             if let selectedID, !ids.contains(selectedID) {
                 self.selectedID = ids.first
             }
@@ -52,18 +48,18 @@ struct RetailInvestorView: View {
 
     private var pageProgress: some View {
         HStack(spacing: 8) {
-            Text("样本 \(selectedIndex + 1) / \(items.count)")
+            Text("博主 \(selectedIndex + 1) / \(store.authors.count)")
                 .font(.caption.weight(.semibold).monospacedDigit())
                 .foregroundStyle(ResearchDesign.accent)
                 .fixedSize()
 
-            ProgressView(value: Double(selectedIndex + 1), total: Double(items.count))
+            ProgressView(value: Double(selectedIndex + 1), total: Double(store.authors.count))
                 .tint(ResearchDesign.accent)
                 .accessibilityHidden(true)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("散户观点进度")
-        .accessibilityValue("第 \(selectedIndex + 1) 张，共 \(items.count) 张")
+        .accessibilityValue("第 \(selectedIndex + 1) 位博主，共 \(store.authors.count) 位")
         .accessibilityAdjustableAction { direction in
             switch direction {
             case .increment: advance(by: 1)
@@ -77,12 +73,8 @@ struct RetailInvestorView: View {
         GeometryReader { viewport in
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 0) {
-                    ForEach(items) { item in
-                        InvestorMoodVideoCard(item: item) { playbackItem = item }
-                            .frame(maxWidth: TodayBriefStyle.maximumCardWidth)
-                            .padding(.horizontal, TodayBriefStyle.horizontalInset)
-                            .padding(.top, 10)
-                            .padding(.bottom, 12)
+                    ForEach(store.authors) { author in
+                        InvestorMoodAuthorPage(author: author) { playbackItem = $0 }
                             .containerRelativeFrame(.horizontal)
                             .frame(height: viewport.size.height)
                     }
@@ -100,9 +92,9 @@ struct RetailInvestorView: View {
     private var emptyState: some View {
         Group {
             if store.isLoadingInvestorMood {
-                ProgressView("正在读取最新样本")
+                ProgressView("正在读取今日视频")
             } else {
-                Text(store.investorMoodErrorMessage ?? "正在等待最新有效样本")
+                Text(store.investorMoodErrorMessage ?? "暂无今日视频")
             }
         }
         .font(.subheadline)
@@ -112,10 +104,49 @@ struct RetailInvestorView: View {
 
     private func advance(by offset: Int) {
         let destination = selectedIndex + offset
-        guard items.indices.contains(destination) else { return }
+        guard store.authors.indices.contains(destination) else { return }
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) {
-            selectedID = items[destination].id
+            selectedID = store.authors[destination].id
         }
+    }
+}
+
+struct InvestorMoodAuthor: Identifiable {
+    let id: String
+    let nickname: String
+    let videos: [InvestorMoodItem]
+}
+
+private struct InvestorMoodAuthorPage: View {
+    let author: InvestorMoodAuthor
+    let onPlay: (InvestorMoodItem) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(author.nickname)
+                    .font(.title3.weight(.semibold))
+                    .accessibilityAddTraits(.isHeader)
+                Text("今日 \(author.videos.count) 条视频")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    ForEach(author.videos) { video in
+                        InvestorMoodVideoCard(item: video) { onPlay(video) }
+                    }
+                }
+                .padding(.bottom, 56)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
+        .frame(maxWidth: TodayBriefStyle.maximumCardWidth)
+        .padding(.horizontal, TodayBriefStyle.horizontalInset)
+        .padding(.top, 14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .accessibilityIdentifier("retail-investor-author-\(author.id)")
     }
 }
 
@@ -126,26 +157,15 @@ private struct InvestorMoodVideoCard: View {
     @State private var showsDouyinOpenFailure = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    header
-                        .padding(14)
-                        .researchPanel(fill: ResearchDesign.fill)
-                    interpretation
-                        .padding(.horizontal, 2)
-                }
-                .padding(.bottom, 16)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .scrollBounceBehavior(.basedOnSize)
-
+        VStack(alignment: .leading, spacing: 14) {
+            header
+            interpretation
             ResearchDesign.line.frame(height: 1)
             originalVideoButton
-                .padding(.trailing, 52)
-                .padding(.vertical, 8)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .researchPanel()
         .accessibilityIdentifier("retail-investor-card-\(item.id)")
         .alert("无法打开抖音 App", isPresented: $showsDouyinOpenFailure) {
             Button("知道了", role: .cancel) {}
@@ -161,13 +181,9 @@ private struct InvestorMoodVideoCard: View {
 
         return layout {
             VStack(alignment: .leading, spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.nickname)
-                        .font(.headline)
-                    Text(publication)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text(InvestorMoodFormat.compactRelativeTime(item.createdAt))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 moodBadge
 
                 if let description = item.description.nonEmpty {
@@ -204,8 +220,8 @@ private struct InvestorMoodVideoCard: View {
             readingSection("AI 解读", text: analysis)
         } else if let transcript = item.transcript.nonEmpty {
             readingSection("视频字幕", text: transcript)
-        } else {
-            Text(item.analysis.nonEmpty ?? "当前视频暂无解读")
+        } else if let status = item.analysis.nonEmpty {
+            Text(status)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -259,11 +275,6 @@ private struct InvestorMoodVideoCard: View {
         .disabled(url == nil)
         .accessibilityHint(url == nil ? "" : "在抖音 App 打开当前视频")
         .accessibilityIdentifier("retail-investor-open-douyin")
-    }
-
-    private var publication: String {
-        let time = InvestorMoodFormat.compactRelativeTime(item.createdAt)
-        return item.stale ? "\(time) · 旧样本" : time
     }
 
     private var thumbnail: some View {
@@ -473,12 +484,18 @@ private struct InvestorMoodVideoPlayerSheet: View {
 @MainActor
 @Observable
 final class InvestorMoodStore {
-    private(set) var investorMood: InvestorMoodBoard?
     private(set) var investorMoodErrorMessage: String?
     private(set) var isLoadingInvestorMood = false
+    private var investorMood: InvestorMoodBoard?
+    private var loadedAuthors: [InvestorMoodAuthor] = []
     private var investorMoodLoadedAt: Date?
     private let investorMoodLoader: () async throws -> InvestorMoodBoard
     private let service: MarketService
+
+    var authors: [InvestorMoodAuthor] {
+        guard let investorMood, InvestorMoodFormat.isToday(investorMood.generatedAt) else { return [] }
+        return loadedAuthors
+    }
 
     init(
         baseURL: URL = ServerConfiguration.currentURL,
@@ -493,7 +510,7 @@ final class InvestorMoodStore {
         guard !isLoadingInvestorMood else { return }
         if !force, let investorMoodLoadedAt,
            Date().timeIntervalSince(investorMoodLoadedAt) < 60,
-           investorMood?.items.contains(where: { !$0.stale }) == true {
+           !authors.isEmpty {
             return
         }
         isLoadingInvestorMood = true
@@ -502,6 +519,12 @@ final class InvestorMoodStore {
             let mood = try await investorMoodLoader()
             guard !Task.isCancelled else { return }
             let previousIDs = Set(investorMood?.items.map(\.id) ?? [])
+            var videosByAuthor = Dictionary(grouping: mood.items, by: \.authorId)
+            loadedAuthors = mood.items.compactMap { video in
+                videosByAuthor.removeValue(forKey: video.authorId).map { videos in
+                    InvestorMoodAuthor(id: video.authorId, nickname: video.nickname, videos: videos)
+                }
+            }
             investorMood = mood
             investorMoodLoadedAt = Date()
             investorMoodErrorMessage = nil
@@ -522,13 +545,20 @@ private extension String {
 }
 
 private enum InvestorMoodFormat {
-    static func relativeTime(_ value: String?) -> String {
-        guard let value, let date = isoDate(value) else { return "时间未知" }
+    static func isToday(_ value: String) -> Bool {
+        guard let date = isoDate(value) else { return false }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        return calendar.isDateInToday(date)
+    }
+
+    static func relativeTime(_ value: String) -> String {
+        guard let date = isoDate(value) else { return "时间未知" }
         return date.formatted(.relative(presentation: .named, unitsStyle: .abbreviated))
     }
 
-    static func compactRelativeTime(_ value: String?) -> String {
-        guard let value, let date = isoDate(value) else { return "时间未知" }
+    static func compactRelativeTime(_ value: String) -> String {
+        guard let date = isoDate(value) else { return "时间未知" }
         let seconds = max(Int(Date().timeIntervalSince(date)), 0)
         switch seconds {
         case ..<60:
