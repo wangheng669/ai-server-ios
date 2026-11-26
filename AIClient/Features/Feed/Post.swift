@@ -433,6 +433,10 @@ enum XPostTextFormatter {
         return trimmed.hasSuffix("…") || trimmed.hasSuffix("...")
     }
 
+    static func containsJapaneseKana(_ value: String) -> Bool {
+        value.range(of: #"\p{Hiragana}|\p{Katakana}"#, options: .regularExpression) != nil
+    }
+
     static func containsUntranslatedEnglishPassage(_ value: String) -> Bool {
         let pattern = #"(?i)(?:\b[a-z][a-z'’.-]*\b(?:\s+|[,;:()]+\s*)){8,}\b[a-z][a-z'’.-]*\b"#
         return value.range(of: pattern, options: .regularExpression) != nil
@@ -740,7 +744,10 @@ struct Post: Codable, Identifiable, Hashable {
         guard sourceName == "X", xTweetID != nil else { return false }
         let language = meta?.lang?.lowercased()
         guard language?.hasPrefix("zh") != true else { return false }
-        guard language != nil || !Self.containsHanCharacters(xStoredOriginalContent) else { return false }
+        if language == nil {
+            let original = xStoredOriginalContent
+            if Self.containsHanCharacters(original), !XPostTextFormatter.containsJapaneseKana(original) { return false }
+        }
         let translation = displayContent
         guard hasTranslation, Self.containsHanCharacters(translation) else { return true }
         if XPostTextFormatter.isTruncated(translation) { return true }

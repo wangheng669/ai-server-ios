@@ -51,6 +51,9 @@ struct TodayActivityItem: Identifiable, Equatable {
     var id: Int { post.id }
     var sourceLabel: String { post.isRSS ? post.rssCardSourceName : "X · \(post.authorName)" }
     var originalSummary: String { post.isRSS ? post.feedOriginalTitle : post.xStoredOriginalContent }
+    var sourceLanguageHint: String? {
+        post.source == "x" ? XDeviceTranslation.declaredLanguage(post.meta?.lang) : nil
+    }
 
     @MainActor
     var chineseSummary: String? {
@@ -58,13 +61,14 @@ struct TodayActivityItem: Identifiable, Equatable {
         if post.isRSS {
             translated = LocalTranslatedText.chineseText(post.displayTitle)
         } else {
-            let serverText = post.needsXTranslation ? nil : LocalTranslatedText.chineseText(post.displayContent)
+            let serverText = post.hasTranslation && !post.needsXTranslation
+                ? LocalTranslatedText.chineseText(post.displayContent) : nil
             translated = serverText ?? post.xTweetID.flatMap {
                 FeedTranslationCache.shared.cachedXTranslation(tweetID: $0, original: originalSummary)
             }
         }
-        return (translated ?? LocalTranslatedText.chineseText(originalSummary))?
-            .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        let originalChinese = sourceLanguageHint == nil ? LocalTranslatedText.chineseText(originalSummary) : nil
+        return (translated ?? originalChinese)?.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 }
 
@@ -279,7 +283,7 @@ private struct TodayActivitySummary: View {
         let request = isActive && chinese == nil ? input : nil
         FeedReaderTranslationText(
             original: item.originalSummary, chinese: chinese, field: .summary,
-            isActive: isActive, showsTranslationControls: false
+            isActive: isActive, showsTranslationControls: false, sourceLanguageHint: item.sourceLanguageHint
         )
         .task(id: request?.key) {
             guard let request else { return }
