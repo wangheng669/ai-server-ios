@@ -163,35 +163,57 @@ struct TodayActivityRows: View {
     let refreshFailed: Bool
     let open: (Post) -> Void
 
+    private let shape = RoundedRectangle(cornerRadius: 16)
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(items) { item in
-                TodayBriefStyle.rule.frame(height: 1)
+                if item.id != items.first?.id {
+                    separator
+                }
                 Button {
                     open(item.post)
                 } label: {
-                    VStack(alignment: .leading, spacing: 3) {
+                    VStack(alignment: .leading, spacing: 5) {
                         Text("\(TodayBriefDate.activityTime(item.publishedAt)) · \(item.sourceLabel)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                            .font(.subheadline.weight(.medium))
+                            .monospacedDigit()
+                            .foregroundStyle(TodayBriefStyle.accent)
                         Text(item.summary)
-                            .font(.subheadline)
+                            .font(.body)
                             .foregroundStyle(TodayBriefStyle.ink)
-                            .lineLimit(1)
+                            .lineSpacing(3)
+                            .lineLimit(3)
                     }
-                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("today-activity-\(item.id)")
             }
             if refreshFailed {
+                if !items.isEmpty { separator }
                 Text("动态暂未更新")
-                    .font(.caption)
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
-                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
             }
         }
+        .background(TodayBriefStyle.accent.opacity(0.035), in: shape)
+        .overlay {
+            shape.strokeBorder(TodayBriefStyle.surfaceOutline)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private var separator: some View {
+        TodayBriefStyle.rule.frame(height: 1)
+            .padding(.horizontal, 14)
     }
 }
