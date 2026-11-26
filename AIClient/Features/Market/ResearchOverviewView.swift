@@ -4,6 +4,7 @@ private enum ResearchTopic: String, Identifiable {
     case company = "公司", industry = "行业", macro = "宏观", viewpoints = "机构观点", sentiment = "市场情绪"
 
     case industryQuotes = "全部行业"
+    case chinaMarketStructure = "中国市场结构"
 
     static let shortcuts: [Self] = [.company, .industry, .macro, .viewpoints]
 
@@ -17,6 +18,7 @@ private enum ResearchTopic: String, Identifiable {
         case .macro: "宏观指标"
         case .viewpoints: "机构观点"
         case .sentiment: "CNN 恐慌与贪婪指数"
+        case .chinaMarketStructure: "资金与杠杆信号"
         }
     }
 
@@ -28,6 +30,7 @@ private enum ResearchTopic: String, Identifiable {
         case .macro: "chart.line.uptrend.xyaxis"
         case .viewpoints: "text.bubble"
         case .sentiment: "gauge.with.dots.needle.50percent"
+        case .chinaMarketStructure: "chart.pie"
         }
     }
 }
@@ -60,7 +63,6 @@ struct ResearchHomeView: View {
     let companyStore: CompanyResearchStore
     let onOpenGlobalRanking: () -> Void
     let onOpenInvestors: () -> Void
-    let onOpenMarketQuotes: () -> Void
     let onOpenMarketDetail: (String) -> Void
     let onOpenRetailInvestors: () -> Void
     @Environment(\.rootTabIsActive) private var rootTabIsActive
@@ -122,6 +124,12 @@ struct ResearchHomeView: View {
                     NavigationStack { InstitutionResearchView(store: researchStore) }
                 case .sentiment:
                     ResearchSentimentView(store: store)
+                case .chinaMarketStructure:
+                    ScrollView {
+                        ChinaMarketStructurePanel(structure: store.dashboard?.marketStructure)
+                            .padding(.bottom, 76)
+                    }
+                    .scrollIndicators(.hidden)
                 }
             }
             .appPresentationDetents([.large])
@@ -268,21 +276,17 @@ struct ResearchHomeView: View {
     }
 
     private var globalMarkets: some View {
-        VStack(spacing: 4) {
-            HStack(spacing: 8) {
-                if store.isShowingCachedSnapshot {
-                    Text("缓存行情")
-                        .font(.caption)
-                        .foregroundStyle(ResearchStyle.muted)
-                }
-                Spacer(minLength: 0)
-                sectionAction("全部行情", action: onOpenMarketQuotes)
-                    .accessibilityIdentifier("research-all-market-quotes")
+        VStack(alignment: .leading, spacing: 8) {
+            if store.isShowingCachedSnapshot {
+                Text("缓存行情")
+                    .font(.caption)
+                    .foregroundStyle(ResearchStyle.muted)
             }
             ResearchGlobalMarketSnapshot(
                 store: store,
                 onOpenQuote: onOpenMarketDetail,
-                onOpenSentiment: { presentedTopic = .sentiment }
+                onOpenSentiment: { presentedTopic = .sentiment },
+                onOpenChinaMarketStructure: { presentedTopic = .chinaMarketStructure }
             )
         }
     }
@@ -394,31 +398,91 @@ private struct ResearchGlobalMarketSnapshot: View {
     let store: MarketStore
     let onOpenQuote: (String) -> Void
     let onOpenSentiment: () -> Void
+    let onOpenChinaMarketStructure: () -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var showsMore = false
     @ScaledMetric(relativeTo: .caption) private var changeColumnWidth: CGFloat = 66
     @ScaledMetric(relativeTo: .caption2) private var sparklineHeight: CGFloat = 30
+
+    private static let tickers: [(title: String, symbol: String, showsPrice: Bool)] = [
+        ("欧洲 STOXX 50", "^STOXX50E", false),
+        ("黄金", "GC1!", true),
+        ("比特币", "BINANCE:BTCUSDT", true)
+    ]
+    private static let metrics: [(title: String, symbol: String, isYield: Bool)] = [
+        ("VIX", "^VIX", false),
+        ("美债 10 年期", "^TNX", true)
+    ]
 
     private var usesSingleColumn: Bool { dynamicTypeSize >= .xxxLarge }
 
     var body: some View {
-        VStack(spacing: 0) {
+        LazyVStack(spacing: 0) {
             ForEach(ResearchHomeContent.primaryMarkets, id: \.1) { title, symbol in
                 indexRow(title, symbol: symbol)
                 rowDivider
             }
-            ticker("欧洲 STOXX 50", symbol: "^STOXX50E", showsPrice: false)
-            rowDivider
-            ticker("黄金", symbol: "GC1!", showsPrice: true)
-            rowDivider
-            ticker("比特币", symbol: "BINANCE:BTCUSDT", showsPrice: true)
-            rowDivider
-            metric("VIX", symbol: "^VIX", isYield: false)
-            rowDivider
-            metric("美债 10 年期", symbol: "^TNX", isYield: true)
-            rowDivider
+            ForEach(Self.tickers, id: \.symbol) { item in
+                ticker(item.title, symbol: item.symbol, quote: store.quote(symbol: item.symbol), showsPrice: item.showsPrice)
+                rowDivider
+            }
+            ForEach(Self.metrics, id: \.symbol) { item in
+                metric(item.title, symbol: item.symbol, isYield: item.isYield)
+                rowDivider
+            }
             sentimentRow
+            if let dashboard = store.dashboard {
+                rowDivider
+                moreButton
+                if showsMore {
+                    ForEach(additionalQuotes(in: dashboard)) { entry in
+                        rowDivider
+                        ticker(marketCardTitle(symbol: entry.id, name: entry.stockName), symbol: entry.id, quote: entry.quote)
+                    }
+                    rowDivider
+                    marketLink("中国市场结构", icon: "chevron.right", action: onOpenChinaMarketStructure)
+                        .accessibilityIdentifier("research-china-market-structure")
+                }
+            }
         }
         .researchPanel()
+    }
+
+    private func additionalQuotes(in dashboard: MarketDashboard) -> [MarketDashboardQuoteEntry] {
+        var seen = Set(ResearchHomeContent.chartSymbols + Self.tickers.map(\.symbol) + Self.metrics.map(\.symbol))
+        return MarketRegion.allCases.flatMap { region in
+            let regionalMetrics = dashboard.regions.first { $0.id == region.dashboardID }?.metricSymbols ?? []
+            return (region.marketSymbols + regionalMetrics).compactMap { symbol in
+                guard seen.insert(symbol).inserted else { return nil }
+                if let quote = store.quote(symbol: symbol) { return .quote(quote) }
+                return dashboard.unavailableQuote(symbol: symbol).map(MarketDashboardQuoteEntry.unavailable)
+            }
+        }
+    }
+
+    private var moreButton: some View {
+        marketLink(showsMore ? "收起更多行情" : "更多行情", icon: showsMore ? "chevron.up" : "chevron.down") {
+            showsMore.toggle()
+        }
+        .accessibilityIdentifier("research-more-market-indicators")
+    }
+
+    private func marketLink(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Text(title).font(.subheadline.weight(.medium))
+                Spacer(minLength: 0)
+                Image(systemName: icon)
+                    .font(.footnote.weight(.semibold))
+                    .accessibilityHidden(true)
+            }
+            .foregroundStyle(ResearchDesign.accent)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func indexRow(_ title: String, symbol: String) -> some View {
@@ -468,15 +532,15 @@ private struct ResearchGlobalMarketSnapshot: View {
         .accessibilityIdentifier("research-market-\(symbol)")
     }
 
-    private func ticker(_ title: String, symbol: String, showsPrice: Bool) -> some View {
-        let quote = store.quote(symbol: symbol)
+    private func ticker(_ title: String, symbol: String, quote: MarketQuote?, showsPrice: Bool = true) -> some View {
         let change = quote?.marketDisplayFormattedPercent ?? "—"
+        let unit = quote?.priceUnit ?? quote?.currency
         return snapshotRow(
             title, status: quoteStatus(quote, symbol: symbol),
             identifier: "research-market-\(symbol)", action: { onOpenQuote(symbol) }
         ) {
             if showsPrice {
-                reading(price(quote), unit: quote?.priceUnit ?? quote?.currency)
+                reading(quote.map(marketQuotePriceText) ?? "—", unit: unit == "%" ? nil : unit)
             }
             changeBadge(change, tint: ResearchStyle.tint(quote))
                 .frame(width: changeColumnWidth, alignment: .trailing)

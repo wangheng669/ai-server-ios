@@ -5,9 +5,6 @@ import UIKit
 private enum MarketStyle {
     static let canvas = InvestmentDesign.surface
     static let surface = InvestmentDesign.surface
-    static let secondarySurface = InvestmentDesign.secondarySurface
-    static let cardSurface = InvestmentDesign.surface
-    static let cardBorder = Color.clear
     static let divider = InvestmentDesign.divider
     static let gain = InvestmentDesign.gain
     static let loss = InvestmentDesign.loss
@@ -74,7 +71,6 @@ struct MarketView: View {
         false
         #endif
     }()
-    @State private var showsMarketQuotes = false
     @State private var selectedDetail: MarketDetailRoute? = {
         #if DEBUG
         if let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--market-detail-symbol=") }) {
@@ -94,7 +90,7 @@ struct MarketView: View {
     @Environment(\.rootTabIsActive) private var rootTabIsActive
 
     private var isResearchVisible: Bool {
-        rootTabIsActive && selectedDetail == nil && !showsMarketQuotes
+        rootTabIsActive && selectedDetail == nil
             && !showsRetailInvestors && !showsInvestors && !showsGlobalRanking
     }
 
@@ -120,9 +116,6 @@ struct MarketView: View {
             },
             onOpenInvestors: {
                 showsInvestors = true
-            },
-            onOpenMarketQuotes: {
-                showsMarketQuotes = true
             },
             onOpenMarketDetail: { symbol in
                 #if DEBUG
@@ -159,13 +152,6 @@ struct MarketView: View {
                 .appPresentationDetents([.large])
                 .appPresentationCornerRadius(28)
                 .appPresentationBackground(InvestmentDesign.surface)
-                .appPresentationScrollsWithoutExpanding()
-        }
-        .appSheet(isPresented: $showsMarketQuotes) {
-            MarketQuotesSheet(store: store)
-                .appPresentationDetents([.large])
-                .appPresentationCornerRadius(28)
-                .appPresentationBackground(MarketStyle.surface)
                 .appPresentationScrollsWithoutExpanding()
         }
         .marketInstrumentDetailSheet(item: $selectedDetail, store: store)
@@ -207,10 +193,13 @@ enum MarketRegion: String, CaseIterable, Identifiable {
 
     var id: Self { self }
 
-    var symbols: [String] {
+    var marketSymbols: [String] {
         switch self {
         case .unitedStates: ["SPY", "QQQ", "DIA", "^VIX"]
-        case .china: ["000001.SS", "000300.SS", "000688.SS", "^HSTECH", "^HSI"]
+        case .china: [
+            "000001.SS", "000016.SS", "000300.SS", "399006.SZ", "000688.SS",
+            "000905.SS", "000852.SS", "932000.SS", "THS:883418", "^HSTECH", "^HSI"
+        ]
         case .japan: ["^N225"]
         case .korea: ["^KS11"]
         case .europe: ["^STOXX50E", "^GDAXI", "^FTSE", "^FCHI"]
@@ -218,16 +207,6 @@ enum MarketRegion: String, CaseIterable, Identifiable {
         case .crypto: ["BINANCE:BTCUSDT", "BINANCE:ETHUSDT", "BINANCE:SOLUSDT", "BINANCE:BNBUSDT", "BINANCE:XRPUSDT", "BINANCE:DOGEUSDT"]
         }
     }
-
-    var allSymbols: [String] {
-        guard self == .china else { return symbols }
-        return [
-            "000001.SS", "000016.SS", "000300.SS", "399006.SZ", "000688.SS",
-            "000905.SS", "000852.SS", "932000.SS", "THS:883418", "^HSTECH", "^HSI"
-        ]
-    }
-
-    var primarySymbol: String { symbols[0] }
 
     var dashboardID: String {
         switch self {
@@ -242,619 +221,7 @@ enum MarketRegion: String, CaseIterable, Identifiable {
     }
 }
 
-private enum MarketQuotesScope: Hashable, Identifiable {
-    case global
-    case region(MarketRegion)
-
-    var id: String { region?.dashboardID ?? "global" }
-    var title: String { region?.rawValue ?? "全球" }
-
-    var region: MarketRegion? {
-        guard case let .region(region) = self else { return nil }
-        return region
-    }
-}
-
-private struct MarketRegionPicker: View {
-    let store: MarketStore
-    @Binding var selection: MarketQuotesScope
-
-    var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal) {
-                HStack(spacing: 4) {
-                    scopeButton(.global, accessibilityLabel: "全球市场")
-                    ForEach(MarketRegion.allCases) { region in
-                        regionButton(region)
-                    }
-                }
-            }
-            .scrollIndicators(.hidden)
-            .onChange(of: selection, initial: true) { _, scope in
-                proxy.scrollTo(scope, anchor: .center)
-            }
-        }
-    }
-
-    private func regionButton(_ region: MarketRegion) -> some View {
-        let quote = store.quote(symbol: region.primarySymbol)
-        let overnightQuote = region == .unitedStates && quote?.tradingSession != .regular
-            ? marketActiveIndexSession(store.dashboard?.indexSessions?[region.primarySymbol])
-            : nil
-        let movementQuote = overnightQuote ?? quote
-        let status = tabStatus(for: region, quote: quote, overnightQuote: overnightQuote)
-        return scopeButton(.region(region), accessibilityLabel: "\(region.rawValue)，\(tabMovementLabel(for: movementQuote))，\(status.accessibilityLabel)")
-    }
-
-    private func scopeButton(_ scope: MarketQuotesScope, accessibilityLabel: String) -> some View {
-        let isSelected = selection == scope
-        return Button {
-            selection = scope
-        } label: {
-            VStack(spacing: 6) {
-                Text(scope.title)
-                    .font(.system(size: 14, weight: isSelected ? .semibold : .medium))
-                    .foregroundStyle(isSelected ? InvestmentDesign.accent : .primary)
-                Capsule()
-                    .fill(isSelected ? InvestmentDesign.accent : .clear)
-                    .frame(height: 2)
-            }
-            .lineLimit(1)
-            .frame(minWidth: 44, minHeight: 44)
-            .background(isSelected ? InvestmentDesign.accent.opacity(0.10) : .clear, in: RoundedRectangle(cornerRadius: 12))
-            .contentShape(Rectangle())
-        }
-        .id(scope)
-        .buttonStyle(.plain)
-        .accessibilityLabel(accessibilityLabel)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-        .accessibilityIdentifier("market-quotes-scope-\(scope.id)")
-    }
-
-    private func tabMovementTint(for quote: MarketQuote?) -> Color {
-        marketChangeTint(quote?.marketDisplayPercentValue)
-    }
-
-    private func tabMovementLabel(for quote: MarketQuote?) -> String {
-        guard let change = quote?.marketDisplayPercentValue else { return "涨跌暂缺" }
-        if change > 0 { return String(format: "上涨 %.2f%%", change) }
-        if change < 0 { return String(format: "下跌 %.2f%%", abs(change)) }
-        return "平盘"
-    }
-
-    private func tabStatus(
-        for region: MarketRegion,
-        quote: MarketQuote?,
-        overnightQuote: MarketQuote?
-    ) -> (label: String, accessibilityLabel: String, tint: Color) {
-        if region == .unitedStates, overnightQuote != nil {
-            return ("夜盘", "期指夜盘交易中", MarketStyle.live)
-        }
-
-        if quote?.isMiddayBreak == true {
-            return ("午休", "午间休市", .secondary)
-        }
-
-        switch quote?.tradingSession {
-        case .regular:
-            return ("交易中", "交易中", MarketStyle.live)
-        case .premarket:
-            return ("盘前", "盘前交易", MarketStyle.live)
-        case .postmarket:
-            return ("盘后", "盘后交易", MarketStyle.live)
-        case .overnight:
-            return ("夜盘", "夜盘交易", MarketStyle.live)
-        case .alwaysOpen:
-            return ("24H", "24小时交易", MarketStyle.live)
-        case .closed:
-            return ("休市", "已休市", Color.secondary)
-        case .unknown, .none:
-            return ("更新中", "交易状态更新中", Color.secondary)
-        }
-    }
-}
-
-private struct MarketQuotesSheet: View {
-    @State private var scope: MarketQuotesScope = .global
-    let store: MarketStore
-    @Environment(\.dismiss) private var dismiss
-    @State private var selectedDetail: MarketDetailRoute?
-
-    var body: some View {
-        VStack(spacing: 0) {
-            MarketRegionPicker(store: store, selection: $scope)
-                .padding(.horizontal, 12)
-                .padding(.top, 12)
-                .padding(.bottom, 4)
-                .background(InvestmentDesign.surface)
-                .overlay(alignment: .bottom) { Divider() }
-
-            TabView(selection: $scope) {
-                ForEach([MarketQuotesScope.global] + MarketRegion.allCases.map(MarketQuotesScope.region)) { page in
-                    MarketQuotesPage(scope: page, store: store, isActive: scope == page && selectedDetail == nil) { symbol in
-                        selectedDetail = MarketDetailRoute(symbol: symbol)
-                    }
-                    .tag(page)
-                }
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-        }
-        .background(MarketStyle.surface)
-        .floatingSheetClose("关闭市场行情", action: dismiss.callAsFunction)
-        .accessibilityIdentifier("market-quotes-sheet")
-        .accessibilityAction(.escape) { dismiss() }
-        .marketInstrumentDetailSheet(item: $selectedDetail, store: store)
-    }
-}
-
-private struct MarketQuotesPage: View {
-    let scope: MarketQuotesScope
-    let store: MarketStore
-    let isActive: Bool
-    let onSelectQuote: (String) -> Void
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.scenePhase) private var scenePhase
-
-    @State private var showsMarketStructure = false
-    @State private var chinaScope: ChinaIndexScope = .core
-    @State private var displayedLogoPaths: [String: String]
-    @ScaledMetric(relativeTo: .body) private var indexCardWidth: CGFloat = 136
-
-    init(scope: MarketQuotesScope, store: MarketStore, isActive: Bool, onSelectQuote: @escaping (String) -> Void) {
-        self.scope = scope
-        self.store = store
-        self.isActive = isActive
-        self.onSelectQuote = onSelectQuote
-        _displayedLogoPaths = State(initialValue: store.companyLogoPaths)
-    }
-
-    private var region: MarketRegion? { scope.region }
-
-    private var indexSymbols: [String] {
-        guard let region else {
-            return ResearchHomeContent.chartSymbols + ["^KS11", "^STOXX50E", "GC1!", "BINANCE:BTCUSDT"]
-        }
-        return region == .china && chinaScope == .all ? region.allSymbols : region.symbols
-    }
-
-    private var indices: [MarketDashboardQuoteEntry] {
-        indexSymbols.compactMap { symbol in
-            if let quote = store.quote(symbol: symbol) { return .quote(quote) }
-            return store.dashboard?.commodityEntries.first(where: { $0.id == symbol })
-        }
-    }
-
-    private var regionalMetrics: [MarketDashboardQuoteEntry] {
-        guard let region, let dashboard = store.dashboard,
-              let definition = dashboard.regions.first(where: { $0.id == region.dashboardID }) else { return [] }
-        let shown = Set(indexSymbols)
-        return definition.metricSymbols.compactMap { symbol in
-            guard !shown.contains(symbol) else { return nil }
-            return dashboard.metricEntry(symbol: symbol)
-        }
-    }
-
-    private var stocks: [MarketDashboardQuoteEntry] {
-        guard let region else { return [] }
-        return store.dashboard?.regionalStockEntries[region.dashboardID] ?? []
-    }
-
-    private var stocksTitle: String {
-        store.dashboard?.componentsMeta?.label ?? "核心股票"
-    }
-
-    private var requestedQuotes: [MarketQuote] {
-        (indices + regionalMetrics + stocks).compactMap(\.quote).reduce(into: [MarketQuote]()) { result, quote in
-            guard !result.contains(where: { $0.symbol == quote.symbol }) else { return }
-            result.append(quote)
-        }
-    }
-
-    private var selectionDescription: String? {
-        switch store.dashboard?.componentsMeta?.selectionBasis {
-        case "regional-market-leaders": "区域市场代表公司"
-        case "market-cap": "按市值筛选"
-        default: nil
-        }
-    }
-
-    var body: some View {
-        let visibleRequestID = "\(requestID):\(isActive):\(scenePhase)"
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(indexSectionTitle)
-                            .font(.headline)
-                        Spacer()
-                        if !indices.isEmpty {
-                            Text("\(indices.count) 项")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.horizontal, 18)
-
-                    if region == .china {
-                        ChinaIndexScopePicker(selection: $chinaScope)
-                        Button("查看中国市场结构", systemImage: "chart.pie") { showsMarketStructure = true }
-                            .font(.subheadline)
-                            .tint(InvestmentDesign.accent)
-                            .padding(.horizontal, 18)
-                    }
-
-                    if indices.isEmpty {
-                        emptyQuotes
-                    } else {
-                        quoteOverview(indices)
-                            .accessibilityIdentifier("market-quotes-indices")
-                    }
-                }
-
-                if !regionalMetrics.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("区域指标")
-                            .font(.headline)
-                            .accessibilityAddTraits(.isHeader)
-                            .padding(.horizontal, 18)
-                        quoteOverview(regionalMetrics)
-                    }
-                    .accessibilityIdentifier("market-quotes-regional-metrics")
-                }
-
-                if !stocks.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 5) {
-                            HStack(alignment: .firstTextBaseline) {
-                                Text(stocksTitle)
-                                    .font(.title3.weight(.bold))
-                                    .accessibilityIdentifier("market-quotes-stock-title")
-                                Spacer()
-                                Text("\(stocks.count) 家")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if let selectionDescription {
-                                Text(selectionDescription)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(.horizontal, 18)
-
-                        LazyVStack(spacing: 0) {
-                            ForEach(stocks) { entry in
-                                switch entry {
-                                case let .quote(quote):
-                                    quoteRow(quote)
-                                case let .unavailable(quote):
-                                    unavailableQuoteButton(quote)
-                                        .padding(.horizontal, 18)
-                                }
-                                if entry.id != stocks.last?.id {
-                                    Divider().padding(.leading, 66).padding(.trailing, 18)
-                                }
-                            }
-                        }
-
-                        Text("曲线按最近交易日展示，可含盘前盘后及夜盘")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 18)
-                    }
-                }
-            }
-            .padding(.top, 14)
-            .padding(.bottom, 60)
-        }
-        .accessibilityIdentifier("market-quotes-page-\(scope.id)")
-        .scrollIndicators(.hidden)
-        .background(MarketStyle.surface)
-        .appSheet(isPresented: $showsMarketStructure) {
-            ChinaMarketStructureSheet(structure: store.dashboard?.marketStructure)
-
-        }
-        .task(id: visibleRequestID) {
-            guard isActive, scenePhase == .active, region != .commodity else { return }
-            await runWithLimitedConcurrency(requestedQuotes) { quote in
-                await store.loadCompanyLogo(symbol: quote.symbol, name: quote.presentationName)
-                guard let path = await store.companyLogoPaths[quote.symbol],
-                      let url = marketCompanyLogoURL(path) else { return }
-                _ = await MarketLogoImageCache.shared.image(for: url)
-            }
-            guard !Task.isCancelled else { return }
-            displayedLogoPaths = store.companyLogoPaths
-        }
-        .task(id: visibleRequestID) {
-            guard isActive, scenePhase == .active else { return }
-            while !Task.isCancelled {
-                await store.preloadListCharts(symbols: requestedQuotes.map(\.symbol))
-                do { try await Task.sleep(for: .seconds(30)) }
-                catch { return }
-            }
-        }
-    }
-
-    private var indexSectionTitle: String {
-        switch scope {
-        case .global: "全球市场"
-        case .region(.commodity): "商品行情"
-        case .region(.crypto): "加密资产"
-        default: "主要指数"
-        }
-    }
-
-    @ViewBuilder
-    private func quoteOverview(_ entries: [MarketDashboardQuoteEntry]) -> some View {
-        if dynamicTypeSize.isAccessibilitySize {
-            VStack(spacing: 0) {
-                ForEach(entries) { entry in
-                    switch entry {
-                    case let .quote(quote):
-                        quoteRow(quote)
-                    case let .unavailable(quote):
-                        unavailableQuoteButton(quote)
-                            .padding(.horizontal, 18)
-                    }
-                    if entry.id != entries.last?.id {
-                        Divider().padding(.horizontal, 18)
-                    }
-                }
-            }
-        } else {
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: indexCardWidth), spacing: 8)],
-                alignment: .leading,
-                spacing: 8
-            ) {
-                ForEach(entries) { entry in
-                    switch entry {
-                    case let .quote(quote):
-                        Button { onSelectQuote(quote.symbol) } label: {
-                            MarketOverviewIndexCard(quote: quote, trend: store.listTrendValues(for: quote))
-                        }
-                        .buttonStyle(MarketPressStyle())
-                        .accessibilityIdentifier("market-quote-\(quote.symbol)")
-                        .accessibilityHint("弹出行情详情")
-                    case let .unavailable(quote):
-                        unavailableQuoteButton(quote)
-                            .padding(.horizontal, 10)
-                    }
-                }
-            }
-            .padding(.horizontal, 18)
-        }
-    }
-
-    private func unavailableQuoteButton(_ quote: MarketDashboardQuoteEntry.Unavailable) -> some View {
-        Button { onSelectQuote(quote.symbol) } label: {
-            MarketUnavailableQuoteRow(quote: quote, store: store)
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("market-quote-\(quote.symbol)")
-        .accessibilityHint("弹出行情详情")
-    }
-
-    private func quoteRow(_ quote: MarketQuote) -> some View {
-        let lastTrade = store.lastSessionTrade(for: quote)
-        return Button { onSelectQuote(quote.symbol) } label: {
-            VStack(alignment: .leading, spacing: 0) {
-                MarketOverviewQuoteRow(
-                    quote: quote,
-                    trend: store.listTrendValues(for: quote),
-                    logoPath: displayedLogoPaths[quote.symbol],
-                    hasLastTrade: lastTrade != nil
-                )
-                if let trade = lastTrade {
-                    MarketLastSessionTradeNote(trade: trade, symbol: quote.symbol)
-                        .padding(.leading, 66)
-                        .padding(.trailing, 18)
-                        .padding(.bottom, 8)
-                }
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("market-quote-\(quote.symbol)")
-        .accessibilityHint("弹出行情详情")
-    }
-
-    private var emptyQuotes: some View {
-        VStack(spacing: 12) {
-            if store.isLoading {
-                ProgressView()
-                Text("正在加载\(scope.title)市场行情")
-            } else {
-                Image(systemName: "chart.line.uptrend.xyaxis")
-                    .font(.title2)
-                Text(store.errorMessage == nil ? "暂无\(scope.title)市场行情" : "行情暂时无法加载")
-                if store.errorMessage != nil {
-                    Button("重新加载") { Task { await store.refresh() } }
-                        .buttonStyle(.bordered)
-                        .tint(InvestmentDesign.accent)
-                        .disabled(store.isRetrying)
-                }
-            }
-        }
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity, minHeight: 156)
-        .padding(.horizontal, 18)
-    }
-
-    private var requestID: String {
-        "\(scope.id):\(requestedQuotes.map(\.symbol).joined(separator: ","))"
-    }
-}
-
-private struct MarketOverviewIndexCard: View {
-    let quote: MarketQuote
-    let trend: [Double]
-
-    private var formattedPrice: String {
-        marketQuotePriceText(quote)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(marketCardTitle(symbol: quote.symbol, name: quote.presentationName))
-                .font(.footnote.weight(.semibold))
-                .lineLimit(2)
-            HStack(alignment: .center, spacing: 8) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(formattedPrice)
-                        .font(.headline)
-                        .monospacedDigit()
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                    Text(quote.marketDisplayFormattedPercent)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(marketDisplayTint(quote))
-                        .monospacedDigit()
-                        .lineLimit(1)
-                }
-                .layoutPriority(1)
-                Spacer(minLength: 0)
-                Sparkline(values: trend, color: marketDisplayTint(quote), showsFill: false)
-                    .frame(width: 46, height: 26)
-                    .accessibilityHidden(true)
-            }
-            Text(quote.freshnessLabel)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .foregroundStyle(.primary)
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(MarketStyle.secondarySurface, in: RoundedRectangle(cornerRadius: 12))
-        .contentShape(RoundedRectangle(cornerRadius: 12))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(quote.presentationName)，\(quote.displayCode)，\(quote.freshnessLabel)，价格 \(formattedPrice)，涨跌幅 \(quote.marketDisplayFormattedPercent)")
-    }
-}
-
-private struct MarketOverviewQuoteRow: View {
-    let quote: MarketQuote
-    let trend: [Double]
-    let logoPath: String?
-    let hasLastTrade: Bool
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-
-    private var usesExpandedLayout: Bool { dynamicTypeSize >= .xxLarge }
-
-    private var formattedPrice: String {
-        guard quote.stale != true else { return "—" }
-        return marketQuotePriceText(quote)
-    }
-
-    private var identitySubtitle: String {
-        hasLastTrade ? quote.displayCode : "\(quote.displayCode) · \(quote.freshnessLabel)"
-    }
-
-    var body: some View {
-        Group {
-            if usesExpandedLayout {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 12) {
-                        logo
-                        identity
-                    }
-                    if dynamicTypeSize.isAccessibilitySize {
-                        price.frame(maxWidth: .infinity, alignment: .leading)
-                        sparkline.frame(height: 32)
-                    } else {
-                        HStack(spacing: 16) {
-                            sparkline.frame(width: 84, height: 36)
-                            Spacer(minLength: 0)
-                            price
-                        }
-                    }
-                }
-            } else {
-                HStack(spacing: 12) {
-                    logo
-                    identity.frame(maxWidth: .infinity, alignment: .leading)
-                    sparkline.frame(width: 58, height: 30)
-                    price
-                }
-            }
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, minHeight: 82, alignment: .leading)
-        .foregroundStyle(.primary)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(quote.presentationName)，\(identitySubtitle)，价格 \(formattedPrice)，涨跌幅 \(quote.marketDisplayFormattedPercent)")
-    }
-
-    private var logo: some View {
-        MarketInstrumentLogo(quote: quote, path: logoPath, size: 34)
-            .accessibilityHidden(true)
-    }
-
-    private var identity: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(marketCardTitle(symbol: quote.symbol, name: quote.presentationName))
-                .font(.subheadline.weight(.semibold))
-                .lineLimit(usesExpandedLayout ? nil : 2)
-                .fixedSize(horizontal: false, vertical: true)
-            Text(identitySubtitle)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var price: some View {
-        VStack(alignment: .trailing, spacing: 5) {
-            Text(formattedPrice)
-                .font(.body.weight(.semibold))
-                .monospacedDigit()
-            Text(quote.marketDisplayFormattedPercent)
-                .font(.subheadline.weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(marketDisplayTint(quote))
-                .padding(.horizontal, 7)
-                .padding(.vertical, 4)
-                .frame(minWidth: 76, alignment: .trailing)
-                .background(marketDisplayTint(quote).opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
-        }
-        .fixedSize(horizontal: true, vertical: false)
-    }
-
-    private var sparkline: some View {
-        Group {
-            if trend.count >= 2 {
-                Sparkline(values: trend, color: marketDisplayTint(quote), showsFill: false)
-            } else {
-                Text("—").foregroundStyle(.tertiary)
-            }
-        }
-        .accessibilityHidden(true)
-    }
-}
-
-private struct ChinaMarketStructureSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    let structure: MarketStructure?
-
-    var body: some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                ChinaMarketStructurePanel(structure: structure)
-                    .padding(.bottom, 76)
-            }
-            .scrollIndicators(.hidden)
-            .background(MarketStyle.surface)
-        }
-        .overlay(alignment: .bottomTrailing) {
-            DetailSheetControls(closeLabel: "关闭资金与杠杆信号", onClose: dismiss.callAsFunction)
-                .padding(12)
-        }
-    }
-}
-
-private struct ChinaMarketStructurePanel: View {
+struct ChinaMarketStructurePanel: View {
     let structure: MarketStructure?
 
     var body: some View {
@@ -1229,40 +596,6 @@ private func marketMoney(_ value: Double) -> String {
 
 private func marketSignedMoney(_ value: Double) -> String {
     String(format: "%@%.0f亿", value >= 0 ? "+" : "−", abs(value) / 100_000_000)
-}
-
-private enum ChinaIndexScope: String, CaseIterable, Identifiable {
-    case core = "核心"
-    case all = "全部 A 股指数"
-    var id: Self { self }
-}
-
-private struct ChinaIndexScopePicker: View {
-    @Binding var selection: ChinaIndexScope
-
-    var body: some View {
-        HStack(spacing: 8) {
-            ForEach(ChinaIndexScope.allCases) { scope in
-                Button { withAnimation(.easeOut(duration: 0.16)) { selection = scope } } label: {
-                    Text(scope.rawValue)
-                        .font(.caption.weight(selection == scope ? .semibold : .medium))
-                        .foregroundStyle(selection == scope ? MarketStyle.accent : Color.secondary)
-                        .padding(.horizontal, 10)
-                        .frame(height: 28)
-                        .overlay(alignment: .bottom) {
-                            Capsule()
-                                .fill(selection == scope ? MarketStyle.accent : Color.clear)
-                                .frame(height: 2)
-                        }
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selection == scope ? .isSelected : [])
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 18)
-        .padding(.top, 4)
-    }
 }
 
 private struct MarketBreadthComposition: View {
@@ -3809,10 +3142,6 @@ struct Sparkline: View {
             }
         }
     }
-}
-
-private struct MarketPressStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View { configuration.label.scaleEffect(configuration.isPressed ? 0.985 : 1).opacity(configuration.isPressed ? 0.88 : 1).animation(.easeOut(duration: 0.12), value: configuration.isPressed) }
 }
 
 private struct CoreDescriptor {
