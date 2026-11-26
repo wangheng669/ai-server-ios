@@ -189,6 +189,15 @@ struct ResearchHomeView: View {
             .padding(.bottom, 16)
         }
         .scrollIndicators(.hidden)
+        .id(page == .coreStocks ? stockRegion : nil)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if page == .coreStocks {
+                stockRegionSelector
+                    .padding(.horizontal, ResearchDesign.inset)
+                    .background(InvestmentDesign.surface)
+                    .overlay(alignment: .top) { Rectangle().fill(ResearchDesign.line).frame(height: 1) }
+            }
+        }
     }
 
     @ViewBuilder
@@ -285,11 +294,12 @@ struct ResearchHomeView: View {
 
     private var coreStocks: some View {
         VStack(spacing: 8) {
-            sectionTitle(
-                store.dashboard?.componentsMeta?.label ?? "核心股票",
-                status: store.isShowingCachedSnapshot ? "缓存行情" : nil
-            )
-            stockRegionSelector
+            if store.isShowingCachedSnapshot {
+                Text("缓存行情")
+                    .font(.caption)
+                    .foregroundStyle(ResearchStyle.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             let entries = store.dashboard?.regionalStockEntries[stockRegion.dashboardID] ?? []
             if entries.isEmpty {
                 Text("暂无股票行情")
