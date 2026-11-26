@@ -268,12 +268,16 @@ struct ResearchHomeView: View {
     }
 
     private var globalMarkets: some View {
-        VStack(spacing: 8) {
-            sectionHeading(
-                "主要指数", trailing: "全部行情",
-                status: store.isShowingCachedSnapshot ? "缓存行情" : nil
-            ) {
-                onOpenMarketQuotes()
+        VStack(spacing: 4) {
+            HStack(spacing: 8) {
+                if store.isShowingCachedSnapshot {
+                    Text("缓存行情")
+                        .font(.caption)
+                        .foregroundStyle(ResearchStyle.muted)
+                }
+                Spacer(minLength: 0)
+                sectionAction("全部行情", action: onOpenMarketQuotes)
+                    .accessibilityIdentifier("research-all-market-quotes")
             }
             ResearchGlobalMarketSnapshot(
                 store: store,
@@ -348,23 +352,27 @@ struct ResearchHomeView: View {
             : AnyLayout(HStackLayout(spacing: 8))
         return layout {
             sectionTitle(title, status: status)
-            Button(action: action) {
-                HStack(spacing: 4) {
-                    Text(trailing).font(.footnote.weight(.medium))
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .accessibilityHidden(true)
-                }
-                .foregroundStyle(ResearchDesign.accent)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(ResearchDesign.selection, in: Capsule())
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("research-all-\(title)")
+            sectionAction(trailing, action: action)
+                .accessibilityIdentifier("research-all-\(title)")
         }
+    }
+
+    private func sectionAction(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Text(title).font(.footnote.weight(.medium))
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .accessibilityHidden(true)
+            }
+            .foregroundStyle(ResearchDesign.accent)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(ResearchDesign.selection, in: Capsule())
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func sectionTitle(_ title: String, status: String?) -> some View {
@@ -393,34 +401,24 @@ private struct ResearchGlobalMarketSnapshot: View {
     private var usesSingleColumn: Bool { dynamicTypeSize >= .xxxLarge }
 
     var body: some View {
-        VStack(spacing: 12) {
-            primaryIndices
-
-            section("指数、商品与加密资产") {
-                ticker("欧洲 STOXX 50", symbol: "^STOXX50E", showsPrice: false)
-                rowDivider
-                ticker("黄金", symbol: "GC1!", showsPrice: true)
-                rowDivider
-                ticker("比特币", symbol: "BINANCE:BTCUSDT", showsPrice: true)
-            }
-
-            section("风险与利率") {
-                metric("VIX", symbol: "^VIX", isYield: false)
-                rowDivider
-                metric("美债 10 年期", symbol: "^TNX", isYield: true)
-                rowDivider
-                sentimentRow
-            }
-        }
-    }
-
-    private var primaryIndices: some View {
-        panel {
+        VStack(spacing: 0) {
             ForEach(ResearchHomeContent.primaryMarkets, id: \.1) { title, symbol in
-                if symbol != ResearchHomeContent.primaryMarkets.first?.1 { rowDivider }
                 indexRow(title, symbol: symbol)
+                rowDivider
             }
+            ticker("欧洲 STOXX 50", symbol: "^STOXX50E", showsPrice: false)
+            rowDivider
+            ticker("黄金", symbol: "GC1!", showsPrice: true)
+            rowDivider
+            ticker("比特币", symbol: "BINANCE:BTCUSDT", showsPrice: true)
+            rowDivider
+            metric("VIX", symbol: "^VIX", isYield: false)
+            rowDivider
+            metric("美债 10 年期", symbol: "^TNX", isYield: true)
+            rowDivider
+            sentimentRow
         }
+        .researchPanel()
     }
 
     private func indexRow(_ title: String, symbol: String) -> some View {
@@ -460,7 +458,7 @@ private struct ResearchGlobalMarketSnapshot: View {
                 }
                 .frame(minWidth: usesSingleColumn ? nil : 86, alignment: usesSingleColumn ? .leading : .trailing)
             }
-            .padding(.horizontal, 13)
+            .padding(.horizontal, 12)
             .padding(.vertical, 9)
             .frame(minHeight: 65)
             .contentShape(Rectangle())
@@ -593,20 +591,6 @@ private struct ResearchGlobalMarketSnapshot: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .background(tint.opacity(0.09), in: RoundedRectangle(cornerRadius: 6))
-    }
-
-    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .accessibilityAddTraits(.isHeader)
-            panel(content: content)
-        }
-    }
-
-    private func panel<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(spacing: 0, content: content)
-            .researchPanel()
     }
 
     private var rowDivider: some View {
