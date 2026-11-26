@@ -17,10 +17,12 @@ extension View {
 
     func appSheet<Sheet: View>(
         isPresented: Binding<Bool>,
+        initialContentHeight: CGFloat? = nil,
         onDismiss: (() -> Void)? = nil,
         @ViewBuilder content: @escaping () -> Sheet
     ) -> some View {
-        appModal(isPresented: isPresented, fullscreen: false, onDismiss: onDismiss, content: content)
+        appModal(isPresented: isPresented, fullscreen: false, initialContentHeight: initialContentHeight,
+                 onDismiss: onDismiss, content: content)
     }
 
     func appFullScreenCover<Item: Identifiable, Sheet: View>(
@@ -53,10 +55,12 @@ extension View {
     private func appModal<Sheet: View>(
         isPresented: Binding<Bool>,
         fullscreen: Bool,
+        initialContentHeight: CGFloat? = nil,
         onDismiss: (() -> Void)?,
         content: @escaping () -> Sheet
     ) -> some View {
-        modifier(AppModalModifier(selection: isPresented, dismissedSelection: false, fullscreen: fullscreen, onDismiss: onDismiss) {
+        modifier(AppModalModifier(selection: isPresented, dismissedSelection: false, fullscreen: fullscreen,
+                                  initialContentHeight: initialContentHeight, onDismiss: onDismiss) {
             $0 ? (AnyHashable(true), content()) : nil
         })
     }
@@ -68,6 +72,7 @@ private struct AppModalModifier<Selection, Sheet: View>: ViewModifier {
     @Binding var selection: Selection
     let dismissedSelection: Selection
     let fullscreen: Bool
+    var initialContentHeight: CGFloat? = nil
     let onDismiss: (() -> Void)?
     let presentation: (Selection) -> (id: AnyHashable, view: Sheet)?
 
@@ -76,6 +81,7 @@ private struct AppModalModifier<Selection, Sheet: View>: ViewModifier {
         return content.background(AppModalPresenter(
             identity: presented?.id,
             fullscreen: fullscreen,
+            initialContentHeight: initialContentHeight,
             content: presented?.view,
             onDismiss: {
                 selection = dismissedSelection
@@ -88,6 +94,7 @@ private struct AppModalModifier<Selection, Sheet: View>: ViewModifier {
 private struct AppModalPresenter<Sheet: View>: UIViewControllerRepresentable {
     let identity: AnyHashable?
     let fullscreen: Bool
+    let initialContentHeight: CGFloat?
     let content: Sheet?
     let onDismiss: () -> Void
 
@@ -103,6 +110,7 @@ private struct AppModalPresenter<Sheet: View>: UIViewControllerRepresentable {
     func updateUIViewController(_ anchor: Anchor, context: Context) {
         let coordinator = context.coordinator
         coordinator.fullscreen = fullscreen
+        coordinator.initialContentHeight = initialContentHeight
         let openURL = context.environment.openURL
         let scenePhase = context.environment.scenePhase
         coordinator.content = content.map { content in
@@ -184,12 +192,21 @@ private struct AppModalPresenter<Sheet: View>: UIViewControllerRepresentable {
     }
 
     @MainActor final class Coordinator: NSObject, UIViewControllerTransitioningDelegate, UISheetPresentationControllerDelegate {
+        private static var contentDetent: UISheetPresentationController.Detent.Identifier {
+            .init("app-content-height")
+        }
+
         var content: ContentView?
         var fullscreen = false
+        var initialContentHeight: CGFloat?
         private var options = AppModalOptions()
         var onDismiss: (() -> Void)?
         var host: Host?
         private var closing = false
+
+        private var contentHeight: CGFloat? {
+            options.contentHeight ?? initialContentHeight
+        }
 
         func update(from anchor: Anchor) {
             guard anchor.viewIfLoaded?.window != nil else { return }
@@ -216,6 +233,7 @@ private struct AppModalPresenter<Sheet: View>: UIViewControllerRepresentable {
                 self.host = nil
                 self.closing = false
                 self.options.readingContentHeight = nil
+                self.options.contentHeight = nil
                 self.onDismiss?()
             }
             self.host = host
@@ -230,19 +248,47 @@ private struct AppModalPresenter<Sheet: View>: UIViewControllerRepresentable {
 
         func updateOptions(_ updated: AppModalOptions) {
             let previous = options
+            let previousContentHeight = contentHeight
             options = updated
             guard updated != previous, let host else { return }
             if let sheet = host.presentationController as? UISheetPresentationController {
-                applyOptions(
-                    to: sheet,
-                    animateReadingResize: updated.readingContentHeight != previous.readingContentHeight
-                        && host.viewIfLoaded?.window != nil && !host.isBeingPresented
-                )
+                let contentHeightChanged = contentHeight != previousContentHeight
+                let heightChanged = contentHeightChanged || updated.readingContentHeight != previous.readingContentHeight
+                applyOptions(to: sheet, contentHeightChanged: contentHeightChanged,
+                             animateResize: heightChanged && host.viewIfLoaded?.window != nil && !host.isBeingPresented)
             }
             host.view.backgroundColor = updated.background.map(UIColor.init) ?? .systemBackground
         }
 
-        private func applyOptions(to sheet: UISheetPresentationController, animateReadingResize: Bool = false) {
+        private func applyOptions(
+            to sheet: UISheetPresentationController,
+            contentHeightChanged: Bool = false,
+            animateResize: Bool = false
+        ) {
+            if contentHeight != nil {
+                let identifier = Self.contentDetent
+                if sheet.detents.first?.identifier != identifier {
+                    sheet.detents = [.custom(identifier: identifier) { [weak self] context in
+                        min(self?.contentHeight ?? context.maximumDetentValue, context.maximumDetentValue)
+                    }]
+                    sheet.selectedDetentIdentifier = identifier
+                } else if contentHeightChanged {
+                    if animateResize && !UIAccessibility.isReduceMotionEnabled {
+                        sheet.animateChanges { sheet.invalidateDetents() }
+                    } else {
+                        sheet.invalidateDetents()
+                    }
+                }
+                sheet.prefersScrollingExpandsWhenScrolledToEdge = false
+            } else {
+                applyStandardDetents(to: sheet, animateResize: animateResize)
+            }
+
+            if let radius = options.cornerRadius { sheet.preferredCornerRadius = radius }
+            sheet.prefersGrabberVisible = options.showsGrabber
+        }
+
+        private func applyStandardDetents(to sheet: UISheetPresentationController, animateResize: Bool) {
             var supportedDetents = options.detents ?? [.large]
             var scrollExpandsSheet = !options.scrollsWithoutExpanding
             // The window height keeps the cutoff stable after the sheet resizes.
@@ -260,15 +306,13 @@ private struct AppModalPresenter<Sheet: View>: UIViewControllerRepresentable {
                     sheet.detents = detents.map(\.native)
                     if self.options.selection == nil { sheet.selectedDetentIdentifier = detents.first?.identifier }
                 }
-                if animateReadingResize { sheet.animateChanges(updateDetents) }
+                if animateResize { sheet.animateChanges(updateDetents) }
                 else { updateDetents() }
             }
             if let selected = options.selection, sheet.selectedDetentIdentifier != selected.identifier {
                 sheet.selectedDetentIdentifier = selected.identifier
             }
-            if let radius = options.cornerRadius { sheet.preferredCornerRadius = radius }
             sheet.prefersScrollingExpandsWhenScrolledToEdge = scrollExpandsSheet
-            sheet.prefersGrabberVisible = options.showsGrabber
         }
 
         func presentationController(forPresented presented: UIViewController, presenting: UIViewController?, source: UIViewController) -> UIPresentationController? {
@@ -383,6 +427,7 @@ private struct AppModalOptions: Equatable {
     var scrollsWithoutExpanding = false
     var showsGrabber = false
     var readingContentHeight: CGFloat?
+    var contentHeight: CGFloat?
     var background: Color?
 
     static func == (lhs: Self, rhs: Self) -> Bool {
@@ -391,6 +436,7 @@ private struct AppModalOptions: Equatable {
             && lhs.scrollsWithoutExpanding == rhs.scrollsWithoutExpanding
             && lhs.showsGrabber == rhs.showsGrabber
             && lhs.readingContentHeight == rhs.readingContentHeight
+            && lhs.contentHeight == rhs.contentHeight
             && lhs.background == rhs.background
     }
     mutating func merge(_ other: Self) {
@@ -399,6 +445,7 @@ private struct AppModalOptions: Equatable {
         scrollsWithoutExpanding = scrollsWithoutExpanding || other.scrollsWithoutExpanding
         showsGrabber = showsGrabber || other.showsGrabber
         if let height = other.readingContentHeight { readingContentHeight = height }
+        if let height = other.contentHeight { contentHeight = height }
         if let value = other.background { background = value }
     }
 }
@@ -425,6 +472,9 @@ extension View {
     }
     func appPresentationScrollsWithoutExpanding() -> some View {
         transformPreference(AppModalOptionsKey.self) { $0.scrollsWithoutExpanding = true }
+    }
+    func appPresentationContentHeight(_ height: CGFloat) -> some View {
+        transformPreference(AppModalOptionsKey.self) { $0.contentHeight = height }
     }
     func appReadingContentHeight(_ height: CGFloat?) -> some View {
         transformPreference(AppModalOptionsKey.self) { $0.readingContentHeight = height }
