@@ -2663,6 +2663,7 @@ private struct MarketDetailChart: View {
     @State private var showsChartData = false
     @State private var showsMinutePeriods = false
     @State private var previousPeriod: MarketChartPeriod?
+    private let vwapTint = Color(red: 0.46, green: 0.27, blue: 0.72)
 
     private var selectedRange: MarketRange { selectedPeriod.sourceRange }
     private var displayedPeriod: MarketChartPeriod {
@@ -2676,6 +2677,12 @@ private struct MarketDetailChart: View {
     private var currentRender: MarketChartDisplayArtifacts? { sourceSnapshot?.artifacts.displays[displayedPeriod] }
     private var chart: MarketChart? { currentRender?.chart }
     private var presentation: MarketChartPresentation? { currentRender?.presentation }
+    private var intradayVWAP: MarketChartVWAP? {
+        guard usesStockLayout, displayedPeriod == .intraday, !points.isEmpty,
+              let average = chart?.quote.intradayVWAP, average.price.isFinite, average.price > 0,
+              average.asOfTimestamp > 0 else { return nil }
+        return average
+    }
 
     private func snapshot(for period: MarketChartPeriod) -> MarketChartSnapshot? {
         store.chartSnapshot(symbol: symbol, range: period.sourceRange)
@@ -2983,6 +2990,10 @@ private struct MarketDetailChart: View {
                    let previousClose = chart?.quote.previousClose {
                     ChartReferenceLine(value: previousClose, low: presentation?.low, high: presentation?.high)
                 }
+                if let intradayVWAP {
+                    ChartReferenceLine(value: intradayVWAP.price, low: presentation?.low, high: presentation?.high,
+                                       color: vwapTint, strokeStyle: StrokeStyle(lineWidth: 1.2))
+                }
                 if selectedPointIndex != nil, let inspectedPointIndex {
                     let point = points[inspectedPointIndex]
                     MarketChartPriceOverlay(
@@ -3126,24 +3137,40 @@ private struct MarketDetailChart: View {
     }
 
     private var chartLegend: some View {
-        HStack(spacing: 11) {
-            if let label = presentation?.extendedSessionLabel {
-                HStack(spacing: 4) {
-                    Capsule().fill(chartColor).frame(width: 10, height: 2)
-                    Text("常规盘")
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 11) {
+                if let label = presentation?.extendedSessionLabel {
+                    HStack(spacing: 4) {
+                        Capsule().fill(chartColor).frame(width: 10, height: 2)
+                        Text("常规盘")
+                    }
+                    HStack(spacing: 4) {
+                        Capsule().fill(MarketDetailPageStyle.extended).frame(width: 10, height: 2)
+                        Text(label)
+                    }
                 }
-                HStack(spacing: 4) {
-                    Capsule().fill(MarketDetailPageStyle.extended).frame(width: 10, height: 2)
-                    Text(label)
+                if presentation?.hasVolume == true {
+                    Text("成交量")
                 }
             }
-            if presentation?.hasVolume == true {
-                Text("成交量")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            if let intradayVWAP {
+                let time = MarketViewDateFormatters.chart(period: .minute15, timezone: chart?.timezone)
+                    .string(from: Date(timeIntervalSince1970: Double(intradayVWAP.asOfTimestamp) / 1_000))
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Capsule().fill(vwapTint).frame(width: 12, height: 2)
+                        .accessibilityHidden(true)
+                    Text("当日均价 \(formattedPrice(intradayVWAP.price)) · 截至 \(time)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                .accessibilityIdentifier("market-chart-intraday-vwap")
             }
         }
-        .font(.caption2)
-        .foregroundStyle(.secondary)
     }
+
     private var chartColor: Color {
         if displayedPeriod.sourceRange != .day, let periodReturn = chart?.periodReturn?.percent {
             return periodReturn >= 0 ? MarketStyle.gain : MarketStyle.loss
@@ -3241,6 +3268,8 @@ private struct ChartReferenceLine: View {
     let value: Double
     let low: Double?
     let high: Double?
+    var color = Color.secondary.opacity(0.30)
+    var strokeStyle = StrokeStyle(lineWidth: 0.75, dash: [3, 3])
 
     var body: some View {
         GeometryReader { proxy in
@@ -3250,7 +3279,7 @@ private struct ChartReferenceLine: View {
                     path.move(to: CGPoint(x: 0, y: y))
                     path.addLine(to: CGPoint(x: proxy.size.width, y: y))
                 }
-                .stroke(Color.secondary.opacity(0.30), style: StrokeStyle(lineWidth: 0.75, dash: [3, 3]))
+                .stroke(color, style: strokeStyle)
             }
         }
         .allowsHitTesting(false)
