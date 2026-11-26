@@ -18,6 +18,7 @@ import tempfile
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
 from urllib.parse import urlsplit
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -59,6 +60,26 @@ def version_key(version, build):
 
 def command(args, **options):
     return subprocess.run(args, check=True, **options)
+
+
+def log_timing(stage, seconds, status="ok"):
+    print(f"release_timing stage={stage} seconds={seconds:.3f} status={status}", flush=True)
+
+
+def timed_stage(stage):
+    def decorate(function):
+        @wraps(function)
+        def wrapper(*args, **kwargs):
+            start = time.monotonic()
+            status = "failed"
+            try:
+                result = function(*args, **kwargs)
+                status = "ok"
+                return result
+            finally:
+                log_timing(stage, time.monotonic() - start, status)
+        return wrapper
+    return decorate
 
 
 def sha256(path):
@@ -144,6 +165,11 @@ def xcode_environment():
     return env
 
 
+@timed_stage("xcode_archive")
+def archive_command(args, **options):
+    return command(args, **options)
+
+
 def build_app(work, config, entry_url, version, build, source_commit, env, lock_fd):
     source = work / "source"
     source.mkdir()
@@ -163,7 +189,7 @@ def build_app(work, config, entry_url, version, build, source_commit, env, lock_
     archive = work / "AIServerClient.xcarchive"
     log_path = work / "archive.log"
     with log_path.open("wb") as log:
-        command([
+        archive_command([
             "xcodebuild", "archive", "-project", "AIServerClient.xcodeproj", "-scheme", "AIServerClient",
             "-configuration", "Release", "-destination", "generic/platform=iOS", "-archivePath", str(archive),
             "-derivedDataPath", str(work / "DerivedData"), f"DEVELOPMENT_TEAM={config['team_id']}",
@@ -209,6 +235,7 @@ def read_handoff(handoff, identity):
     return receipt
 
 
+@timed_stage("archive_prepare")
 def prepare_archive(config, entry_url, identity, handoff, lock_fd):
     if not handoff.exists() and not handoff.is_symlink():
         env = xcode_environment()
@@ -399,6 +426,7 @@ def save_release_receipt(handoff, destination, receipt, ipa_sha256):
         stage.rename(destination)
 
 
+@timed_stage("public_copy_and_readback")
 def publish(work, channel, entry_url, package, base, assets, ipa, manifest_path, icon, version, build):
     item, = plistlib.loads(manifest_path.read_bytes())["items"]
     require(item["metadata"]["bundle-identifier"] == BUNDLE_ID, "Manifest app identifier differs")
@@ -471,6 +499,7 @@ def save_diagnostics(work, handoff, stage):
         print(f"{stage} log: {saved}", flush=True)
 
 
+@timed_stage("signing_export")
 def export_signed(config, entry_url, identity, handoff, checksum, auth, lock_fd):
     receipt = read_handoff(handoff, identity)
     require(checksum == receipt["archive_sha256"], "Signing request does not match the prepared archive")
@@ -531,6 +560,7 @@ def signing_runs(checksum):
     return [run for run in json.loads(result.stdout) if run["displayTitle"] == f"Focus Ad Hoc {checksum}"]
 
 
+@timed_stage("signing_dispatch")
 def request_signing(identity, checksum):
     matching = signing_runs(checksum)
     if matching and (matching[0]["status"] != "completed" or matching[0]["conclusion"] == "success"):
@@ -542,6 +572,7 @@ def request_signing(identity, checksum):
     return None, {run["databaseId"] for run in matching}
 
 
+@timed_stage("signing_wait")
 def wait_for_signing(checksum, request):
     run_id, previous = request
     deadline = time.monotonic() + 60
@@ -566,6 +597,7 @@ def require_package_name(package, identity):
             "Invalid package identity in release receipt")
 
 
+@timed_stage("publish_finish")
 def finish_release(config, entry_url, identity, handoff, channel):
     current, current_version = read_current(channel)
     version, build = identity["version"], identity["build"]
@@ -709,7 +741,9 @@ def queue_release(args, config, configuration_file, entry_url, channel):
 
     # Do not hold the archive/export lock here: the signing runner needs it.
     # The short state lock still lets other callers submit during signing.
+    dispatcher_started = time.monotonic()
     with queue_lock("dispatcher"):
+        log_timing("dispatcher_lock_wait", time.monotonic() - dispatcher_started)
         while True:
             with queue_lock("state"):
                 state = queue_read()
@@ -731,6 +765,9 @@ def queue_release(args, config, configuration_file, entry_url, channel):
                         }
                         state.update(inflight=inflight, pending=None)
                         queue_save(state)
+                        # Policy window can overlap a preceding release; do not add it to batch age.
+                        log_timing("batch_window", max(0, pending["ready_at"] - pending["first_at"]))
+                        log_timing("batch_age", max(0, time.time() - pending["first_at"]))
             if inflight is None:
                 time.sleep(min(remaining, 2))
                 continue
