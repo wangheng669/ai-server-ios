@@ -401,51 +401,51 @@ private struct ResearchGlobalMarketSnapshot: View {
     let onOpenChinaMarketStructure: () -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showsMore = false
-    @ScaledMetric(relativeTo: .caption) private var changeColumnWidth: CGFloat = 66
-    @ScaledMetric(relativeTo: .caption2) private var sparklineHeight: CGFloat = 30
+    @ScaledMetric(relativeTo: .caption) private var quoteCardHeight: CGFloat = 76
+    @ScaledMetric(relativeTo: .caption2) private var sparklineHeight: CGFloat = 16
 
-    private static let tickers: [(title: String, symbol: String, showsPrice: Bool)] = [
-        ("欧洲 STOXX 50", "^STOXX50E", false),
-        ("黄金", "GC1!", true),
-        ("比特币", "BINANCE:BTCUSDT", true)
+    private static let tickers: [(title: String, symbol: String)] = [
+        ("欧洲 STOXX 50", "^STOXX50E"),
+        ("黄金", "GC1!"),
+        ("比特币", "BINANCE:BTCUSDT")
     ]
     private static let metrics: [(title: String, symbol: String, isYield: Bool)] = [
         ("VIX", "^VIX", false),
         ("美债 10 年期", "^TNX", true)
     ]
 
-    private var usesSingleColumn: Bool { dynamicTypeSize >= .xxxLarge }
+    private var columns: [GridItem] {
+        let column = GridItem(.flexible(minimum: 0), spacing: 6, alignment: .topLeading)
+        return Array(repeating: column, count: dynamicTypeSize >= .xxxLarge ? 1 : 2)
+    }
 
     var body: some View {
-        LazyVStack(spacing: 0) {
-            ForEach(ResearchHomeContent.primaryMarkets, id: \.1) { title, symbol in
-                indexRow(title, symbol: symbol)
-                rowDivider
+        LazyVStack(spacing: 6) {
+            LazyVGrid(columns: columns, spacing: 6) {
+                ForEach(ResearchHomeContent.primaryMarkets, id: \.1) { title, symbol in
+                    indexCard(title, symbol: symbol)
+                }
+                ForEach(Self.tickers, id: \.symbol) { item in
+                    ticker(item.title, symbol: item.symbol, quote: store.quote(symbol: item.symbol))
+                }
+                ForEach(Self.metrics, id: \.symbol) { item in
+                    metric(item.title, symbol: item.symbol, isYield: item.isYield)
+                }
             }
-            ForEach(Self.tickers, id: \.symbol) { item in
-                ticker(item.title, symbol: item.symbol, quote: store.quote(symbol: item.symbol), showsPrice: item.showsPrice)
-                rowDivider
-            }
-            ForEach(Self.metrics, id: \.symbol) { item in
-                metric(item.title, symbol: item.symbol, isYield: item.isYield)
-                rowDivider
-            }
-            sentimentRow
+            sentimentCard
             if let dashboard = store.dashboard {
-                rowDivider
                 moreButton
                 if showsMore {
-                    ForEach(additionalQuotes(in: dashboard)) { entry in
-                        rowDivider
-                        ticker(marketCardTitle(symbol: entry.id, name: entry.stockName), symbol: entry.id, quote: entry.quote)
+                    LazyVGrid(columns: columns, spacing: 6) {
+                        ForEach(additionalQuotes(in: dashboard)) { entry in
+                            ticker(marketCardTitle(symbol: entry.id, name: entry.stockName), symbol: entry.id, quote: entry.quote)
+                        }
                     }
-                    rowDivider
                     marketLink("中国市场结构", icon: "chevron.right", action: onOpenChinaMarketStructure)
                         .accessibilityIdentifier("research-china-market-structure")
                 }
             }
         }
-        .researchPanel()
     }
 
     private func additionalQuotes(in dashboard: MarketDashboard) -> [MarketDashboardQuoteEntry] {
@@ -478,74 +478,40 @@ private struct ResearchGlobalMarketSnapshot: View {
                     .accessibilityHidden(true)
             }
             .foregroundStyle(ResearchDesign.accent)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
             .frame(minHeight: 44)
             .contentShape(Rectangle())
+            .researchPanel()
         }
         .buttonStyle(.plain)
     }
 
-    private func indexRow(_ title: String, symbol: String) -> some View {
+    private func indexCard(_ title: String, symbol: String) -> some View {
         let quote = store.quote(symbol: symbol)
         let value = price(quote)
         let change = quote?.marketDisplayFormattedPercent ?? "—"
         let tint = ResearchStyle.tint(quote)
-        let layout = usesSingleColumn
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-            : AnyLayout(HStackLayout(spacing: 10))
-
-        return Button { onOpenQuote(symbol) } label: {
-            layout {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(.subheadline.weight(.semibold))
-                    Text(quoteStatus(quote, symbol: symbol))
-                        .font(.caption2)
-                        .foregroundStyle(ResearchStyle.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                ResearchSparkline(
-                    values: store.listTrendValues(for: quote),
-                    color: tint,
-                    emptyLabel: trendStatus(symbol: symbol, hasQuote: quote != nil)
-                )
-                .equatable()
-                .frame(width: usesSingleColumn ? nil : 72, height: sparklineHeight)
-                VStack(alignment: usesSingleColumn ? .leading : .trailing, spacing: 3) {
-                    Text(value)
-                        .font(.title3.weight(.semibold).monospacedDigit())
-                        .accessibilityLabel("价格 \(value)")
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                    changeBadge(change, tint: tint)
-                        .accessibilityLabel("涨跌幅 \(change)")
-                }
-                .frame(minWidth: usesSingleColumn ? nil : 86, alignment: usesSingleColumn ? .leading : .trailing)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .frame(minHeight: 65)
-            .contentShape(Rectangle())
+        return quoteCard(title, status: quoteStatus(quote, symbol: symbol), symbol: symbol) {
+            quoteReading(value, change: change, tint: tint)
+            ResearchSparkline(
+                values: store.listTrendValues(for: quote),
+                color: tint,
+                emptyLabel: trendStatus(symbol: symbol, hasQuote: quote != nil)
+            )
+            .equatable()
+            .frame(height: sparklineHeight)
         }
-        .buttonStyle(.plain)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("research-market-\(symbol)")
     }
 
-    private func ticker(_ title: String, symbol: String, quote: MarketQuote?, showsPrice: Bool = true) -> some View {
+    private func ticker(_ title: String, symbol: String, quote: MarketQuote?) -> some View {
         let change = quote?.marketDisplayFormattedPercent ?? "—"
         let unit = quote?.priceUnit ?? quote?.currency
-        return snapshotRow(
-            title, status: quoteStatus(quote, symbol: symbol),
-            identifier: "research-market-\(symbol)", action: { onOpenQuote(symbol) }
-        ) {
-            if showsPrice {
-                reading(quote.map(marketQuotePriceText) ?? "—", unit: unit == "%" ? nil : unit)
-            }
-            changeBadge(change, tint: ResearchStyle.tint(quote))
-                .frame(width: changeColumnWidth, alignment: .trailing)
-                .accessibilityLabel("涨跌幅 \(change)")
+        let status = [quoteStatus(quote, symbol: symbol), unit == "%" ? nil : unit]
+            .compactMap { $0 }.joined(separator: " · ")
+
+        return quoteCard(title, status: status, symbol: symbol) {
+            quoteReading(quote.map(marketQuotePriceText) ?? "—", change: change, tint: ResearchStyle.tint(quote))
         }
     }
 
@@ -558,18 +524,14 @@ private struct ResearchGlobalMarketSnapshot: View {
             isYield ? String(format: "%+.0f bp", $0 * 100) : String(format: "%+.2f 点", $0)
         } ?? "—"
 
-        return snapshotRow(
-            title, status: [status, timestamp].compactMap { $0 }.joined(separator: " · "),
-            identifier: "research-market-\(symbol)", action: { onOpenQuote(symbol) }
+        return quoteCard(
+            title, status: [status, timestamp].compactMap { $0 }.joined(separator: " · "), symbol: symbol
         ) {
-            reading(value)
-            changeBadge(change, tint: ResearchStyle.tint(quote))
-                .frame(width: changeColumnWidth, alignment: .trailing)
-                .accessibilityLabel("变动 \(change)")
+            quoteReading(value, change: change, tint: ResearchStyle.tint(quote))
         }
     }
 
-    private var sentimentRow: some View {
+    private var sentimentCard: some View {
         let sentiment = store.dashboard?.sentiment.flatMap { $0.available == false ? nil : $0 }
         let timestamp = marketISODate(sentiment?.updatedAt).map {
             marketShortTimestamp(Int64($0.timeIntervalSince1970 * 1000))
@@ -578,88 +540,100 @@ private struct ResearchGlobalMarketSnapshot: View {
             .compactMap { $0 }
             .joined(separator: " · ")
 
-        return snapshotRow(
-            "CNN 市场情绪", status: status,
-            identifier: "research-sentiment", action: onOpenSentiment
-        ) {
-            VStack(alignment: .trailing, spacing: 5) {
-                Text(sentiment.map { String(format: "%.1f / 100", $0.score) } ?? "—")
-                    .font(.subheadline.weight(.semibold))
-                    .monospacedDigit()
-                    .fixedSize(horizontal: true, vertical: false)
-                if let score = sentiment?.score, (0...100).contains(score) {
-                    ProgressView(value: score, total: 100)
-                        .tint(ResearchDesign.accent)
-                        .frame(width: 72)
-                        .accessibilityHidden(true)
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout(spacing: 8))
+        return cardButton("research-sentiment", minHeight: 44, action: onOpenSentiment) {
+            layout {
+                VStack(alignment: .leading, spacing: 2) {
+                    cardTitle("CNN 市场情绪")
+                    cardStatus(status)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text(sentiment.map { String(format: "%.1f / 100", $0.score) } ?? "—")
+                        .font(.subheadline.weight(.semibold).monospacedDigit())
+                        .fixedSize(horizontal: true, vertical: false)
+                    if let score = sentiment?.score, (0...100).contains(score) {
+                        ProgressView(value: score, total: 100)
+                            .tint(ResearchDesign.accent)
+                            .frame(width: 64)
+                            .accessibilityHidden(true)
+                    }
                 }
             }
         }
     }
 
-    private func snapshotRow<Readings: View>(
+    private func quoteCard<Readings: View>(
         _ title: String,
         status: String,
-        identifier: String,
-        action: @escaping () -> Void,
+        symbol: String,
         @ViewBuilder readings: () -> Readings
     ) -> some View {
-        let layout = usesSingleColumn
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
-            : AnyLayout(HStackLayout(alignment: .center, spacing: 10))
-
-        return Button(action: action) {
-            layout {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
-                        .font(.subheadline.weight(.semibold))
-                    Text(status)
-                        .font(.caption2)
-                        .foregroundStyle(ResearchStyle.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                HStack(spacing: 6, content: readings)
+        cardButton("research-market-\(symbol)", minHeight: quoteCardHeight, action: { onOpenQuote(symbol) }) {
+            VStack(alignment: .leading, spacing: 2) {
+                cardTitle(title)
+                readings()
+                cardStatus(status)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .frame(minHeight: 48)
-            .contentShape(Rectangle())
+        }
+    }
+
+    private func cardButton<Content: View>(
+        _ identifier: String,
+        minHeight: CGFloat,
+        action: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        Button(action: action) {
+            content()
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity, minHeight: minHeight, alignment: .topLeading)
+                .contentShape(Rectangle())
+                .researchPanel()
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier(identifier)
     }
 
-    private func reading(_ value: String, unit: String? = nil) -> some View {
-        VStack(alignment: .trailing, spacing: 2) {
-            Text(value)
-                .font(.subheadline.weight(.semibold))
-                .monospacedDigit()
-            if let unit {
-                Text(unit)
-                    .font(.caption2)
-                    .foregroundStyle(ResearchStyle.muted)
+    private func cardTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func cardStatus(_ status: String) -> some View {
+        Text(status)
+            .font(.caption2)
+            .foregroundStyle(ResearchStyle.muted)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func quoteReading(_ value: String, change: String, tint: Color) -> some View {
+        let price = Text(value)
+            .font(.subheadline.weight(.semibold).monospacedDigit())
+            .accessibilityLabel("价格 \(value)")
+        let movement = Text(change)
+            .font(.caption2.weight(.semibold).monospacedDigit())
+            .foregroundStyle(tint)
+            .accessibilityLabel("变动 \(change)")
+
+        return ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                price
+                movement
+            }
+            .fixedSize(horizontal: true, vertical: false)
+
+            VStack(alignment: .leading, spacing: 1) {
+                price.lineLimit(1).minimumScaleFactor(0.8)
+                movement
             }
         }
-        .fixedSize(horizontal: true, vertical: false)
-    }
-
-    private func changeBadge(_ value: String, tint: Color) -> some View {
-        Text(value)
-            .font(.caption.weight(.semibold))
-            .monospacedDigit()
-            .foregroundStyle(tint)
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(tint.opacity(0.09), in: RoundedRectangle(cornerRadius: 6))
-    }
-
-    private var rowDivider: some View {
-        ResearchDesign.line.frame(height: 0.5).padding(.horizontal, 12)
     }
 
     private func price(_ quote: MarketQuote?) -> String {
