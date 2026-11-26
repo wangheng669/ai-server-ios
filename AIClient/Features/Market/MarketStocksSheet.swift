@@ -416,7 +416,7 @@ private struct MarketStockQuoteRow: View {
     }
 }
 
-private extension MarketDashboardQuoteEntry {
+extension MarketDashboardQuoteEntry {
     var stockName: String {
         switch self {
         case let .quote(quote): quote.presentationName
@@ -432,13 +432,13 @@ private extension MarketDashboardQuoteEntry {
         return quote
     }
 
-    var changeForRanking: Double? {
+    fileprivate var changeForRanking: Double? {
         guard let quote = displayQuote, !quote.hasSuspiciousIndexMove,
               let change = quote.marketDisplayPercentValue, change.isFinite else { return nil }
         return change
     }
 
-    func matches(_ search: String) -> Bool {
+    fileprivate func matches(_ search: String) -> Bool {
         let name: String?
         switch self {
         case let .quote(quote): name = quote.name

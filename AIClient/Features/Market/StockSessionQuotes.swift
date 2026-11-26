@@ -171,13 +171,6 @@ extension MarketStore {
         return StockSessionQuotes(quote: quote, chart: chart, afterHoursEmptyLabel: emptyLabel,
                                   extendedSession: extendedSession, isCurrent: isCurrent)
     }
-
-    func missingAfterHoursSymbols(_ symbols: [String]) -> [String] {
-        symbols.filter { symbol in
-            guard let quote = quote(symbol: symbol) else { return false }
-            return chart(symbol: symbol, range: .day)?.stockAfterHoursEnd(for: quote) == nil
-        }
-    }
 }
 
 struct MarketLastSessionTradeNote: View {
