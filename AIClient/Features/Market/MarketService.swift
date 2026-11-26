@@ -112,6 +112,11 @@ struct MarketService: Sendable {
         return try await request(url, as: InvestorMoodResponse.self, bypassCache: refresh).data
     }
 
+    func xiaohongshuMood() async throws -> XiaohongshuMoodBoard {
+        let url = baseURL.appending(path: "api/ios/v1/market/dashboard/xiaohongshu-mood")
+        return try await request(url, as: XiaohongshuMoodResponse.self, bypassCache: true).data
+    }
+
     func prewarmInvestorMoodVideos(_ items: [InvestorMoodItem]) async {
         await runWithLimitedConcurrency(
             Array(items.prefix(6)),
