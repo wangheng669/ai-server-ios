@@ -13,6 +13,7 @@
 		A4B801000000000000000001 /* TodayWorldView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4B801000000000000000002 /* TodayWorldView.swift */; };
 		AE5900000000000000000001 /* LobeIcons-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = AE5900000000000000000002 /* LobeIcons-LICENSE.txt */; };
 		AE5800000000000000000001 /* TodayBriefOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE5800000000000000000002 /* TodayBriefOverviewView.swift */; };
+		0F9EA32E8A604E17B3B0C0A1 /* TodayActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F9EA32E8A604E17B3B0C0A2 /* TodayActivity.swift */; };
 		AE5800000000000000000041 /* MarketStockQuotes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE5800000000000000000042 /* MarketStockQuotes.swift */; };
 		F13F00000000000000000001 /* Sec13FNotificationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F13F00000000000000000002 /* Sec13FNotificationView.swift */; };
 		C17A00000000000000000001 /* CityNewsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C17A00000000000000000002 /* CityNewsView.swift */; };
@@ -118,6 +119,7 @@
 		A4B801000000000000000002 /* TodayWorldView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayWorldView.swift; sourceTree = "<group>"; };
 		AE5900000000000000000002 /* LobeIcons-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "BrandAssets/LobeIcons-LICENSE.txt"; sourceTree = "<group>"; };
 		AE5800000000000000000002 /* TodayBriefOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayBriefOverviewView.swift; sourceTree = "<group>"; };
+		0F9EA32E8A604E17B3B0C0A2 /* TodayActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayActivity.swift; sourceTree = "<group>"; };
 		AE5800000000000000000042 /* MarketStockQuotes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketStockQuotes.swift; sourceTree = "<group>"; };
 		F13F00000000000000000002 /* Sec13FNotificationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sec13FNotificationView.swift; sourceTree = "<group>"; };
 		C17A00000000000000000002 /* CityNewsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CityNewsView.swift; sourceTree = "<group>"; };
@@ -191,6 +193,7 @@
 		AE5800000000000000000003 /* Today */ = {
 			isa = PBXGroup;
 			children = (
+				0F9EA32E8A604E17B3B0C0A2 /* TodayActivity.swift */,
 				AE5800000000000000000002 /* TodayBriefOverviewView.swift */,
 				A4B801000000000000000002 /* TodayWorldView.swift */,
 			);
@@ -564,6 +567,7 @@
 				00964D188729A223382D77B6 /* AIServerClientApp.swift in Sources */,
 				A4B801000000000000000001 /* TodayWorldView.swift in Sources */,
 				AE5800000000000000000001 /* TodayBriefOverviewView.swift in Sources */,
+				0F9EA32E8A604E17B3B0C0A1 /* TodayActivity.swift in Sources */,
 				AE5800000000000000000041 /* MarketStockQuotes.swift in Sources */,
 				260E90A29878D779265564DE /* APIClient.swift in Sources */,
 				837F96D7A10C4DD7BCCF8DE3 /* DisplaySnapshotCache.swift in Sources */,
