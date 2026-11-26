@@ -673,12 +673,6 @@ private struct TodayBriefDeck: View {
             }
             VStack(spacing: 14) {
                 summaryDeck(selection: selection, width: cardWidth, height: cardHeight, maximumHeight: maximumHeight)
-                if let stock, !showsOriginals {
-                    TodayCompanyStockCard(stock: stock, marketStore: marketStore) {
-                        presentedStock = MarketDetailRoute(symbol: stock.symbol, companyName: stock.name)
-                    }
-                        .frame(width: cardWidth)
-                }
                 if !showsOriginals {
                     activityRows(for: activitySource)
                         .frame(width: cardWidth)
@@ -792,8 +786,12 @@ private struct TodayBriefDeck: View {
             TodayBriefCardFace(
                 card: card,
                 source: card.postIDs.lazy.compactMap { brief.sources[$0] }.first,
+                marketStore: marketStore,
                 maximumHeight: maximumHeight,
-                openSource: { setOriginals(true) }
+                openSource: { setOriginals(true) },
+                openStock: { stock in
+                    presentedStock = MarketDetailRoute(symbol: stock.symbol, companyName: stock.name)
+                }
             )
             .frame(width: width)
             .fixedSize(horizontal: false, vertical: true)
@@ -1106,109 +1104,32 @@ private struct TodayBriefDeckLayers<Layer: View>: View, Animatable {
     }
 }
 
-private struct TodayCompanyStockCard: View {
+private struct TodayCompanyStockPrice: View {
     let stock: TodayCompanyStock
     let marketStore: MarketStore
     let onOpen: () -> Void
 
-    private var stockQuotes: MarketStockQuoteStore { marketStore.stockQuotes }
-
     var body: some View {
+        let quotes = marketStore.stockQuotes
+        let price = quotes.currentQuote(for: stock.symbol, marketStore: marketStore)
+            ?? quotes.confirmedClose(for: stock.symbol, marketStore: marketStore)
+        let amount = price?.formattedAmount(symbol: stock.symbol) ?? "—"
+        let status = quotes.snapshots[stock.symbol] == nil ? "股价读取中" : "股价暂缺"
         Button(action: onOpen) {
-            HStack(spacing: 10) {
-                cardContent
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(TodayBriefStyle.accent)
-                    .accessibilityHidden(true)
-            }
-            .padding(.horizontal, 15)
-            .padding(.vertical, 11)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(TodayBriefStyle.accent.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16)
-                    .strokeBorder(TodayBriefStyle.surfaceOutline)
-                    .allowsHitTesting(false)
-            }
-            .contentShape(RoundedRectangle(cornerRadius: 16))
+            Text(amount)
+                .font(.body.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(price == nil ? .secondary : TodayBriefStyle.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("\(stock.name)股价")
+        .accessibilityValue(price.map { "\(amount)，\($0.label)" } ?? status)
         .accessibilityHint("打开股价详情")
         .accessibilityIdentifier("today-stock-\(stock.symbol)")
-    }
-
-    private var cardContent: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 14) {
-                identity
-                Spacer(minLength: 0)
-                pricing(alignment: .trailing)
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                identity
-                pricing(alignment: .leading)
-            }
-        }
-    }
-
-    private var identity: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(stock.name)
-                .font(.subheadline.weight(.semibold))
-            Text(stock.symbol)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-        }
-        .fixedSize(horizontal: true, vertical: false)
-    }
-
-    @ViewBuilder
-    private func pricing(alignment: HorizontalAlignment) -> some View {
-        let snapshot = stockQuotes.snapshots[stock.symbol]
-        let close = stockQuotes.confirmedClose(for: stock.symbol, marketStore: marketStore)
-        let current = stockQuotes.currentQuote(for: stock.symbol, marketStore: marketStore)
-        if let current {
-            VStack(alignment: alignment, spacing: 5) {
-                priceReading(current, alignment: alignment)
-                if let close {
-                    Text("\(close.label) · \(close.formattedAmount(symbol: stock.symbol))")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .monospacedDigit()
-        } else if let close {
-            priceReading(close, alignment: alignment)
-                .monospacedDigit()
-        } else {
-            Text(snapshot == nil ? "股价读取中" : "股价暂缺")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private func priceReading(_ price: MarketStockPrice, alignment: HorizontalAlignment) -> some View {
-        VStack(alignment: alignment, spacing: 4) {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) { priceAndChange(price) }
-                    .fixedSize(horizontal: true, vertical: false)
-                VStack(alignment: alignment, spacing: 3) { priceAndChange(price) }
-            }
-            Text(price.label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private func priceAndChange(_ price: MarketStockPrice) -> some View {
-        Group {
-            Text(price.formattedAmount(symbol: stock.symbol)).font(.subheadline.weight(.semibold))
-            if let change = price.changePercent {
-                Text(marketFormattedChangePercent(change))
-                    .font(.caption.weight(.medium)).foregroundStyle(price.changeColor)
-            }
-        }
     }
 }
 
@@ -1218,8 +1139,10 @@ private struct TodayBriefCardFace: View {
 
     let card: TodayBriefProjection.Card
     let source: TodaySourcePresentation?
+    let marketStore: MarketStore
     let maximumHeight: CGFloat
     let openSource: () -> Void
+    let openStock: (TodayCompanyStock) -> Void
 
     private var summary: String? {
         if let text = card.text, !text.isEmpty { return text }
@@ -1228,7 +1151,7 @@ private struct TodayBriefCardFace: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            identity
+            header
                 .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { identityHeight = $0 }
             if let summary {
                 TodaySummaryText(
@@ -1250,6 +1173,19 @@ private struct TodayBriefCardFace: View {
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .accessibilityElement(children: .contain)
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            identity
+            Spacer(minLength: 0)
+            if let stock = card.stock {
+                TodayCompanyStockPrice(stock: stock, marketStore: marketStore) {
+                    openStock(stock)
+                }
+                .layoutPriority(1)
+            }
+        }
     }
 
     private var followUps: some View {

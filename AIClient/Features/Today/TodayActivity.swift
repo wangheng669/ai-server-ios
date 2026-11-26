@@ -50,9 +50,21 @@ struct TodayActivityItem: Identifiable, Equatable {
 
     var id: Int { post.id }
     var sourceLabel: String { post.isRSS ? post.rssCardSourceName : "X · \(post.authorName)" }
-    var summary: String {
-        let content = post.isRSS ? post.displayTitle : post.displayContent
-        return content.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    var originalSummary: String { post.isRSS ? post.feedOriginalTitle : post.xStoredOriginalContent }
+
+    @MainActor
+    var chineseSummary: String? {
+        let translated: String?
+        if post.isRSS {
+            translated = LocalTranslatedText.chineseText(post.displayTitle)
+        } else {
+            let serverText = post.needsXTranslation ? nil : LocalTranslatedText.chineseText(post.displayContent)
+            translated = serverText ?? post.xTweetID.flatMap {
+                FeedTranslationCache.shared.cachedXTranslation(tweetID: $0, original: originalSummary)
+            }
+        }
+        return (translated ?? LocalTranslatedText.chineseText(originalSummary))?
+            .split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 }
 
@@ -179,7 +191,7 @@ struct TodayActivityRows: View {
                             .font(.subheadline.weight(.medium))
                             .monospacedDigit()
                             .foregroundStyle(TodayBriefStyle.accent)
-                        Text(item.summary)
+                        TodayActivitySummary(item: item)
                             .font(.body)
                             .foregroundStyle(TodayBriefStyle.ink)
                             .lineSpacing(3)
@@ -215,5 +227,36 @@ struct TodayActivityRows: View {
     private var separator: some View {
         TodayBriefStyle.rule.frame(height: 1)
             .padding(.horizontal, 14)
+    }
+}
+
+private struct TodayActivitySummary: View {
+    @Environment(\.rootTabIsActive) private var rootTabIsActive
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var resolvedXText: (key: String, text: String)?
+
+    let item: TodayActivityItem
+
+    var body: some View {
+        let input = item.post.xBodyTranslationInput
+        let translated = resolvedXText.flatMap { value in
+            value.key == input?.key ? value.text : nil
+        }
+        let chinese = item.chineseSummary ?? translated
+        let isActive = rootTabIsActive && scenePhase == .active
+        let request = isActive && chinese == nil ? input : nil
+        FeedReaderTranslationText(
+            original: item.originalSummary, chinese: chinese, field: .summary,
+            isActive: isActive, showsTranslationControls: false
+        )
+        .task(id: request?.key) {
+            guard let request else { return }
+            let client = APIClient(baseURL: ServerConfiguration.currentURL)
+            guard let translation = try? await FeedTranslationCache.shared.translateXPost(
+                tweetID: request.tweetID, original: request.original, sourceLanguage: request.sourceLanguage,
+                replyContext: request.replyContext, using: client.fetchXTranslation
+            ), !Task.isCancelled else { return }
+            resolvedXText = (request.key, translation)
+        }
     }
 }

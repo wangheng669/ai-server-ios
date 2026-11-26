@@ -405,13 +405,16 @@ struct FeedReaderTranslationText: View {
     let chinese: String?
     let field: FeedTranslationField
     let isActive: Bool
+    var showsTranslationControls = true
 
     var body: some View {
         if let text = LocalTranslatedText.chineseText(chinese) ?? LocalTranslatedText.chineseText(original) {
             Text(text)
         } else if let original, !original.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             if isActive {
-                LocalTranslatedText(original: original, detail: true, translationOnly: true, field: field)
+                LocalTranslatedText(
+                    original: original, detail: showsTranslationControls, translationOnly: true, field: field
+                )
             } else {
                 Text("\(field.rawValue)待翻译").foregroundStyle(.secondary)
             }
