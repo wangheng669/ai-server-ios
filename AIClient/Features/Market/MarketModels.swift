@@ -869,6 +869,66 @@ struct InvestorMoodResponse: Decodable {
     let data: InvestorMoodBoard
 }
 
+struct XiaohongshuMoodResponse: Decodable {
+    let data: XiaohongshuMoodBoard
+}
+
+struct XiaohongshuMoodBoard: Decodable {
+    let state: XiaohongshuCaptureState
+    let reason: String?
+    let stale: Bool
+    let updatedAt: String?
+    let authors: Int
+    let onlyTopics: Int
+    let notes: [XiaohongshuMoodNote]
+    let runs: [XiaohongshuCapture]
+}
+
+struct XiaohongshuMoodNote: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let hasTitle: Bool
+    let excerpt: String
+    let onlyTopics: Bool
+    let repeated: Bool
+    let publishedAt: String
+    let collectedAt: String
+}
+
+struct XiaohongshuCapture: Decodable, Identifiable {
+    let startedAt: String
+    let at: String
+    let state: XiaohongshuCaptureState
+    let reason: String?
+    let newNotes: Int
+
+    var id: String { startedAt }
+}
+
+enum XiaohongshuCaptureState: String, Decodable {
+    case waiting, running, paused, failed, baseline
+    case overlapReached = "overlap_reached"
+    case coverageGap = "coverage_gap"
+
+    func title(reason: String?) -> String {
+        switch self {
+        case .waiting: "等待首次采集"
+        case .running: "采集中"
+        case .paused:
+            switch reason {
+            case "login_required": "等待登录"
+            case "platform_verification_required": "等待验证"
+            case "platform_access_restricted": "平台访问受限"
+            default: "采集已暂停"
+            }
+        case .failed: "采集失败"
+        case .baseline: "首轮完成"
+        case .overlapReached: "接上上一轮样本"
+        case .coverageGap: "本轮有采集缺口"
+        }
+    }
+}
+
 struct InvestorMoodBoard: Decodable {
     let dataContract: String
     let generatedAt: String

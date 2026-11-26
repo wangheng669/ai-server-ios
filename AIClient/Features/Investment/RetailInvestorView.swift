@@ -5,6 +5,7 @@ import UIKit
 
 struct RetailInvestorView: View {
     fileprivate static let closeClearance: CGFloat = 60
+    private static let estimatedSourceHeight: CGFloat = 44
     private static let estimatedHeaderHeight: CGFloat = 80
     private static let estimatedEmptyHeight: CGFloat = 130
 
@@ -12,14 +13,16 @@ struct RetailInvestorView: View {
     let onClose: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selectedID: InvestorMoodAuthor.ID?
-    @State private var selectedVideo: InvestorMoodItem?
+    @State private var destination: RetailInvestorDestination?
+    @State private var sourceHeight: CGFloat?
     @State private var headerHeight: CGFloat?
     @State private var emptyHeight: CGFloat?
     @State private var listHeights: [InvestorMoodAuthor.ID: CGFloat] = [:]
 
     static func initialContentHeight(for author: InvestorMoodAuthor?) -> CGFloat {
-        guard let author else { return estimatedEmptyHeight }
-        return estimatedHeaderHeight + CGFloat(author.videos.count) * InvestorMoodVideoRow.minimumHeight + closeClearance
+        guard let author else { return estimatedSourceHeight + estimatedEmptyHeight }
+        return estimatedSourceHeight + estimatedHeaderHeight
+            + CGFloat(author.videos.count) * InvestorMoodVideoRow.minimumHeight + closeClearance
     }
 
     private var selectedIndex: Int {
@@ -30,6 +33,10 @@ struct RetailInvestorView: View {
         let authors = store.authors
         let author = authors.isEmpty ? nil : authors[selectedIndex]
         VStack(spacing: 0) {
+            sourceLink
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.height.rounded(.up) }) {
+                    sourceHeight = $0
+                }
             if let author {
                 authorHeader(author)
                     .onGeometryChange(for: CGFloat.self, of: { $0.size.height.rounded(.up) }) {
@@ -53,16 +60,46 @@ struct RetailInvestorView: View {
                 self.selectedID = ids.first
             }
         }
-        .appSheet(item: $selectedVideo) { item in
-            InvestorMoodVideoDetailSheet(item: item)
+        .appSheet(item: $destination) { destination in
+            switch destination {
+            case .video(let item):
+                InvestorMoodVideoDetailSheet(item: item)
+            case .xiaohongshu:
+                XiaohongshuMoodSheet(load: store.xiaohongshuMood)
+                    .readingSheetPresentation()
+                    .appPresentationBackground(InvestmentDesign.surface)
+            }
         }
     }
 
+    private var sourceLink: some View {
+        Button {
+            destination = .xiaohongshu
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "bubble.left.and.bubble.right")
+                Text("小红书")
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+            }
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(ResearchDesign.accent)
+            .frame(minHeight: Self.estimatedSourceHeight)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("retail-investor-xiaohongshu")
+        .frame(maxWidth: TodayBriefStyle.maximumCardWidth, alignment: .trailing)
+        .padding(.horizontal, TodayBriefStyle.horizontalInset)
+        .frame(maxWidth: .infinity)
+    }
+
     private func contentHeight(for author: InvestorMoodAuthor?) -> CGFloat {
-        let estimatedHeight = Self.initialContentHeight(for: author)
-        guard let author else { return emptyHeight ?? estimatedHeight }
-        guard let listHeight = listHeights[author.id] else { return estimatedHeight }
-        return (headerHeight ?? Self.estimatedHeaderHeight) + listHeight
+        let source = sourceHeight ?? Self.estimatedSourceHeight
+        guard let author else { return source + (emptyHeight ?? Self.estimatedEmptyHeight) }
+        let listHeight = listHeights[author.id] ?? CGFloat(author.videos.count) * InvestorMoodVideoRow.minimumHeight
+            + Self.closeClearance
+        return source + (headerHeight ?? Self.estimatedHeaderHeight) + listHeight
     }
 
     private func authorHeader(_ author: InvestorMoodAuthor) -> some View {
@@ -111,7 +148,7 @@ struct RetailInvestorView: View {
                 LazyHStack(spacing: 0) {
                     ForEach(store.authors) { author in
                         InvestorMoodAuthorPage(author: author) {
-                            selectedVideo = $0
+                            destination = .video($0)
                         } onHeightChange: {
                             listHeights[author.id] = $0
                         }
@@ -156,6 +193,18 @@ struct RetailInvestorView: View {
         guard store.authors.indices.contains(destination) else { return }
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) {
             selectedID = store.authors[destination].id
+        }
+    }
+}
+
+private enum RetailInvestorDestination: Identifiable {
+    case video(InvestorMoodItem)
+    case xiaohongshu
+
+    var id: String {
+        switch self {
+        case .video(let item): "video-\(item.id)"
+        case .xiaohongshu: "xiaohongshu"
         }
     }
 }
@@ -514,6 +563,10 @@ final class InvestorMoodStore {
         } catch {
             investorMoodErrorMessage = NetworkErrorPresentation.message(for: error)
         }
+    }
+
+    func xiaohongshuMood() async throws -> XiaohongshuMoodBoard {
+        try await service.xiaohongshuMood()
     }
 }
 
