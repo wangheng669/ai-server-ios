@@ -352,6 +352,7 @@ private func fetchTodayWorldPostBatch(ids: ArraySlice<Int>, baseURL: URL) async 
 
 struct TodayWorldView: View {
     @Environment(\.rootTabIsActive) private var rootTabIsActive
+    @Environment(\.rootTabIsSelected) private var rootTabIsSelected
     @Environment(\.rootBottomChromeHeight) private var bottomChromeHeight
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store: TodayWorldStore
@@ -465,8 +466,8 @@ struct TodayWorldView: View {
         .onChange(of: showsTools) { _, open in
             if open { showsStatus = false }
         }
-        .onChange(of: rootTabIsActive) { _, active in
-            if !active {
+        .onChange(of: rootTabIsSelected) { _, selected in
+            if !selected {
                 showsTools = false
                 showsStatus = false
             }
@@ -772,7 +773,9 @@ struct TodayInlineSourceView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             FeedReaderTranslationText(
-                original: source.originalText, chinese: chineseText, field: .body, isActive: allowsTranslation
+                original: source.originalText, chinese: chineseText, field: .body, isActive: allowsTranslation,
+                sourceLanguageHint: source.post.sourceName == "X"
+                    ? XDeviceTranslation.declaredLanguage(source.post.meta?.lang) : nil
             )
             .font(.body)
             .foregroundStyle(TodayBriefStyle.ink)

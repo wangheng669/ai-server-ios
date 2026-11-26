@@ -7,6 +7,10 @@ private struct RootTabIsActiveKey: EnvironmentKey {
     static let defaultValue = true
 }
 
+private struct RootTabIsSelectedKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
 private struct RootBottomChromeHeightKey: EnvironmentKey {
     static let defaultValue: CGFloat = 0
 }
@@ -23,6 +27,11 @@ extension EnvironmentValues {
     var rootTabIsActive: Bool {
         get { self[RootTabIsActiveKey.self] }
         set { self[RootTabIsActiveKey.self] = newValue }
+    }
+
+    var rootTabIsSelected: Bool {
+        get { self[RootTabIsSelectedKey.self] }
+        set { self[RootTabIsSelectedKey.self] = newValue }
     }
 
     var rootBottomChromeHeight: CGFloat {
@@ -892,6 +901,7 @@ private struct EditorialRootView: View {
         let isSelected = selectedTab == tab
         if isSelected || visitedTabs.contains(tab) {
             content()
+                .environment(\.rootTabIsSelected, isSelected)
                 .environment(\.rootTabIsActive, isSelected && canPrefetchBackground)
                 .opacity(isSelected ? 1 : 0)
                 .allowsHitTesting(isSelected)

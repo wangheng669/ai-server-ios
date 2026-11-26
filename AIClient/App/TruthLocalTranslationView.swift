@@ -406,14 +406,17 @@ struct FeedReaderTranslationText: View {
     let field: FeedTranslationField
     let isActive: Bool
     var showsTranslationControls = true
+    var sourceLanguageHint: String? = nil
 
     var body: some View {
-        if let text = LocalTranslatedText.chineseText(chinese) ?? LocalTranslatedText.chineseText(original) {
+        let originalChinese = sourceLanguageHint == nil ? LocalTranslatedText.chineseText(original) : nil
+        if let text = LocalTranslatedText.chineseText(chinese) ?? originalChinese {
             Text(text)
         } else if let original, !original.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             if isActive {
                 LocalTranslatedText(
-                    original: original, detail: showsTranslationControls, translationOnly: true, field: field
+                    original: original, detail: showsTranslationControls, translationOnly: true, field: field,
+                    sourceLanguageHint: sourceLanguageHint
                 )
             } else {
                 Text("\(field.rawValue)待翻译").foregroundStyle(.secondary)
@@ -432,6 +435,7 @@ struct LocalTranslatedText: View {
     var field: FeedTranslationField? = nil
     var openOriginal: (() -> Void)?
     var preservesOriginal = false
+    var sourceLanguageHint: String? = nil
 
     private static let recognizedLanguages: NSCache<NSString, NSString> = {
         let cache = NSCache<NSString, NSString>()
@@ -457,15 +461,19 @@ struct LocalTranslatedText: View {
     private static func recognizeLanguage(_ text: String) -> String? {
         let sample = languageSample(text)
         guard sample.unicodeScalars.contains(where: CharacterSet.letters.contains) else { return nil }
+        let containsKana = XPostTextFormatter.containsJapaneseKana(sample)
         let hasEnglishPassage = XPostTextFormatter.containsUntranslatedEnglishPassage(sample)
         if hasHan(sample), sample.unicodeScalars.allSatisfy(isHanLatinOrNonletter) {
             return hasEnglishPassage ? "en" : nil
         }
         let recognizer = NLLanguageRecognizer()
+        if containsKana { recognizer.languageConstraints = [.japanese, .simplifiedChinese, .traditionalChinese] }
         recognizer.processString(sample)
         switch recognizer.dominantLanguage {
-        case .simplifiedChinese, .traditionalChinese, .undetermined, nil:
+        case .simplifiedChinese, .traditionalChinese:
             return hasEnglishPassage ? "en" : nil
+        case .undetermined, nil:
+            return containsKana ? "ja" : hasEnglishPassage ? "en" : nil
         case let language?:
             return language.rawValue
         }
@@ -475,6 +483,7 @@ struct LocalTranslatedText: View {
         guard let value = text?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty,
               hasHan(value),
               !XPostTextFormatter.containsUntranslatedEnglishPassage(value) else { return nil }
+        if XPostTextFormatter.containsJapaneseKana(value), sourceLanguage(value) == "ja" { return nil }
         return value
     }
 
@@ -504,7 +513,7 @@ struct LocalTranslatedText: View {
                 DisclosureGroup("查看原文") { Text(original).textSelection(.enabled) }
                     .font(.callout)
             }
-        } else if enabled, let language = Self.sourceLanguage(original) {
+        } else if enabled, let language = sourceLanguageHint ?? Self.sourceLanguage(original) {
             if #available(iOS 18.0, *) {
                 FeedDeviceTranslatedText(original: original, detail: detail, sourceIdentifier: language,
                                          translationOnly: translationOnly, field: field, openOriginal: openOriginal,

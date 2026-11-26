@@ -596,6 +596,7 @@ private struct TodayReportRetryButton: View {
 private struct TodayBriefDeck: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.rootTabIsActive) private var rootTabIsActive
+    @Environment(\.rootTabIsSelected) private var rootTabIsSelected
     @Environment(\.scenePhase) private var scenePhase
     @State private var activityStore = TodayActivityStore()
     @State private var presentedStock: MarketDetailRoute?
@@ -742,8 +743,8 @@ private struct TodayBriefDeck: View {
             settlement = nil
             selectedIndex = section.firstCardIndex
         }
-        .onChange(of: rootTabIsActive) { _, active in
-            if !active {
+        .onChange(of: rootTabIsSelected) { _, selected in
+            if !selected {
                 presentedStock = nil
                 settlement = nil
                 endOriginals()
@@ -1120,21 +1121,29 @@ private struct TodayCompanyStockPrice: View {
         let quotes = marketStore.stockQuotes
         let price = quotes.currentQuote(for: stock.symbol, marketStore: marketStore)
             ?? quotes.confirmedClose(for: stock.symbol, marketStore: marketStore)
-        let amount = price?.formattedAmount(symbol: stock.symbol) ?? "—"
         let status = quotes.snapshots[stock.symbol] == nil ? "股价读取中" : "股价暂缺"
         Button(action: onOpen) {
-            Text(amount)
-                .font(.body.weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(price == nil ? .secondary : TodayBriefStyle.ink)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
-                .contentShape(Rectangle())
+            VStack(alignment: .trailing, spacing: 2) {
+                if let price {
+                    Text(price.formattedAmount(symbol: stock.symbol))
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(TodayBriefStyle.ink)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+                Text(price?.label ?? status)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+                    .lineLimit(2)
+            }
+            .monospacedDigit()
+            .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(stock.name)股价")
-        .accessibilityValue(price.map { "\(amount)，\($0.label)" } ?? status)
+        .accessibilityValue(price.map { "\($0.formattedAmount(symbol: stock.symbol))，\($0.label)" } ?? status)
         .accessibilityHint("打开股价详情")
         .accessibilityIdentifier("today-stock-\(stock.symbol)")
     }

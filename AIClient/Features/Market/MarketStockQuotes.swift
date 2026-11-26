@@ -72,7 +72,7 @@ extension MarketQuote {
 @Observable
 final class MarketStockQuoteStore {
     struct Snapshot {
-        let regularQuote: MarketStockPrice?
+        let regularQuote: (price: MarketStockPrice, timestamp: Int64)?
         let history: MarketStockHistory?
         let loadedAt: Date
     }
@@ -86,11 +86,16 @@ final class MarketStockQuoteStore {
     }
 
     func currentQuote(for symbol: String, marketStore: MarketStore) -> MarketStockPrice? {
-        if let regularQuote = snapshots[symbol]?.regularQuote { return regularQuote }
-        guard let quote = marketStore.quote(symbol: symbol), quote.stale != true,
+        let quote = marketStore.quote(symbol: symbol)
+        let timestamp = quote?.marketAsOfTimestamp ?? 0
+        if let regularQuote = snapshots[symbol]?.regularQuote, regularQuote.timestamp > timestamp,
+           quote == nil || quote?.tradingSession == .regular || marketStore.isShowingCachedSnapshot {
+            return regularQuote.price
+        }
+        guard let quote, quote.stale != true,
               quote.tradingSession == .regular || quote.hasActiveExtendedSessionQuote,
               quote.marketDisplayPrice.isFinite, quote.marketDisplayPrice > 0,
-              let timestamp = quote.marketAsOfTimestamp, timestamp > 0 else { return nil }
+              timestamp > 0 else { return nil }
         let session = quote.hasIndicativeOvernightPrice ? "夜盘参考" : quote.tradingSession.displayLabel
         let status = marketStore.isShowingCachedSnapshot ? "缓存" : quote.hasDelayedSessionPrice ? "延迟" : nil
         let label = [session, status, marketShortTimestamp(timestamp)].compactMap { $0 }.joined(separator: " · ")
@@ -99,9 +104,10 @@ final class MarketStockQuoteStore {
     }
 
     func confirmedClose(for symbol: String, marketStore: MarketStore) -> MarketStockPrice? {
-        if let price = snapshots[symbol]?.history?.confirmedClose { return price }
+        let history = snapshots[symbol]?.history
         guard let quote = marketStore.quote(symbol: symbol), quote.stale != true, quote.tradingSession == .closed,
-              quote.price.isFinite, quote.price > 0, let date = quote.quality?.tradingDate else { return nil }
+              quote.price.isFinite, quote.price > 0, let date = quote.quality?.tradingDate,
+              date > (history?.bars.last?.tradingDate ?? "") else { return history?.confirmedClose }
         let status = marketStore.isShowingCachedSnapshot ? " · 缓存" : ""
         return MarketStockPrice(amount: quote.price, currency: quote.currency, change: quote.percentValue,
                                label: "\(date) 收盘\(status)")
@@ -138,12 +144,13 @@ final class MarketStockQuoteStore {
             snapshots[symbol] = Snapshot(regularQuote: nil, history: snapshots[symbol]?.history, loadedAt: Date())
             return
         }
-        let regularQuote: MarketStockPrice?
+        let regularQuote: (price: MarketStockPrice, timestamp: Int64)?
         if MarketTradingSession(rawValue: chart.session) == .regular,
            let amount = chart.quote.price, amount.isFinite, amount > 0,
            let timestamp = chart.quote.providerTimestamp, timestamp > 0 {
-            regularQuote = MarketStockPrice(amount: amount, currency: history.currency, change: chart.quote.changePercent,
-                                           label: "盘中报价 · \(marketShortTimestamp(timestamp))")
+            let price = MarketStockPrice(amount: amount, currency: history.currency, change: chart.quote.changePercent,
+                                         label: "盘中报价 · \(marketShortTimestamp(timestamp))")
+            regularQuote = (price, timestamp)
         } else {
             regularQuote = nil
         }
