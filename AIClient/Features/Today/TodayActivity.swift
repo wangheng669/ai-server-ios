@@ -273,15 +273,46 @@ private struct TodayActivitySummary: View {
 
     let item: TodayActivityItem
 
+    private var isActive: Bool { rootTabIsActive && scenePhase == .active }
+
     var body: some View {
+        if item.post.xBodyContainsOnlyLinks {
+            linkPreview
+        } else {
+            translatedSummary
+        }
+    }
+
+    @ViewBuilder private var linkPreview: some View {
+        if let quote = item.post.xQuotedPost {
+            let original = quote.originalText
+            let cached = item.post.xQuoteTranslationInput.flatMap {
+                FeedTranslationCache.shared.cachedXTranslation(tweetID: $0.tweetID, original: $0.original)
+            }
+            if let chinese = LocalTranslatedText.chineseText(quote.textZH) ?? cached
+                ?? LocalTranslatedText.chineseText(original) {
+                Text(chinese.split(whereSeparator: \.isWhitespace).joined(separator: " "))
+            } else if let original {
+                FeedReaderTranslationText(
+                    original: original, chinese: nil, field: .quote,
+                    isActive: isActive, showsTranslationControls: false
+                )
+            } else {
+                Text("查看引用")
+            }
+        } else {
+            Text("仅含链接")
+        }
+    }
+
+    private var translatedSummary: some View {
         let input = item.post.xBodyTranslationInput
         let translated = resolvedXText.flatMap { value in
             value.key == input?.key ? value.text : nil
         }
         let chinese = item.chineseSummary ?? translated
-        let isActive = rootTabIsActive && scenePhase == .active
         let request = isActive && chinese == nil ? input : nil
-        FeedReaderTranslationText(
+        return FeedReaderTranslationText(
             original: item.originalSummary, chinese: chinese, field: .summary,
             isActive: isActive, showsTranslationControls: false, sourceLanguageHint: item.sourceLanguageHint
         )

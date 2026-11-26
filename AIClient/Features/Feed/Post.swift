@@ -736,6 +736,14 @@ struct Post: Codable, Identifiable, Hashable {
             .compactMap(clean)
             .max(by: { $0.count < $1.count }) ?? originalDisplayContent
     }
+    var xBodyContainsOnlyLinks: Bool {
+        guard source == "x" else { return false }
+        let words = xStoredOriginalContent.split(whereSeparator: \.isWhitespace)
+        return !words.isEmpty && words.allSatisfy { word in
+            guard let url = URL(string: String(word)), let scheme = url.scheme?.lowercased() else { return false }
+            return (scheme == "https" || scheme == "http") && url.host() != nil
+        }
+    }
     var isChineseXSource: Bool {
         sourceName == "X" && meta?.lang?.lowercased().hasPrefix("zh") == true
     }

@@ -772,15 +772,22 @@ struct TodayInlineSourceView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            FeedReaderTranslationText(
-                original: source.originalText, chinese: chineseText, field: .body, isActive: allowsTranslation,
-                sourceLanguageHint: source.post.sourceName == "X"
-                    ? XDeviceTranslation.declaredLanguage(source.post.meta?.lang) : nil
-            )
-            .font(.body)
-            .foregroundStyle(TodayBriefStyle.ink)
-            .lineSpacing(5)
-            .textSelection(.enabled)
+            if source.post.xBodyContainsOnlyLinks {
+                if source.quote == nil {
+                    Text(source.originalText)
+                        .textSelection(.enabled)
+                }
+            } else {
+                FeedReaderTranslationText(
+                    original: source.originalText, chinese: chineseText, field: .body, isActive: allowsTranslation,
+                    sourceLanguageHint: source.post.sourceName == "X"
+                        ? XDeviceTranslation.declaredLanguage(source.post.meta?.lang) : nil
+                )
+                .font(.body)
+                .foregroundStyle(TodayBriefStyle.ink)
+                .lineSpacing(5)
+                .textSelection(.enabled)
+            }
 
             if let reply = source.reply, reply.displayText != nil {
                 VStack(alignment: .leading, spacing: 4) {
