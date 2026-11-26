@@ -663,7 +663,6 @@ private struct EditorialRootView: View {
     @State private var selectedTab = EditorialPreview.initialTab
     @State private var notificationPresentationAnchor: UIView?
     @State private var presentedNotificationDetails: PushNotificationDestination?
-    @State private var showFeedAfterNotification = false
     @State private var lastDynamicTab: EditorialTab = .observation
     @State private var presentedExternalLink = EditorialPreview.externalLink
     @State private var signalSentiment: GoogleSignalSentimentFilter = .all
@@ -736,11 +735,7 @@ private struct EditorialRootView: View {
             return .handled
         })
         .inAppBrowserCover(item: $presentedExternalLink)
-        .sheet(item: $presentedNotificationDetails, onDismiss: {
-            guard personPushNavigation.request == nil, showFeedAfterNotification else { return }
-            showFeedAfterNotification = false
-            selectedTab = .observation
-        }) { details in
+        .sheet(item: $presentedNotificationDetails) { details in
             PushNotificationDetailsView(destination: details, feedModel: details.opensPost ? pageStores.loadedFeed : nil)
                 .id(details.id)
                 .presentationDragIndicator(.hidden)
@@ -872,7 +867,6 @@ private struct EditorialRootView: View {
             guard !Task.isCancelled, personPushNavigation.request?.id == request.id else { return }
             presentedExternalLink = nil
             showsSignalFilters = false
-            showFeedAfterNotification = request.opensPost
             presentedNotificationDetails = request
             personPushNavigation.clear()
         }
