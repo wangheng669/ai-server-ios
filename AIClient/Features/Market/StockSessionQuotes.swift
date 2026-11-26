@@ -117,6 +117,36 @@ struct StockSessionPriceCell: View {
 }
 
 extension MarketChart {
+    func latestStockExtendedTrade(for quote: MarketQuote, now: Date = .now) -> MarketChartPoint? {
+        guard symbol == quote.symbol, market == "US", interval == "1m",
+              quote.quality?.fallbackUsed != true, quote.price.isFinite, quote.price > 0,
+              self.quote.price == quote.price else { return nil }
+        let timestamp = Int64(now.timeIntervalSince1970 * 1_000)
+        let windows = analysis.sessionWindows
+        let regularClose = windows.last {
+            $0.session == "regular" && $0.tradingDate == tradingDate && $0.endTimestamp <= timestamp
+        }?.endTimestamp
+        let windowStart: Int64
+        switch quote.tradingSession {
+        case .closed:
+            guard quote.quality?.tradingDate == tradingDate, let regularClose else { return nil }
+            windowStart = regularClose
+        case .premarket, .postmarket, .overnight:
+            guard let active = windows.last(where: {
+                MarketTradingSession(rawValue: $0.session) == quote.tradingSession
+                    && $0.startTimestamp <= timestamp && timestamp < $0.endTimestamp
+            }) else { return nil }
+            windowStart = regularClose ?? active.startTimestamp
+        case .regular, .alwaysOpen, .unknown:
+            return nil
+        }
+        let extended = windows.filter {
+            $0.startTimestamp >= windowStart && $0.startTimestamp <= timestamp
+                && MarketTradingSession(rawValue: $0.session).isExtended
+        }
+        return lastConfirmedStockTrade(in: extended, through: timestamp)
+    }
+
     func matchesAfterHoursAnchor(for quote: MarketQuote) -> Bool {
         guard self.quote.price == quote.price else { return false }
         let session: String
@@ -142,9 +172,16 @@ extension MarketChart {
               let regular = analysis.sessionWindows.last(where: { $0.session == "regular" && $0.tradingDate == tradingDate }),
               candles.contains(where: { $0.session == "regular" && regular.contains($0.timestamp, convention: analysis.candleTimestamp) })
         else { return nil }
-        return candles.last {
-            $0.session == "post" && $0.state == "confirmed" && ($0.volume ?? 0) > 0 &&
-                $0.close.isFinite && $0.close > 0 && window.contains($0.timestamp, convention: analysis.candleTimestamp)
+        return lastConfirmedStockTrade(in: [window], through: window.endTimestamp)
+    }
+
+    private func lastConfirmedStockTrade(in windows: [MarketChartSessionWindow], through timestamp: Int64) -> MarketChartPoint? {
+        candles.last { point in
+            point.timestamp <= timestamp && point.state == "confirmed" && (point.volume ?? 0) > 0
+                && point.close.isFinite && point.close > 0
+                && windows.contains {
+                    $0.session == point.session && $0.contains(point.timestamp, convention: analysis.candleTimestamp)
+                }
         }
     }
 }

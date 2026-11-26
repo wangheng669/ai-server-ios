@@ -300,6 +300,8 @@ struct ResearchHomeView: View {
                 ResearchStockQuotes(
                     entries: entries,
                     region: stockRegion,
+                    store: store,
+                    isActive: shouldRefreshCharts && selectedPage == .coreStocks,
                     onOpen: onOpenMarketDetail
                 )
             }
@@ -926,6 +928,8 @@ private struct ResearchTopicSheet<Content: View>: View {
 private struct ResearchStockQuotes: View {
     let entries: [MarketDashboardQuoteEntry]
     let region: MarketRegion
+    let store: MarketStore
+    let isActive: Bool
     let onOpen: (String) -> Void
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -935,15 +939,49 @@ private struct ResearchStockQuotes: View {
         return Array(repeating: GridItem(.flexible(minimum: 0), spacing: 6, alignment: .top), count: count)
     }
 
+    private var extendedPriceSymbols: [String] {
+        guard isActive, !store.isShowingCachedSnapshot else { return [] }
+        return entries.compactMap { entry in
+            guard let quote = entry.quote, quote.stale != true, quote.quality?.fallbackUsed != true,
+                  includesExtendedHours(entry), quote.tradingSession == .closed || (quote.tradingSession.isExtended
+                      && (quote.coreStockSessionPrice == nil || quote.hasDelayedSessionPrice)) else { return nil }
+            return entry.id
+        }
+    }
+
+    private func includesExtendedHours(_ entry: MarketDashboardQuoteEntry) -> Bool {
+        region == .unitedStates || entry.quote?.listingCountryCode == "US"
+    }
+
     var body: some View {
         LazyVGrid(columns: columns, spacing: 6) {
             ForEach(entries) { entry in
                 Button { onOpen(entry.id) } label: {
-                    ResearchStockCard(entry: entry, region: region)
+                    ResearchStockCard(
+                        entry: entry,
+                        region: region,
+                        price: store.coreStockPrice(for: entry, includesExtendedHours: includesExtendedHours(entry))
+                    )
                 }
                 .buttonStyle(.plain)
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("research-stock-\(entry.id)")
+            }
+        }
+        .task(id: extendedPriceSymbols) {
+            let symbols = extendedPriceSymbols
+            guard !symbols.isEmpty else { return }
+            while !Task.isCancelled {
+                let needingChart = symbols.filter { symbol in
+                    guard let quote = store.quote(symbol: symbol) else { return false }
+                    guard quote.tradingSession == .closed else { return true }
+                    guard let snapshot = store.chartSnapshot(symbol: symbol, range: .day), !snapshot.isRestored,
+                          snapshot.chart.session == "closed" else { return true }
+                    return snapshot.chart.latestStockExtendedTrade(for: quote) == nil
+                }
+                await store.preloadListCharts(symbols: needingChart)
+                do { try await Task.sleep(for: .seconds(60)) }
+                catch { return }
             }
         }
     }
@@ -952,6 +990,7 @@ private struct ResearchStockQuotes: View {
 private struct ResearchStockCard: View {
     let entry: MarketDashboardQuoteEntry
     let region: MarketRegion
+    let price: MarketStockPrice?
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -964,12 +1003,14 @@ private struct ResearchStockCard: View {
 
     private var status: String {
         if case let .unavailable(stock) = entry { return stock.quality.unavailableLabel }
-        return entry.displayQuote?.researchStatus ?? entry.quote?.quality?.unavailableLabel ?? "报价待更新"
+        return entry.quote?.quality?.unavailableLabel ?? "报价待更新"
     }
 
     var body: some View {
-        let quote = entry.displayQuote
-        let tint = ResearchStyle.tint(quote)
+        let tint = price?.changeColor ?? ResearchStyle.muted
+        let amount = price.map {
+            $0.amount.formatted(.number.precision(.fractionLength(marketPriceDigits($0.amount, symbol: entry.id))))
+        }
         VStack(alignment: .leading, spacing: 3) {
             Text(code)
                 .font(.caption.weight(.semibold))
@@ -979,12 +1020,12 @@ private struct ResearchStockCard: View {
                 .foregroundStyle(ResearchStyle.muted)
                 .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
             HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(quote.map(marketQuotePriceText) ?? "—")
+                Text(amount ?? "—")
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
-                    .accessibilityLabel(quote.map { "价格 \(marketQuotePriceText($0))" } ?? "价格暂缺")
-                if let currency = quote?.currency, currency != "%" {
+                    .accessibilityLabel(amount.map { "价格 \($0)" } ?? "价格暂缺")
+                if let currency = price?.currency {
                     Text(currency)
                         .font(.caption2)
                         .foregroundStyle(ResearchStyle.muted)
@@ -993,13 +1034,13 @@ private struct ResearchStockCard: View {
             }
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    changeText(quote, tint: tint)
+                    changeText(tint: tint)
                     Spacer(minLength: 0)
                     statusText
                 }
                 .fixedSize(horizontal: true, vertical: false)
                 VStack(alignment: .leading, spacing: 2) {
-                    changeText(quote, tint: tint)
+                    changeText(tint: tint)
                     statusText
                 }
             }
@@ -1008,20 +1049,20 @@ private struct ResearchStockCard: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 7)
         .frame(maxWidth: .infinity, minHeight: 82, alignment: .topLeading)
-        .background(tint.opacity(quote == nil ? 0.06 : 0.09), in: RoundedRectangle(cornerRadius: 11))
+        .background(tint.opacity(price == nil ? 0.06 : 0.09), in: RoundedRectangle(cornerRadius: 11))
         .contentShape(Rectangle())
     }
 
-    private func changeText(_ quote: MarketQuote?, tint: Color) -> some View {
-        let text = quote?.marketDisplayFormattedPercent ?? "—"
+    private func changeText(tint: Color) -> some View {
+        let text = price.map { $0.changePercent.map(marketFormattedChangePercent) ?? "涨跌暂缺" } ?? "—"
         return Text(text)
             .font(.caption2.weight(.semibold))
             .foregroundStyle(tint)
-            .accessibilityLabel(quote == nil ? "涨跌幅暂缺" : "涨跌幅 \(text)")
+            .accessibilityLabel(price == nil ? "涨跌幅暂缺" : "涨跌幅 \(text)")
     }
 
     private var statusText: some View {
-        Text(status)
+        Text(price?.label ?? status)
             .font(.caption2)
             .foregroundStyle(ResearchStyle.muted)
     }
