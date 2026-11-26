@@ -8,24 +8,19 @@ struct RetailInvestorView: View {
     let onClose: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selectedID: InvestorMoodAuthor.ID?
-    @State private var playbackItem: InvestorMoodItem?
+    @State private var selectedVideo: InvestorMoodItem?
 
     private var selectedIndex: Int {
         store.authors.firstIndex { $0.id == selectedID } ?? 0
     }
 
     var body: some View {
+        let authors = store.authors
         VStack(spacing: 0) {
-            if store.authors.count > 1 {
-                pageProgress
-                    .frame(maxWidth: TodayBriefStyle.maximumCardWidth)
-                    .padding(.horizontal, ResearchDesign.inset)
-                    .padding(.top, 12)
-            }
-
-            if store.authors.isEmpty {
+            if authors.isEmpty {
                 emptyState
             } else {
+                authorHeader(authors[selectedIndex])
                 pager
             }
         }
@@ -41,32 +36,49 @@ struct RetailInvestorView: View {
                 self.selectedID = ids.first
             }
         }
-        .appSheet(item: $playbackItem) { item in
-            InvestorMoodVideoPlayerSheet(item: item)
+        .appSheet(item: $selectedVideo) { item in
+            InvestorMoodVideoDetailSheet(item: item)
         }
     }
 
-    private var pageProgress: some View {
+    private func authorHeader(_ author: InvestorMoodAuthor) -> some View {
         HStack(spacing: 8) {
-            Text("博主 \(selectedIndex + 1) / \(store.authors.count)")
-                .font(.caption.weight(.semibold).monospacedDigit())
-                .foregroundStyle(ResearchDesign.accent)
-                .fixedSize()
+            VStack(alignment: .leading, spacing: 4) {
+                Text(author.nickname)
+                    .font(.title2.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                Text("今日 \(author.videos.count) 条视频")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            ProgressView(value: Double(selectedIndex + 1), total: Double(store.authors.count))
-                .tint(ResearchDesign.accent)
-                .accessibilityHidden(true)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("散户观点进度")
-        .accessibilityValue("第 \(selectedIndex + 1) 位博主，共 \(store.authors.count) 位")
-        .accessibilityAdjustableAction { direction in
-            switch direction {
-            case .increment: advance(by: 1)
-            case .decrement: advance(by: -1)
-            @unknown default: break
+            if store.authors.count > 1 {
+                HStack(spacing: 0) {
+                    authorButton("chevron.backward", label: "上一位博主", offset: -1)
+                    authorButton("chevron.forward", label: "下一位博主", offset: 1)
+                }
             }
         }
+        .frame(maxWidth: TodayBriefStyle.maximumCardWidth)
+        .padding(.horizontal, TodayBriefStyle.horizontalInset)
+        .padding(.top, 20)
+        .padding(.bottom, 12)
+    }
+
+    private func authorButton(_ symbol: String, label: String, offset: Int) -> some View {
+        Button {
+            advance(by: offset)
+        } label: {
+            Image(systemName: symbol)
+                .font(.subheadline.weight(.semibold))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .disabled(!store.authors.indices.contains(selectedIndex + offset))
+        .accessibilityLabel(label)
     }
 
     private var pager: some View {
@@ -74,7 +86,7 @@ struct RetailInvestorView: View {
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 0) {
                     ForEach(store.authors) { author in
-                        InvestorMoodAuthorPage(author: author) { playbackItem = $0 }
+                        InvestorMoodAuthorPage(author: author) { selectedVideo = $0 }
                             .containerRelativeFrame(.horizontal)
                             .frame(height: viewport.size.height)
                     }
@@ -119,53 +131,64 @@ struct InvestorMoodAuthor: Identifiable {
 
 private struct InvestorMoodAuthorPage: View {
     let author: InvestorMoodAuthor
-    let onPlay: (InvestorMoodItem) -> Void
+    let onSelect: (InvestorMoodItem) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(author.nickname)
-                    .font(.title3.weight(.semibold))
-                    .accessibilityAddTraits(.isHeader)
-                Text("今日 \(author.videos.count) 条视频")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
-            ScrollView {
-                LazyVStack(spacing: 12) {
-                    ForEach(author.videos) { video in
-                        InvestorMoodVideoCard(item: video) { onPlay(video) }
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(author.videos) { video in
+                    InvestorMoodVideoRow(item: video) { onSelect(video) }
+                    if video.id != author.videos.last?.id {
+                        Divider()
+                            .accessibilityHidden(true)
                     }
                 }
-                .padding(.bottom, 56)
             }
-            .scrollBounceBehavior(.basedOnSize)
+            .frame(maxWidth: TodayBriefStyle.maximumCardWidth)
+            .padding(.horizontal, TodayBriefStyle.horizontalInset)
+            .frame(maxWidth: .infinity)
+            .padding(.bottom, 60)
         }
-        .frame(maxWidth: TodayBriefStyle.maximumCardWidth)
-        .padding(.horizontal, TodayBriefStyle.horizontalInset)
-        .padding(.top, 14)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .scrollBounceBehavior(.basedOnSize)
         .accessibilityIdentifier("retail-investor-author-\(author.id)")
     }
 }
 
-private struct InvestorMoodVideoCard: View {
+private struct InvestorMoodVideoRow: View {
     let item: InvestorMoodItem
-    let onPlay: () -> Void
+    let onSelect: () -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showsDouyinOpenFailure = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            header
-            interpretation
-            ResearchDesign.line.frame(height: 1)
+        HStack(spacing: 4) {
+            Button(action: onSelect) {
+                HStack(spacing: 12) {
+                    thumbnail
+                        .accessibilityHidden(true)
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(item.description.nonEmpty ?? "抖音视频")
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Text("\(InvestorMoodFormat.compactRelativeTime(item.createdAt)) · \(item.label)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .multilineTextAlignment(.leading)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(item.directPlaybackURL == nil ? "查看视频信息和解读" : "播放视频并查看解读")
+
             originalVideoButton
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .researchPanel()
+        .padding(.vertical, 10)
         .accessibilityIdentifier("retail-investor-card-\(item.id)")
         .alert("无法打开抖音 App", isPresented: $showsDouyinOpenFailure) {
             Button("知道了", role: .cancel) {}
@@ -174,71 +197,26 @@ private struct InvestorMoodVideoCard: View {
         }
     }
 
-    private var header: some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
-            : AnyLayout(HStackLayout(alignment: .top, spacing: 14))
-
-        return layout {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(InvestorMoodFormat.compactRelativeTime(item.createdAt))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                moodBadge
-
-                if let description = item.description.nonEmpty {
-                    Text(description)
-                        .font(.body.weight(.semibold))
-                        .accessibilityAddTraits(.isHeader)
-                }
+    private var thumbnail: some View {
+        AsyncImage(url: item.coverPlaybackURL) { phase in
+            if let image = phase.image {
+                image.resizable().scaledToFill()
+            } else {
+                InvestmentDesign.secondarySurface
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
+        }
+        .frame(width: 56, height: 72)
+        .clipped()
+        .overlay {
             if item.directPlaybackURL != nil {
-                Button(action: onPlay) {
-                    thumbnail
-                        .frame(width: 84, height: 112)
-                        .clipped()
-                        .overlay {
-                            Image(systemName: "play.fill")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.white)
-                                .frame(width: 32, height: 32)
-                                .background(.black.opacity(0.54), in: Circle())
-                        }
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("在焦点内播放视频")
+                Image(systemName: "play.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 22, height: 22)
+                    .background(.black.opacity(0.55), in: Circle())
             }
         }
-    }
-
-    @ViewBuilder
-    private var interpretation: some View {
-        if let analysis = item.analysis.nonEmpty, item.analysisSource.nonEmpty != nil {
-            readingSection("AI 解读", text: analysis)
-        } else if let transcript = item.transcript.nonEmpty {
-            readingSection("视频字幕", text: transcript)
-        } else if let status = item.analysis.nonEmpty {
-            Text(status)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private func readingSection(_ title: String, text: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(ResearchDesign.accent)
-                .accessibilityAddTraits(.isHeader)
-            Text(text)
-                .font(.body)
-                .lineSpacing(4)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private var originalVideoButton: some View {
@@ -250,67 +228,22 @@ private struct InvestorMoodVideoCard: View {
                 showsDouyinOpenFailure = !opened
             }
         } label: {
-            HStack(spacing: 8) {
-                Image("TikTokMark")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 20, height: 20)
-                    .accessibilityHidden(true)
-                Text(url == nil ? "原视频暂不可用" : "打开抖音原视频")
-                    .font(.subheadline.weight(.semibold))
-                Spacer(minLength: 0)
-                if url != nil {
-                    Image(systemName: "arrow.up.right")
-                        .font(.caption.weight(.semibold))
-                        .accessibilityHidden(true)
-                }
-            }
-            .foregroundStyle(url == nil ? .secondary : ResearchDesign.accent)
-            .padding(.horizontal, 12)
-            .frame(minHeight: 44)
-            .background(ResearchDesign.fill, in: RoundedRectangle(cornerRadius: 10))
-            .contentShape(Rectangle())
+            Image("TikTokMark")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 19, height: 19)
+                .opacity(url == nil ? 0.35 : 1)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(url == nil)
-        .accessibilityHint(url == nil ? "" : "在抖音 App 打开当前视频")
+        .accessibilityLabel(url == nil ? "抖音原视频暂不可用" : "打开抖音原视频")
         .accessibilityIdentifier("retail-investor-open-douyin")
-    }
-
-    private var thumbnail: some View {
-        AsyncImage(url: item.directCoverURL) { phase in
-            if let image = phase.image {
-                image.resizable().scaledToFill()
-            } else if phase.error != nil {
-                proxyCoverImage
-            } else {
-                InvestmentDesign.secondarySurface
-            }
-        }
-    }
-
-    private var proxyCoverImage: some View {
-        AsyncImage(url: item.coverPlaybackURL) { phase in
-            if let image = phase.image {
-                image.resizable().scaledToFill()
-            } else {
-                InvestmentDesign.secondarySurface
-            }
-        }
-    }
-
-    private var moodBadge: some View {
-        let tint = InvestorMoodFormat.moodColor(item.label)
-        return Text(item.label)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(tint)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
-private struct InvestorMoodVideoPlayerSheet: View {
+private struct InvestorMoodVideoDetailSheet: View {
     private static let playbackPreparationTimeout: Duration = .seconds(6)
 
     let item: InvestorMoodItem
@@ -324,19 +257,21 @@ private struct InvestorMoodVideoPlayerSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    ZStack {
-                        VideoPlayer(player: player)
+                    if item.directPlaybackURL != nil {
+                        ZStack {
+                            VideoPlayer(player: player)
 
-                        if !isPlaybackReady {
-                            loadingCover
-                                .transition(.opacity)
+                            if !isPlaybackReady {
+                                loadingCover
+                                    .transition(.opacity)
+                            }
                         }
+                        .aspectRatio(9 / 16, contentMode: .fit)
+                        .frame(maxWidth: 240)
+                        .background(.black)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .frame(maxWidth: .infinity, alignment: .center)
                     }
-                    .aspectRatio(9 / 16, contentMode: .fit)
-                    .frame(maxWidth: 240)
-                    .background(.black)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .frame(maxWidth: .infinity, alignment: .center)
 
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
@@ -362,11 +297,12 @@ private struct InvestorMoodVideoPlayerSheet: View {
             }
             .toolbar(.hidden, for: .navigationBar)
             .overlay(alignment: .bottomTrailing) {
-                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭原视频")
+                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭视频详情")
                     .padding(16)
             }
         }
         .task(id: "\(item.id)-\(playbackAttempt)") {
+            guard item.directPlaybackURL != nil else { return }
             await startPlayback()
         }
         .onDisappear { player.pause() }
@@ -569,17 +505,6 @@ private enum InvestorMoodFormat {
             return "\(seconds / 3_600) 小时前"
         default:
             return "\(seconds / 86_400) 天前"
-        }
-    }
-
-    static func moodColor(_ label: String) -> Color {
-        switch label {
-        case "悲观", "恐慌":
-            return Color(red: 0.12, green: 0.39, blue: 0.27)
-        case "乐观", "亢奋":
-            return Color(red: 0.65, green: 0.20, blue: 0.24)
-        default:
-            return .secondary
         }
     }
 
