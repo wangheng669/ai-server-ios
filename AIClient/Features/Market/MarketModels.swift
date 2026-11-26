@@ -1282,6 +1282,12 @@ struct MarketChartQuote: Codable, Sendable {
     let providerTimestamp: Int64?
     let receivedTimestamp: Int64?
     let source: String
+    let intradayVWAP: MarketChartVWAP?
+}
+
+struct MarketChartVWAP: Codable, Sendable {
+    let price: Double
+    let asOfTimestamp: Int64
 }
 
 struct MarketChartPoint: Codable, Identifiable, Equatable, Sendable {
@@ -1350,7 +1356,7 @@ struct MarketChartPresentation: Sendable {
     let extendedSessionLabel: String?
     let sessionBreak: MarketChartSessionBreak?
 
-    init(chart: MarketChart) {
+    init(chart: MarketChart, referencePrice: Double? = nil) {
         let points = marketChartDisplayPoints(chart.candles, interval: chart.interval)
             .sorted { $0.timestamp < $1.timestamp }
         let values = points.compactMap(\.displayValue)
@@ -1362,8 +1368,9 @@ struct MarketChartPresentation: Sendable {
         )
         self.xFractions = xFractions
         lineSegments = marketChartLineSegments(points: points, chart: chart)
-        let rawLow = points.map(\.low).filter(\.isFinite).min()
-        let rawHigh = points.map(\.high).filter(\.isFinite).max()
+        let reference = referencePrice.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        let rawLow = points.map(\.low).filter(\.isFinite).min().map { min($0, reference ?? $0) }
+        let rawHigh = points.map(\.high).filter(\.isFinite).max().map { max($0, reference ?? $0) }
         if let rawLow, let rawHigh, rawLow == rawHigh {
             let padding = max(abs(rawLow) * 0.001, 0.000_001)
             low = rawLow - padding
@@ -1432,7 +1439,8 @@ private func marketChartDisplayArtifacts(
     try Task.checkCancellation()
     guard let chart = marketChartForDisplay(source, period: period) else { return nil }
     try Task.checkCancellation()
-    let presentation = MarketChartPresentation(chart: chart)
+    let reference = period == .intraday ? chart.quote.intradayVWAP?.price : nil
+    let presentation = MarketChartPresentation(chart: chart, referencePrice: reference)
     let points = presentation.points
     let movingAverages = [5, 10, 20, 60].filter { $0 <= points.count }.map { period in
         MarketMovingAverageSeries(period: period, values: marketMovingAverageValues(points, period: period))
