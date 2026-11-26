@@ -135,12 +135,15 @@ struct MarketView: View {
             }
         )
         .environment(\.rootTabIsActive, isResearchVisible)
-        .appSheet(isPresented: $showsRetailInvestors) {
+        .appSheet(
+            isPresented: $showsRetailInvestors,
+            initialContentHeight: RetailInvestorView.initialContentHeight(
+                for: showsRetailInvestors ? investorMoodStore.authors.first : nil
+            )
+        ) {
             RetailInvestorView(store: investorMoodStore, onClose: { showsRetailInvestors = false })
-                .appPresentationDetents([.large])
                 .appPresentationCornerRadius(28)
                 .appPresentationBackground(InvestmentDesign.surface)
-                .appPresentationScrollsWithoutExpanding()
         }
         .appSheet(isPresented: $showsInvestors) {
             FamousHoldingsView(store: holdingsStore, onClose: { showsInvestors = false })

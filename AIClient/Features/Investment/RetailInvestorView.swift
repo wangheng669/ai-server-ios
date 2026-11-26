@@ -4,11 +4,23 @@ import SwiftUI
 import UIKit
 
 struct RetailInvestorView: View {
+    fileprivate static let closeClearance: CGFloat = 60
+    private static let estimatedHeaderHeight: CGFloat = 80
+    private static let estimatedEmptyHeight: CGFloat = 130
+
     let store: InvestorMoodStore
     let onClose: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selectedID: InvestorMoodAuthor.ID?
     @State private var selectedVideo: InvestorMoodItem?
+    @State private var headerHeight: CGFloat?
+    @State private var emptyHeight: CGFloat?
+    @State private var listHeights: [InvestorMoodAuthor.ID: CGFloat] = [:]
+
+    static func initialContentHeight(for author: InvestorMoodAuthor?) -> CGFloat {
+        guard let author else { return estimatedEmptyHeight }
+        return estimatedHeaderHeight + CGFloat(author.videos.count) * InvestorMoodVideoRow.minimumHeight + closeClearance
+    }
 
     private var selectedIndex: Int {
         store.authors.firstIndex { $0.id == selectedID } ?? 0
@@ -16,15 +28,20 @@ struct RetailInvestorView: View {
 
     var body: some View {
         let authors = store.authors
+        let author = authors.isEmpty ? nil : authors[selectedIndex]
         VStack(spacing: 0) {
-            if authors.isEmpty {
-                emptyState
-            } else {
-                authorHeader(authors[selectedIndex])
+            if let author {
+                authorHeader(author)
+                    .onGeometryChange(for: CGFloat.self, of: { $0.size.height.rounded(.up) }) {
+                        headerHeight = $0
+                    }
                 pager
+            } else {
+                emptyState
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .appPresentationContentHeight(contentHeight(for: author))
         .background(InvestmentDesign.surface)
         .floatingSheetClose("关闭散户观点", action: onClose)
         .accessibilityAction(.escape) { onClose() }
@@ -39,6 +56,13 @@ struct RetailInvestorView: View {
         .appSheet(item: $selectedVideo) { item in
             InvestorMoodVideoDetailSheet(item: item)
         }
+    }
+
+    private func contentHeight(for author: InvestorMoodAuthor?) -> CGFloat {
+        let estimatedHeight = Self.initialContentHeight(for: author)
+        guard let author else { return emptyHeight ?? estimatedHeight }
+        guard let listHeight = listHeights[author.id] else { return estimatedHeight }
+        return (headerHeight ?? Self.estimatedHeaderHeight) + listHeight
     }
 
     private func authorHeader(_ author: InvestorMoodAuthor) -> some View {
@@ -86,9 +110,13 @@ struct RetailInvestorView: View {
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 0) {
                     ForEach(store.authors) { author in
-                        InvestorMoodAuthorPage(author: author) { selectedVideo = $0 }
-                            .containerRelativeFrame(.horizontal)
-                            .frame(height: viewport.size.height)
+                        InvestorMoodAuthorPage(author: author) {
+                            selectedVideo = $0
+                        } onHeightChange: {
+                            listHeights[author.id] = $0
+                        }
+                        .containerRelativeFrame(.horizontal)
+                        .frame(height: viewport.size.height)
                     }
                 }
                 .scrollTargetLayout()
@@ -102,16 +130,25 @@ struct RetailInvestorView: View {
     }
 
     private var emptyState: some View {
-        Group {
-            if store.isLoadingInvestorMood {
-                ProgressView("正在读取今日视频")
-            } else {
-                Text(store.investorMoodErrorMessage ?? "暂无今日视频")
+        ScrollView {
+            Group {
+                if store.isLoadingInvestorMood {
+                    ProgressView("正在读取今日视频")
+                } else {
+                    Text(store.investorMoodErrorMessage ?? "暂无今日视频")
+                }
+            }
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+            .padding(20)
+            .padding(.bottom, Self.closeClearance)
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.height.rounded(.up) }) {
+                emptyHeight = $0
             }
         }
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
-        .padding(20)
+        .scrollBounceBehavior(.basedOnSize)
     }
 
     private func advance(by offset: Int) {
@@ -132,10 +169,12 @@ struct InvestorMoodAuthor: Identifiable {
 private struct InvestorMoodAuthorPage: View {
     let author: InvestorMoodAuthor
     let onSelect: (InvestorMoodItem) -> Void
+    let onHeightChange: (CGFloat) -> Void
 
     var body: some View {
         ScrollView {
-            LazyVStack(spacing: 0) {
+            // Measure the full list so paging and scrolling cannot change its fitted height.
+            VStack(spacing: 0) {
                 ForEach(author.videos) { video in
                     InvestorMoodVideoRow(item: video) { onSelect(video) }
                     if video.id != author.videos.last?.id {
@@ -147,7 +186,8 @@ private struct InvestorMoodAuthorPage: View {
             .frame(maxWidth: TodayBriefStyle.maximumCardWidth)
             .padding(.horizontal, TodayBriefStyle.horizontalInset)
             .frame(maxWidth: .infinity)
-            .padding(.bottom, 60)
+            .padding(.bottom, RetailInvestorView.closeClearance)
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.height.rounded(.up) }, action: onHeightChange)
         }
         .scrollBounceBehavior(.basedOnSize)
         .accessibilityIdentifier("retail-investor-author-\(author.id)")
@@ -155,6 +195,10 @@ private struct InvestorMoodAuthorPage: View {
 }
 
 private struct InvestorMoodVideoRow: View {
+    private static let coverHeight: CGFloat = 72
+    private static let verticalPadding: CGFloat = 10
+    static let minimumHeight = coverHeight + verticalPadding * 2
+
     let item: InvestorMoodItem
     let onSelect: () -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -188,7 +232,7 @@ private struct InvestorMoodVideoRow: View {
 
             originalVideoButton
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, Self.verticalPadding)
         .accessibilityIdentifier("retail-investor-card-\(item.id)")
         .alert("无法打开抖音 App", isPresented: $showsDouyinOpenFailure) {
             Button("知道了", role: .cancel) {}
@@ -205,7 +249,7 @@ private struct InvestorMoodVideoRow: View {
                 InvestmentDesign.secondarySurface
             }
         }
-        .frame(width: 56, height: 72)
+        .frame(width: 56, height: Self.coverHeight)
         .clipped()
         .overlay {
             if item.directPlaybackURL != nil {
