@@ -35,20 +35,6 @@ private enum ResearchTopic: String, Identifiable {
 enum ResearchHomeContent {
     static let primaryMarkets = [("标普500", "^GSPC"), ("沪深300", "000300.SS"), ("日经225", "^N225")]
     static var chartSymbols: [String] { primaryMarkets.map(\.1) }
-
-    static func stocks(in dashboard: MarketDashboard?, region: MarketRegion) -> [MarketQuote] {
-        stockEntries(in: dashboard, region: region).compactMap(\.quote)
-    }
-
-    static func stockEntries(in dashboard: MarketDashboard?, region: MarketRegion) -> [MarketDashboardQuoteEntry] {
-        Array((dashboard?.regionalStockEntries[region.dashboardID] ?? []).prefix(4))
-    }
-
-    static func afterHoursSymbols(for stocks: [MarketQuote]) -> [String] {
-        stocks.filter {
-            $0.tradingSession == .overnight || $0.tradingSession == .premarket || $0.tradingSession == .closed
-        }.map(\.symbol)
-    }
 }
 
 private enum ResearchStyle {
@@ -91,18 +77,10 @@ struct ResearchHomeView: View {
     }()
 
     private var chartSymbols: [String] { ResearchHomeContent.chartSymbols }
-    private var stocks: [MarketQuote] {
-        ResearchHomeContent.stocks(in: store.dashboard, region: stockRegion)
-    }
     private var isLoadingMarket: Bool { store.dashboard == nil && store.errorMessage == nil }
     private var shouldRefreshCharts: Bool { rootTabIsActive && scenePhase == .active && presentedTopic == nil }
     private var shouldRefreshIndustryQuotes: Bool {
         rootTabIsActive && scenePhase == .active && (presentedTopic == nil || presentedTopic == .industryQuotes)
-    }
-
-    private var afterHoursSymbols: [String] {
-        guard shouldRefreshCharts, stockRegion == .unitedStates else { return [] }
-        return ResearchHomeContent.afterHoursSymbols(for: stocks)
     }
 
     var body: some View {
@@ -156,17 +134,6 @@ struct ResearchHomeView: View {
             guard shouldRefreshIndustryQuotes else { return }
             while !Task.isCancelled {
                 await store.refreshAShareIndustryQuotes()
-                do { try await Task.sleep(for: .seconds(60)) }
-                catch { return }
-            }
-        }
-        .task(id: afterHoursSymbols) {
-            let symbols = afterHoursSymbols
-            guard !symbols.isEmpty else { return }
-            while !Task.isCancelled {
-                let missing = store.missingAfterHoursSymbols(symbols)
-                guard !missing.isEmpty else { return }
-                await store.preloadListCharts(symbols: missing)
                 do { try await Task.sleep(for: .seconds(60)) }
                 catch { return }
             }
@@ -324,7 +291,7 @@ struct ResearchHomeView: View {
                 onOpenAllStocks(stockRegion)
             }
             stockRegionSelector
-            let entries = ResearchHomeContent.stockEntries(in: store.dashboard, region: stockRegion)
+            let entries = store.dashboard?.regionalStockEntries[stockRegion.dashboardID] ?? []
             if entries.isEmpty {
                 Text("暂无股票行情")
                     .font(.subheadline).foregroundStyle(ResearchStyle.muted)
@@ -333,7 +300,6 @@ struct ResearchHomeView: View {
                 ResearchStockQuotes(
                     entries: entries,
                     region: stockRegion,
-                    store: store,
                     onOpen: onOpenMarketDetail
                 )
             }
@@ -960,154 +926,107 @@ private struct ResearchTopicSheet<Content: View>: View {
 private struct ResearchStockQuotes: View {
     let entries: [MarketDashboardQuoteEntry]
     let region: MarketRegion
-    let store: MarketStore
     let onOpen: (String) -> Void
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    private var quotes: [MarketQuote] { entries.compactMap(\.quote) }
-    private var extendedSession: MarketTradingSession {
-        quotes.contains { $0.tradingSession == .premarket } ? .premarket : .overnight
+    private var columns: [GridItem] {
+        let count = dynamicTypeSize.isAccessibilitySize ? 1 : dynamicTypeSize >= .xxLarge ? 2 : 3
+        return Array(repeating: GridItem(.flexible(minimum: 0), spacing: 6, alignment: .top), count: count)
     }
-    private var showsIndicative: Bool { quotes.contains(where: \.hasIndicativeOvernightPrice) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if quotes.contains(where: showsSessionBreakdown) {
-                VStack(spacing: 8) {
-                    ForEach(entries) { entry in
-                        stockEntry(entry)
-                            .researchPanel()
-                    }
+        LazyVGrid(columns: columns, spacing: 6) {
+            ForEach(entries) { entry in
+                Button { onOpen(entry.id) } label: {
+                    ResearchStockCard(entry: entry, region: region)
                 }
-                Text(StockSessionQuotes.sourceNote(indicative: showsIndicative))
-                    .font(.caption)
-                    .foregroundStyle(ResearchStyle.muted)
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(entries) { entry in
-                        if entry.id != entries.first?.id {
-                            ResearchDesign.line.frame(height: 1).padding(.horizontal, 12)
-                        }
-                        stockEntry(entry)
-                    }
-                }
-                .researchPanel()
+                .buttonStyle(.plain)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("research-stock-\(entry.id)")
             }
         }
-    }
-
-    @ViewBuilder
-    private func stockEntry(_ entry: MarketDashboardQuoteEntry) -> some View {
-        switch entry {
-        case let .quote(quote):
-            stockRow(quote)
-        case let .unavailable(stock):
-            Button { onOpen(stock.symbol) } label: {
-                MarketUnavailableQuoteRow(quote: stock, store: store)
-                    .padding(.horizontal, 12)
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("research-stock-\(stock.symbol)")
-        }
-    }
-
-    private func showsSessionBreakdown(for quote: MarketQuote) -> Bool {
-        region == .unitedStates && quote.tradingSession != .regular
-    }
-
-    private func stockRow(_ quote: MarketQuote) -> some View {
-        let showsBreakdown = showsSessionBreakdown(for: quote)
-        let active = quote.stale != true && !store.isShowingCachedSnapshot
-        let lastTrade = store.lastSessionTrade(for: quote)
-        let subtitle = stockSubtitle(quote, showsBreakdown: showsBreakdown, active: active, hasLastTrade: lastTrade != nil)
-        return Button { onOpen(quote.symbol) } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                if showsBreakdown {
-                    HStack(spacing: 8) {
-                        Text(quote.presentationName).font(.subheadline.weight(.semibold))
-                        Text([subtitle, quote.currency].compactMap { $0 }.joined(separator: " · "))
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(ResearchStyle.muted)
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                            .accessibilityHidden(true)
-                    }
-                    .padding(.horizontal, 5)
-                    sessionPrices(quote, active: active)
-                } else {
-                    compactQuote(quote, subtitle: subtitle)
-                }
-                if let lastTrade {
-                    MarketLastSessionTradeNote(trade: lastTrade, symbol: quote.symbol)
-                        .padding(.horizontal, showsBreakdown ? 5 : 0)
-                }
-            }
-            .monospacedDigit()
-            .padding(.horizontal, showsBreakdown ? 8 : 12)
-            .padding(.vertical, 8)
-            .frame(minHeight: 52)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("research-stock-\(quote.symbol)")
-    }
-
-    private func sessionPrices(_ quote: MarketQuote, active: Bool) -> some View {
-        let sessions = store.stockSessionQuotes(for: quote, chartSymbol: quote.symbol,
-                                                extendedSession: extendedSession, isCurrent: active)
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-            : AnyLayout(HStackLayout(alignment: .top, spacing: 2))
-        return layout {
-            ForEach(sessions.columns) { column in
-                StockSessionPriceCell(column: column, symbol: quote.symbol, muted: ResearchStyle.muted, showsTitle: true)
-            }
-        }
-        .background(ResearchDesign.fill, in: RoundedRectangle(cornerRadius: 8))
-    }
-
-    private func compactQuote(_ quote: MarketQuote, subtitle: String) -> some View {
-        let price = quote.stale == true ? "—" : quote.marketDisplayPrice.formatted(
-            .number.precision(.fractionLength(marketPriceDigits(quote.marketDisplayPrice, symbol: quote.symbol)))
-        )
-        let change = quote.stale == true ? "—" : quote.marketDisplayFormattedPercent
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 5))
-            : AnyLayout(HStackLayout(spacing: 10))
-        return layout {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(quote.presentationName).font(.subheadline.weight(.semibold))
-                Text(subtitle)
-                    .font(.caption2)
-                    .foregroundStyle(ResearchStyle.muted)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 3) {
-                Text([price, quote.currency].compactMap { $0 }.joined(separator: " "))
-                    .font(region == .unitedStates ? .body.weight(.semibold) : .subheadline.weight(.semibold))
-                    .minimumScaleFactor(0.75)
-                Text(change)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(ResearchStyle.tint(quote))
-            }
-        }
-    }
-
-    private func stockSubtitle(
-        _ quote: MarketQuote, showsBreakdown: Bool, active: Bool, hasLastTrade: Bool
-    ) -> String {
-        let code = region == .europe && quote.listingCountryCode == "US" ? "\(quote.displayCode) · 美股" : quote.displayCode
-        if hasLastTrade { return code }
-        if !active { return "\(code) · 待更新" }
-        if showsBreakdown { return code }
-        let separator = region == .unitedStates ? " · " : "\n"
-        return "\(code)\(separator)\(quote.researchStatus)"
     }
 }
+
+private struct ResearchStockCard: View {
+    let entry: MarketDashboardQuoteEntry
+    let region: MarketRegion
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var code: String {
+        if region == .europe, entry.quote?.listingCountryCode == "US" {
+            return "\(entry.stockCode) · 美股"
+        }
+        return entry.stockCode
+    }
+
+    private var status: String {
+        if case let .unavailable(stock) = entry { return stock.quality.unavailableLabel }
+        return entry.displayQuote?.researchStatus ?? entry.quote?.quality?.unavailableLabel ?? "报价待更新"
+    }
+
+    var body: some View {
+        let quote = entry.displayQuote
+        let tint = ResearchStyle.tint(quote)
+        VStack(alignment: .leading, spacing: 3) {
+            Text(code)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+            Text(entry.stockName)
+                .font(.caption)
+                .foregroundStyle(ResearchStyle.muted)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(quote.map(marketQuotePriceText) ?? "—")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .accessibilityLabel(quote.map { "价格 \(marketQuotePriceText($0))" } ?? "价格暂缺")
+                if let currency = quote?.currency, currency != "%" {
+                    Text(currency)
+                        .font(.caption2)
+                        .foregroundStyle(ResearchStyle.muted)
+                        .fixedSize()
+                }
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    changeText(quote, tint: tint)
+                    Spacer(minLength: 0)
+                    statusText
+                }
+                .fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 2) {
+                    changeText(quote, tint: tint)
+                    statusText
+                }
+            }
+        }
+        .monospacedDigit()
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, minHeight: 82, alignment: .topLeading)
+        .background(tint.opacity(quote == nil ? 0.06 : 0.09), in: RoundedRectangle(cornerRadius: 11))
+        .contentShape(Rectangle())
+    }
+
+    private func changeText(_ quote: MarketQuote?, tint: Color) -> some View {
+        let text = quote?.marketDisplayFormattedPercent ?? "—"
+        return Text(text)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(tint)
+            .accessibilityLabel(quote == nil ? "涨跌幅暂缺" : "涨跌幅 \(text)")
+    }
+
+    private var statusText: some View {
+        Text(status)
+            .font(.caption2)
+            .foregroundStyle(ResearchStyle.muted)
+    }
+}
+
 struct MarketUnavailableQuoteRow: View {
     let quote: MarketDashboardQuoteEntry.Unavailable
     let store: MarketStore
