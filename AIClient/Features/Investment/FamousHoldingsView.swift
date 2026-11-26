@@ -185,7 +185,6 @@ private struct HoldingsPortfolio: View {
                     }
                 }
             }
-            .refreshable { await store.load(force: true) }
             .accessibilityIdentifier("holdings-scroll")
         }
     }

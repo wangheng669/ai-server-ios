@@ -52,6 +52,9 @@ struct MarketStocksSheet: View {
                             Label(quoteNotice, systemImage: "clock")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
+                            if store.errorMessage != nil {
+                                reloadButton
+                            }
                         }
                         if !entries.isEmpty {
                             listControls(visibleCount: visible.count, totalCount: entries.count)
@@ -85,7 +88,6 @@ struct MarketStocksSheet: View {
                 .padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
-            .refreshable { await store.refresh() }
         }
         .background(InvestmentDesign.surface)
         .accessibilityIdentifier("market-stocks-sheet")
@@ -106,6 +108,13 @@ struct MarketStocksSheet: View {
             return store.errorMessage == nil ? "正在显示缓存行情" : "更新失败，正在显示缓存行情"
         }
         return store.errorMessage == nil ? nil : "行情列表更新失败"
+    }
+
+    private var reloadButton: some View {
+        Button("重新加载") { Task { await store.refresh() } }
+            .buttonStyle(.bordered)
+            .tint(ResearchDesign.accent)
+            .disabled(store.isRetrying)
     }
 
     private var titleBar: some View {
@@ -270,10 +279,7 @@ struct MarketStocksSheet: View {
                 Text("未找到匹配的股票")
             } else if store.errorMessage != nil {
                 Text("股票行情暂时无法加载")
-                Button("重新加载") { Task { await store.refresh() } }
-                    .buttonStyle(.bordered)
-                    .tint(ResearchDesign.accent)
-                    .disabled(store.isRetrying)
+                reloadButton
             } else {
                 Text("暂无\(region.rawValue)股票行情")
             }
