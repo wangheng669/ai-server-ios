@@ -33,11 +33,17 @@ enum TodayBriefDate {
     private static let dateOnly = formatter("yyyy-MM-dd")
     private static let editionLabel = formatter("M 月 d 日 · EEE")
     private static let timeLabel = formatter("M 月 d 日 HH:mm")
+    private static let activityLabel = formatter("HH:mm")
+    static let shanghaiCalendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        return calendar
+    }()
 
     private static func formatter(_ format: String) -> DateFormatter {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
-        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        formatter.timeZone = shanghaiCalendar.timeZone
         formatter.dateFormat = format
         return formatter
     }
@@ -47,11 +53,19 @@ enum TodayBriefDate {
     }
 
     static func timestamp(_ value: String) -> String? {
-        ((try? fractionalISO.parse(value)) ?? (try? iso.parse(value))).map(timeLabel.string)
+        parseTimestamp(value).map(timeLabel.string)
     }
 
     static func timestamp(_ date: Date) -> String {
         timeLabel.string(from: date)
+    }
+
+    static func parseTimestamp(_ value: String) -> Date? {
+        (try? fractionalISO.parse(value)) ?? (try? iso.parse(value))
+    }
+
+    static func activityTime(_ date: Date) -> String {
+        activityLabel.string(from: date)
     }
 }
 
@@ -172,6 +186,7 @@ struct TodayBriefProjection: Sendable {
         let followUps: [String]
         let section: String
         let stock: TodayCompanyStock?
+        let activityPostIDs: Set<Int>
 
         var sourceLabel: String {
             switch content {
@@ -208,6 +223,14 @@ struct TodayBriefProjection: Sendable {
     func sectionTitle(at index: Int) -> String? {
         guard !cards.isEmpty else { return nil }
         return cards[min(index, cards.count - 1)].section
+    }
+
+    fileprivate func activitySource(for card: Card) -> TodayActivitySource? {
+        let posts = card.activityPostIDs.compactMap { sources[$0]?.post }
+        guard posts.count == card.activityPostIDs.count,
+              let first = posts.first, let source = TodayActivitySource(post: first),
+              posts.allSatisfy({ TodayActivitySource(post: $0) == source }) else { return nil }
+        return source
     }
 
     var avatarURLs: [URL] {
@@ -272,7 +295,8 @@ struct TodayBriefProjection: Sendable {
             }
             return Card(
                 id: "highlight-" + event.id, content: .event(event), followUps: followUps,
-                section: "重点", stock: TodayCompanyStock.match(event: event, systems: systems)
+                section: "重点", stock: TodayCompanyStock.match(event: event, systems: systems),
+                activityPostIDs: event.companySystemKey == nil ? [] : Set(item.postIDs.filter { $0 > 0 })
             )
         }
         var companyCards: [Card] = []
@@ -291,7 +315,8 @@ struct TodayBriefProjection: Sendable {
                         content: .company(CompanyCard(system, fact: fact)),
                         followUps: takeFollowUps(for: key),
                         section: section.sectionName,
-                        stock: TodayCompanyStock.match(systemKey: system.systemKey, sourceKeys: Set(fact?.sourceKeys ?? []))
+                        stock: TodayCompanyStock.match(systemKey: system.systemKey, sourceKeys: Set(fact?.sourceKeys ?? [])),
+                        activityPostIDs: Set((fact?.postIDs ?? []).filter { $0 > 0 })
                     ))
                 }
             }
@@ -300,7 +325,8 @@ struct TodayBriefProjection: Sendable {
             let event = TodayReadingEvent.highlight(watch.item, systems: systems)
             return Card(
                 id: "watch-" + event.id, content: .event(event), followUps: [],
-                section: "后续关注", stock: TodayCompanyStock.match(event: event, systems: systems)
+                section: "后续关注", stock: TodayCompanyStock.match(event: event, systems: systems),
+                activityPostIDs: event.companySystemKey == nil ? [] : Set(watch.item.postIDs.filter { $0 > 0 })
             )
         }
         cards = highlights + companyCards + standaloneWatches
@@ -311,7 +337,7 @@ struct TodayBriefProjection: Sendable {
         }
         var seenSymbols = Set<String>()
         stockSymbols = cards.compactMap { $0.stock?.symbol }.filter { seenSymbols.insert($0).inserted }
-        sourceIDs = Set(cards.flatMap(\.postIDs)).sorted()
+        sourceIDs = Set(cards.flatMap(\.postIDs)).union(cards.flatMap(\.activityPostIDs)).sorted()
     }
 }
 
@@ -564,8 +590,10 @@ private struct TodayBriefDeck: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.rootTabIsActive) private var rootTabIsActive
     @Environment(\.scenePhase) private var scenePhase
+    @State private var activityStore = TodayActivityStore()
     @State private var presentedStock: MarketDetailRoute?
-    @State private var showsOriginals = false
+    @State private var reading: Reading?
+    @State private var activityReadingHeight: CGFloat?
     @State private var originalsHeights: [String: CGFloat] = [:]
     @State private var summaryHeights: [String: CGFloat] = [:]
     @State private var settlement: Settlement?
@@ -578,6 +606,18 @@ private struct TodayBriefDeck: View {
     let retryReport: () async -> Void
     let groupJump: TodayBriefGroupJump?
     @Binding var selectedIndex: Int
+
+    private enum Reading {
+        case brief
+        case activity(TodaySourcePresentation)
+    }
+
+    private var showsOriginals: Bool { reading != nil }
+
+    private var openedActivity: TodaySourcePresentation? {
+        if case let .activity(source) = reading { return source }
+        return nil
+    }
 
     private enum DragAxis {
         case horizontal
@@ -618,8 +658,11 @@ private struct TodayBriefDeck: View {
         let maximumHeight = max(210, viewport.height - stagePadding - stackHeight)
         let cardWidth = min(max(0, viewport.width - TodayBriefStyle.horizontalInset * 2), TodayBriefStyle.maximumCardWidth)
         let selection = min(selectedIndex, brief.cards.count - 1)
-        let cardHeight = summaryHeights[brief.cards[selection].id] ?? min(350, maximumHeight)
-        let stock = brief.cards[selection].stock
+        let card = brief.cards[selection]
+        let cardHeight = summaryHeights[card.id] ?? min(350, maximumHeight)
+        let stock = card.stock
+        let activitySource = brief.activitySource(for: card)
+        let activeActivitySource = rootTabIsActive && scenePhase == .active ? activitySource : nil
         let stockSymbols = rootTabIsActive && scenePhase == .active ? brief.stockSymbols : []
         let visibleStockSymbol = !stockSymbols.isEmpty && !showsOriginals ? stock?.symbol : nil
         ZStack(alignment: .top) {
@@ -634,6 +677,10 @@ private struct TodayBriefDeck: View {
                     TodayCompanyStockCard(stock: stock, marketStore: marketStore) {
                         presentedStock = MarketDetailRoute(symbol: stock.symbol, companyName: stock.name)
                     }
+                        .frame(width: cardWidth)
+                }
+                if !showsOriginals {
+                    activityRows(for: activitySource)
                         .frame(width: cardWidth)
                 }
             }
@@ -653,6 +700,10 @@ private struct TodayBriefDeck: View {
         .contentShape(Rectangle())
         .simultaneousGesture(swipeGesture(cardWidth: cardWidth))
         .marketInstrumentDetailSheet(item: $presentedStock, store: marketStore)
+        .task(id: activeActivitySource) {
+            guard let activeActivitySource else { return }
+            await activityStore.observe(source: activeActivitySource, client: APIClient(baseURL: ServerConfiguration.currentURL))
+        }
         .task(id: visibleStockSymbol, priority: .utility) {
             guard let visibleStockSymbol else { return }
             do { try await Task.sleep(for: .milliseconds(250)) }
@@ -671,6 +722,7 @@ private struct TodayBriefDeck: View {
             _ = await closingQuotes
         }
         .onChange(of: brief.cards.map(\.id)) { previous, current in
+            if openedActivity != nil { endOriginals() }
             if let id = previous.indices.contains(selectedIndex) ? previous[selectedIndex] : nil,
                let index = current.firstIndex(of: id) {
                 selectedIndex = index
@@ -685,6 +737,7 @@ private struct TodayBriefDeck: View {
             guard let jump, let section = brief.sectionShortcuts.first(where: { $0.title == jump.title }) else {
                 return
             }
+            if openedActivity != nil { endOriginals() }
             settlement = nil
             selectedIndex = section.firstCardIndex
         }
@@ -696,6 +749,17 @@ private struct TodayBriefDeck: View {
             }
         }
         .accessibilityIdentifier("today-card-pager")
+    }
+
+    @ViewBuilder
+    private func activityRows(for source: TodayActivitySource?) -> some View {
+        let items = activityStore.items(for: source)
+        let refreshFailed = activityStore.refreshFailed(for: source)
+        if !items.isEmpty || refreshFailed {
+            TodayActivityRows(items: items, refreshFailed: refreshFailed) { post in
+                openReading(.activity(TodaySourcePresentation(post: post)))
+            }
+        }
     }
 
     private func summaryDeck(selection: Int, width: CGFloat, height: CGFloat, maximumHeight: CGFloat) -> some View {
@@ -754,7 +818,7 @@ private struct TodayBriefDeck: View {
     private func swipeGesture(cardWidth: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 14)
             .updating($drag) { value, state, _ in
-                guard settlement == nil, brief.cards.count > 1 else { return }
+                guard openedActivity == nil, settlement == nil, brief.cards.count > 1 else { return }
                 var current = state ?? Drag(selection: selectedIndex, axis: DragAxis(value.translation))
                 if current.axis == .horizontal, current.selection == selectedIndex {
                     current.shuffle = swipe(for: value.translation.width, cardWidth: cardWidth)
@@ -763,7 +827,7 @@ private struct TodayBriefDeck: View {
             }
             .onEnded { value in
                 let horizontal = value.translation.width
-                guard (drag?.axis ?? DragAxis(value.translation)) == .horizontal,
+                guard openedActivity == nil, (drag?.axis ?? DragAxis(value.translation)) == .horizontal,
                       let swipe = swipe(for: horizontal, cardWidth: cardWidth) else { return }
                 let projected = value.predictedEndTranslation.width
                 let movedFarEnough = abs(horizontal) >= max(40, cardWidth * 0.18)
@@ -781,7 +845,7 @@ private struct TodayBriefDeck: View {
     }
 
     private func advance(_ direction: Int) {
-        guard shuffle == nil else { return }
+        guard openedActivity == nil, shuffle == nil else { return }
         finishShuffle(Shuffle(direction: direction), commit: true)
     }
 
@@ -791,15 +855,20 @@ private struct TodayBriefDeck: View {
     }
 
     private func setOriginals(_ visible: Bool) {
+        openReading(visible ? .brief : nil)
+    }
+
+    private func openReading(_ destination: Reading?) {
         guard shuffle == nil else { return }
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
-            if visible { showsOriginals = true }
-            else { endOriginals() }
+            reading = destination
+            activityReadingHeight = nil
         }
     }
 
     private func endOriginals() {
-        showsOriginals = false
+        reading = nil
+        activityReadingHeight = nil
     }
 
     private func finishShuffle(_ swipe: Shuffle, commit: Bool) {
@@ -834,7 +903,9 @@ private struct TodayBriefDeck: View {
     }
 
     private func originalsDeck(selection: Int, width: CGFloat, maximumHeight: CGFloat, backLayers: Int) -> some View {
-        let height = min(420, maximumHeight, originalsHeights[brief.cards[selection].id] ?? 211)
+        let activity = openedActivity
+        let measured = activity == nil ? originalsHeights[brief.cards[selection].id] : activityReadingHeight
+        let height = min(420, maximumHeight, measured ?? 211)
         let next = shuffle.flatMap { adjacentIndex(from: selection, direction: $0.direction) }
 
         return ZStack(alignment: .top) {
@@ -849,20 +920,23 @@ private struct TodayBriefDeck: View {
             ) { index in
                 let card = brief.cards[index]
                 TodayOriginalsPanel(
-                    sources: card.postIDs.compactMap { brief.sources[$0] },
-                    referenceCount: card.postIDs.count,
+                    sources: activity.map { [$0] } ?? card.postIDs.compactMap { brief.sources[$0] },
+                    referenceCount: activity == nil ? card.postIDs.count : 1,
                     width: width,
                     isCurrent: index == selection,
                     isLoadingSources: isLoadingSources,
                     retryReport: retryReport,
                     measure: { reportedHeight in
-                        if showsOriginals, originalsHeights[card.id] != reportedHeight {
+                        if let activity, openedActivity?.id == activity.id {
+                            if activityReadingHeight != reportedHeight { activityReadingHeight = reportedHeight }
+                        } else if showsOriginals, openedActivity == nil, activity == nil,
+                                  originalsHeights[card.id] != reportedHeight {
                             originalsHeights[card.id] = reportedHeight
                         }
                     }
                 )
                 .environment(\.preparedReadingMedia, brief.previews)
-                .id(card.id)
+                .id(activity.map { "activity-\($0.id)" } ?? card.id)
             }
             .clipShape(shape)
             .modifier(CardSurface(shape: shape, width: width, shadowOpacity: 0.07))
@@ -872,8 +946,12 @@ private struct TodayBriefDeck: View {
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("today-originals-panel")
             .accessibilityAction(.escape) { setOriginals(false) }
-            .accessibilityAction(named: Text("下一张")) { advance(1) }
-            .accessibilityAction(named: Text("上一张")) { advance(-1) }
+            .accessibilityActions {
+                if activity == nil {
+                    Button("下一张") { advance(1) }
+                    Button("上一张") { advance(-1) }
+                }
+            }
         }
         .offset(x: -CGFloat(backLayers) * 2)
     }

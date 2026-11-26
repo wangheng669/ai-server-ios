@@ -183,7 +183,8 @@ struct APIClient {
         feedID: Int,
         page: Int = 1,
         limit: Int = 20,
-        includesAllScores: Bool = true
+        includesAllScores: Bool = true,
+        cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy
     ) async throws -> [Post] {
         var parts = URLComponents(
             url: baseURL.appending(path: "api/ios/v1/rss/feeds/\(feedID)/posts"),
@@ -195,7 +196,7 @@ struct APIClient {
             includesAllScores: includesAllScores
         )
         guard let url = parts?.url else { throw APIError.invalidURL }
-        let response: RSSFeedPostsResponse = try await get(url)
+        let response: RSSFeedPostsResponse = try await get(url, cachePolicy: cachePolicy)
         return response.data.posts
     }
 

@@ -80,7 +80,8 @@ final class RealtimeFeedClient {
         case (.feed, "post"):
             if let post = try? decoder.decode(Post.self, from: data) { onEvent?(.post(post)) }
         case (.feed, "task"):
-            if header.state == "idle", header.skipped != true, let name = header.name {
+            if header.state == "idle", let completedAt = header.completedAt, !completedAt.isEmpty,
+               let name = header.name {
                 onEvent?(.taskCompleted(name))
             }
         case (.deployment, "deployment-status"):
@@ -108,5 +109,5 @@ private struct MessageHeader: Decodable {
     let type: String
     let name: String?
     let state: String?
-    let skipped: Bool?
+    let completedAt: String?
 }
