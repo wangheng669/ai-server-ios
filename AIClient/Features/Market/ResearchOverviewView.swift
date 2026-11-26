@@ -449,14 +449,15 @@ private struct ResearchGlobalMarketSnapshot: View {
     }
 
     private func additionalQuotes(in dashboard: MarketDashboard) -> [MarketDashboardQuoteEntry] {
-        var seen = Set(ResearchHomeContent.chartSymbols + Self.tickers.map(\.symbol) + Self.metrics.map(\.symbol))
-        return MarketRegion.allCases.flatMap { region in
+        let symbols = MarketRegion.allCases.flatMap { region in
             let regionalMetrics = dashboard.regions.first { $0.id == region.dashboardID }?.metricSymbols ?? []
-            return (region.marketSymbols + regionalMetrics).compactMap { symbol in
-                guard seen.insert(symbol).inserted else { return nil }
-                if let quote = store.quote(symbol: symbol) { return .quote(quote) }
-                return dashboard.unavailableQuote(symbol: symbol).map(MarketDashboardQuoteEntry.unavailable)
-            }
+            return region.marketSymbols + regionalMetrics
+        }
+        var seen = Set(ResearchHomeContent.chartSymbols + Self.tickers.map(\.symbol) + Self.metrics.map(\.symbol))
+        return symbols.compactMap { symbol -> MarketDashboardQuoteEntry? in
+            guard seen.insert(symbol).inserted else { return nil }
+            if let quote = store.quote(symbol: symbol) { return .quote(quote) }
+            return dashboard.unavailableQuote(symbol: symbol).map(MarketDashboardQuoteEntry.unavailable)
         }
     }
 
