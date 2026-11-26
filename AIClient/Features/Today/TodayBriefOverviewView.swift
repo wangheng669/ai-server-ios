@@ -216,6 +216,7 @@ struct TodayBriefProjection: Sendable {
     let sectionShortcuts: [SectionShortcut]
     fileprivate let stockSymbols: [String]
     let sourceIDs: [Int]
+    private var activityReportReferences: TodayActivityReportReferences
     private(set) var sources: [Int: TodaySourcePresentation] = [:]
     private(set) var previews: [URL: UIImage] = [:]
     private(set) var hasPreparedPreviews = false
@@ -225,12 +226,12 @@ struct TodayBriefProjection: Sendable {
         return cards[min(index, cards.count - 1)].section
     }
 
-    fileprivate func activitySource(for card: Card) -> TodayActivitySource? {
+    fileprivate func activityQuery(for card: Card) -> TodayActivityQuery? {
         let posts = card.activityPostIDs.compactMap { sources[$0]?.post }
         guard posts.count == card.activityPostIDs.count,
               let first = posts.first, let source = TodayActivitySource(post: first),
               posts.allSatisfy({ TodayActivitySource(post: $0) == source }) else { return nil }
-        return source
+        return TodayActivityQuery(source: source, reportReferences: activityReportReferences)
     }
 
     var avatarURLs: [URL] {
@@ -265,7 +266,9 @@ struct TodayBriefProjection: Sendable {
 
     mutating func addSources(_ posts: [Int: Post]) {
         for (id, post) in posts {
-            sources[id] = TodaySourcePresentation(post: post)
+            let source = TodaySourcePresentation(post: post)
+            sources[id] = source
+            activityReportReferences.include(source)
         }
     }
 
@@ -338,6 +341,10 @@ struct TodayBriefProjection: Sendable {
         var seenSymbols = Set<String>()
         stockSymbols = cards.compactMap { $0.stock?.symbol }.filter { seenSymbols.insert($0).inserted }
         sourceIDs = Set(cards.flatMap(\.postIDs)).union(cards.flatMap(\.activityPostIDs)).sorted()
+        activityReportReferences = TodayActivityReportReferences(
+            postIDs: sourceIDs,
+            cardTexts: cards.compactMap(\.text) + cards.flatMap(\.followUps)
+        )
     }
 }
 
@@ -661,8 +668,8 @@ private struct TodayBriefDeck: View {
         let card = brief.cards[selection]
         let cardHeight = summaryHeights[card.id] ?? min(350, maximumHeight)
         let stock = card.stock
-        let activitySource = brief.activitySource(for: card)
-        let activeActivitySource = rootTabIsActive && scenePhase == .active ? activitySource : nil
+        let activityQuery = brief.activityQuery(for: card)
+        let activeActivityQuery = rootTabIsActive && scenePhase == .active ? activityQuery : nil
         let stockSymbols = rootTabIsActive && scenePhase == .active ? brief.stockSymbols : []
         let visibleStockSymbol = !stockSymbols.isEmpty && !showsOriginals ? stock?.symbol : nil
         ZStack(alignment: .top) {
@@ -674,7 +681,7 @@ private struct TodayBriefDeck: View {
             VStack(spacing: 14) {
                 summaryDeck(selection: selection, width: cardWidth, height: cardHeight, maximumHeight: maximumHeight)
                 if !showsOriginals {
-                    activityRows(for: activitySource)
+                    activityRows(for: activityQuery)
                         .frame(width: cardWidth)
                 }
             }
@@ -694,9 +701,9 @@ private struct TodayBriefDeck: View {
         .contentShape(Rectangle())
         .simultaneousGesture(swipeGesture(cardWidth: cardWidth))
         .marketInstrumentDetailSheet(item: $presentedStock, store: marketStore)
-        .task(id: activeActivitySource) {
-            guard let activeActivitySource else { return }
-            await activityStore.observe(source: activeActivitySource, client: APIClient(baseURL: ServerConfiguration.currentURL))
+        .task(id: activeActivityQuery) {
+            guard let activeActivityQuery else { return }
+            await activityStore.observe(query: activeActivityQuery, client: APIClient(baseURL: ServerConfiguration.currentURL))
         }
         .task(id: visibleStockSymbol, priority: .utility) {
             guard let visibleStockSymbol else { return }
@@ -746,9 +753,9 @@ private struct TodayBriefDeck: View {
     }
 
     @ViewBuilder
-    private func activityRows(for source: TodayActivitySource?) -> some View {
-        let items = activityStore.items(for: source)
-        let refreshFailed = activityStore.refreshFailed(for: source)
+    private func activityRows(for query: TodayActivityQuery?) -> some View {
+        let items = activityStore.items(for: query)
+        let refreshFailed = activityStore.refreshFailed(for: query)
         if !items.isEmpty || refreshFailed {
             TodayActivityRows(items: items, refreshFailed: refreshFailed) { post in
                 openReading(.activity(TodaySourcePresentation(post: post)))
