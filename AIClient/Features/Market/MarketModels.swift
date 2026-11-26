@@ -264,6 +264,15 @@ enum MarketDashboardQuoteEntry: Codable, Identifiable {
         return quote
     }
 
+    var stockName: String {
+        switch self {
+        case let .quote(quote): quote.presentationName
+        case let .unavailable(quote): quote.presentationName
+        }
+    }
+
+    var stockCode: String { quote?.displayCode ?? id }
+
     init(from decoder: Decoder) throws {
         if let quote = try? MarketQuote(from: decoder) {
             self = .quote(quote)

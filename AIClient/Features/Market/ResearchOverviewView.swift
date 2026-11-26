@@ -61,7 +61,6 @@ struct ResearchHomeView: View {
     let onOpenGlobalRanking: () -> Void
     let onOpenInvestors: () -> Void
     let onOpenMarketQuotes: () -> Void
-    let onOpenAllStocks: (MarketRegion) -> Void
     let onOpenMarketDetail: (String) -> Void
     let onOpenRetailInvestors: () -> Void
     @Environment(\.rootTabIsActive) private var rootTabIsActive
@@ -286,10 +285,10 @@ struct ResearchHomeView: View {
 
     private var coreStocks: some View {
         VStack(spacing: 8) {
-            sectionHeading(store.dashboard?.componentsMeta?.label ?? "核心股票", trailing: "全部股票",
-                           status: store.isShowingCachedSnapshot ? "缓存行情" : nil) {
-                onOpenAllStocks(stockRegion)
-            }
+            sectionTitle(
+                store.dashboard?.componentsMeta?.label ?? "核心股票",
+                status: store.isShowingCachedSnapshot ? "缓存行情" : nil
+            )
             stockRegionSelector
             let entries = store.dashboard?.regionalStockEntries[stockRegion.dashboardID] ?? []
             if entries.isEmpty {
@@ -338,17 +337,7 @@ struct ResearchHomeView: View {
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
             : AnyLayout(HStackLayout(spacing: 8))
         return layout {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.title3.weight(.bold))
-                    .accessibilityAddTraits(.isHeader)
-                if let status {
-                    Text(status)
-                        .font(.caption)
-                        .foregroundStyle(ResearchStyle.muted)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            sectionTitle(title, status: status)
             Button(action: action) {
                 HStack(spacing: 4) {
                     Text(trailing).font(.footnote.weight(.medium))
@@ -366,6 +355,20 @@ struct ResearchHomeView: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("research-all-\(title)")
         }
+    }
+
+    private func sectionTitle(_ title: String, status: String?) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.title3.weight(.bold))
+                .accessibilityAddTraits(.isHeader)
+            if let status {
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle(ResearchStyle.muted)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

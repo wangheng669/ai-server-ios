@@ -75,13 +75,6 @@ struct MarketView: View {
         #endif
     }()
     @State private var showsMarketQuotes = false
-    @State private var selectedStockRegion: MarketRegion? = {
-        #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("--market-core-stocks-preview") ? .unitedStates : nil
-        #else
-        nil
-        #endif
-    }()
     @State private var selectedDetail: MarketDetailRoute? = {
         #if DEBUG
         if let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--market-detail-symbol=") }) {
@@ -101,7 +94,7 @@ struct MarketView: View {
     @Environment(\.rootTabIsActive) private var rootTabIsActive
 
     private var isResearchVisible: Bool {
-        rootTabIsActive && selectedDetail == nil && !showsMarketQuotes && selectedStockRegion == nil
+        rootTabIsActive && selectedDetail == nil && !showsMarketQuotes
             && !showsRetailInvestors && !showsInvestors && !showsGlobalRanking
     }
 
@@ -130,9 +123,6 @@ struct MarketView: View {
             },
             onOpenMarketQuotes: {
                 showsMarketQuotes = true
-            },
-            onOpenAllStocks: { region in
-                selectedStockRegion = region
             },
             onOpenMarketDetail: { symbol in
                 #if DEBUG
@@ -170,13 +160,6 @@ struct MarketView: View {
         }
         .appSheet(isPresented: $showsMarketQuotes) {
             MarketQuotesSheet(store: store)
-                .appPresentationDetents([.large])
-                .appPresentationCornerRadius(28)
-                .appPresentationBackground(MarketStyle.surface)
-                .appPresentationScrollsWithoutExpanding()
-        }
-        .appSheet(item: $selectedStockRegion) { region in
-            MarketStocksSheet(region: region, store: store)
                 .appPresentationDetents([.large])
                 .appPresentationCornerRadius(28)
                 .appPresentationBackground(MarketStyle.surface)
