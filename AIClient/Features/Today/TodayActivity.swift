@@ -276,11 +276,20 @@ private struct TodayActivitySummary: View {
     private var isActive: Bool { rootTabIsActive && scenePhase == .active }
 
     var body: some View {
-        if item.post.xBodyContainsOnlyLinks {
+        if item.post.isXueqiu {
+            Text(xueqiuSummary)
+        } else if item.post.xBodyContainsOnlyLinks {
             linkPreview
         } else {
             translatedSummary
         }
+    }
+
+    private var xueqiuSummary: String {
+        let body = item.post.xueqiuBodyContent
+        let replyChain = body.range(of: #"//\s*@"#, options: .regularExpression)
+        let ownText = replyChain.map { body[..<$0.lowerBound] } ?? body[...]
+        return ownText.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 
     @ViewBuilder private var linkPreview: some View {
