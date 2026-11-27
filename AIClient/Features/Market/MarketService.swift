@@ -143,6 +143,7 @@ struct MarketService: Sendable {
             bypassCache: true
         ).data
         guard history.dataContract == MarketCompanyValuationHistory.dataContractV2,
+              history.symbol == symbol,
               history.frequency == MarketCompanyValuationHistory.dailyFrequency,
               history.method == MarketCompanyValuationHistory.dailyMethod else {
             throw MarketServiceError.invalidResponse

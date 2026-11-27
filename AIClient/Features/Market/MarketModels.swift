@@ -239,12 +239,22 @@ struct MarketDashboard: Codable {
 }
 
 enum MarketDashboardQuoteEntry: Codable, Identifiable {
-    struct Unavailable: Codable, Identifiable {
+    struct Unavailable: Codable, Identifiable, MarketCompanyFundamentals {
         let symbol: String
         let name: String?
         let displayName: String?
         let currency: String?
         let quality: MarketQuoteQuality
+        let marketCap: Double?
+        let peStatic: Double?
+        let pe: Double?
+        let netIncomeTTM: Double?
+        let week52Low: Double?
+        let fundamentalsCurrency: String?
+        let fiscalYear: String?
+        let fundamentalsSource: String?
+        let fundamentalsAsOf: String?
+        let dailyStreak: MarketDailyStreak?
 
         var id: String { symbol }
         var presentationName: String { displayName ?? name ?? symbol }
@@ -417,7 +427,37 @@ struct MarketQuoteQuality: Codable, Hashable {
     }
 }
 
-struct MarketQuote: Codable, Identifiable, Hashable {
+protocol MarketCompanyFundamentals {
+    var marketCap: Double? { get }
+    var peStatic: Double? { get }
+    var pe: Double? { get }
+    var netIncomeTTM: Double? { get }
+    var week52Low: Double? { get }
+    var currency: String? { get }
+    var fundamentalsCurrency: String? { get }
+    var fiscalYear: String? { get }
+    var fundamentalsSource: String? { get }
+    var fundamentalsAsOf: String? { get }
+}
+
+struct MarketDailyStreak: Codable, Hashable {
+    let status: String
+    let direction: String
+    let days: Int
+    let tradingDate: String
+    let atLeast: Bool
+
+    var detailText: String? {
+        guard status == "available", !tradingDate.isEmpty else { return nil }
+        if direction == "flat", days == 0 { return "持平 · \(tradingDate)" }
+        guard days > 0, direction == "up" || direction == "down" else { return nil }
+        let move = direction == "up" ? "连涨" : "连跌"
+        let length = atLeast ? "至少 \(days) 日" : "\(days) 日"
+        return "\(move) \(length) · \(tradingDate)"
+    }
+}
+
+struct MarketQuote: Codable, Identifiable, Hashable, MarketCompanyFundamentals {
     var id: String { symbol }
     let symbol: String
     let name: String
@@ -445,6 +485,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
     var fiscalYear: String?
     var fundamentalsSource: String?
     var fundamentalsAsOf: String?
+    let dailyStreak: MarketDailyStreak?
     let volume: Double?
     let turnover: Double?
     let dataSource: String?
@@ -529,6 +570,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         case symbol, name, displayName, instrumentType, proxyFor, referenceSymbol, historicalSymbol, displayMode, priceUnit
         case price, openPrice, previousClose, high, low, pe, marketCap, peStatic, peType, netIncomeTTM, week52Low
         case currency, listingCountryCode, fundamentalsCurrency, fiscalYear, fundamentalsSource, fundamentalsAsOf, volume, turnover
+        case dailyStreak
         case dataSource, delaySeconds, marketSession, sessionPrice, sessionChangePercent, sessionDataSource
         case changePercent, timestamp, receivedAt, quality, trend, nightTrend, stale
     }
@@ -560,6 +602,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         fiscalYear: String? = nil,
         fundamentalsSource: String? = nil,
         fundamentalsAsOf: String? = nil,
+        dailyStreak: MarketDailyStreak? = nil,
         volume: Double?,
         turnover: Double?,
         dataSource: String?,
@@ -603,6 +646,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         self.fiscalYear = fiscalYear
         self.fundamentalsSource = fundamentalsSource
         self.fundamentalsAsOf = fundamentalsAsOf
+        self.dailyStreak = dailyStreak
         self.volume = volume
         self.turnover = turnover
         self.dataSource = dataSource
@@ -649,6 +693,7 @@ struct MarketQuote: Codable, Identifiable, Hashable {
         fiscalYear = try values.decodeIfPresent(String.self, forKey: .fiscalYear)
         fundamentalsSource = try values.decodeIfPresent(String.self, forKey: .fundamentalsSource)
         fundamentalsAsOf = try values.decodeIfPresent(String.self, forKey: .fundamentalsAsOf)
+        dailyStreak = try values.decodeIfPresent(MarketDailyStreak.self, forKey: .dailyStreak)
         volume = try values.decodeIfPresent(Double.self, forKey: .volume)
         turnover = try values.decodeIfPresent(Double.self, forKey: .turnover)
         dataSource = try values.decodeIfPresent(String.self, forKey: .dataSource)
@@ -778,6 +823,7 @@ struct MarketQuoteUpdate: Decodable {
             pe: current?.pe,
             marketCap: current?.marketCap,
             listingCountryCode: current?.listingCountryCode,
+            dailyStreak: current?.dailyStreak,
             volume: volume ?? current?.volume,
             turnover: turnover ?? current?.turnover,
             dataSource: dataSource ?? current?.dataSource,

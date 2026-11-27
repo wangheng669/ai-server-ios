@@ -444,6 +444,10 @@ final class MarketStore {
         return constituentsBySymbol[symbol]
     }
 
+    func companyValuationHistory(symbol: String) async throws -> MarketCompanyValuationHistory {
+        try await service.companyValuationHistory(symbol: symbol)
+    }
+
     func loadCompanyLogo(symbol: String, name: String) async {
         guard companyLogoPaths[symbol] == nil else { return }
         guard loadingCompanyLogoSymbols.insert(symbol).inserted else { return }
