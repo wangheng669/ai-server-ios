@@ -31,6 +31,13 @@ struct IndustryPayload: Decodable, Identifiable {
         let source: Source
     }
 
+    struct ProfitMargin: Decodable {
+        let percent: Double
+        let scope: String
+        let period: String
+        let source: Scale.Source
+    }
+
     struct HistoryPoint: Decodable, Identifiable {
         let year: Int
         let value: Double
@@ -103,6 +110,7 @@ struct IndustryPayload: Decodable, Identifiable {
     let subtitle: String
     let icon: String
     let scale: Scale
+    let profitMargin: ProfitMargin?
     let history: [HistoryPoint]?
     let autoSales: AutoSales?
     let anchors: [String]
@@ -114,6 +122,7 @@ struct IndustryPayload: Decodable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id, title, subtitle, icon, scale, history, anchors, chain, companies, insights, provenance
         case autoSales = "auto_sales"
+        case profitMargin = "profit_margin"
     }
 }
 
@@ -427,6 +436,7 @@ private struct IndustryOverview: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             summary
+            profitMarginSection
             if !industry.subtitle.isEmpty {
                 Text(industry.subtitle)
                     .font(.footnote)
@@ -480,6 +490,29 @@ private struct IndustryOverview: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .researchPanel(fill: ResearchDesign.fill)
+    }
+
+    private var profitMarginSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("行业利润率").font(.headline).accessibilityAddTraits(.isHeader)
+            if let margin = industry.profitMargin {
+                Text(margin.scope)
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text((margin.percent / 100).formatted(.percent.precision(.fractionLength(2))))
+                    .font(.title2.weight(.semibold)).monospacedDigit()
+                Text("利润总额 ÷ 营业收入")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                IndustrySourceNote(source: margin.source, period: margin.period)
+            } else {
+                Text("暂无可核实数据")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .researchPanel()
     }
 
     private func monthlyHeadline(_ sales: IndustryPayload.AutoSales, latest: IndustryPayload.AutoSales.Month) -> some View {
