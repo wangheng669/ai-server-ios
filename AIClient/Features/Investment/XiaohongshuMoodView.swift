@@ -402,11 +402,11 @@ private struct XiaohongshuNoteReader: View {
             .padding(.top, 24)
             .padding(.bottom, 80)
             .frame(maxWidth: .infinity)
+            .measureReadingSheetContent(when: true)
         }
         .background(InvestmentDesign.surface)
         .overlay(alignment: .bottom) { controls }
         .accessibilityAction(.escape) { onClose() }
-        .accessibilityIdentifier("xiaohongshu-note-reader")
         .alert("无法打开小红书原帖", isPresented: $openFailed) {
             Button("好", role: .cancel) {}
         } message: {

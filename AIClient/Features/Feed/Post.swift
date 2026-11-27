@@ -2649,6 +2649,9 @@ enum MediaURL {
         guard let scheme = direct.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return direct }
         guard let host = direct.host?.lowercased() else { return direct }
         if host == ServerConfiguration.currentURL.host?.lowercased() { return direct }
+        if proxy == "image-proxy", scheme == "https", host.hasSuffix(".xhscdn.com") {
+            return direct
+        }
         if let hosts,
            !hosts.contains(where: { host == $0 || host.hasSuffix(".\($0)") }) {
             return direct
