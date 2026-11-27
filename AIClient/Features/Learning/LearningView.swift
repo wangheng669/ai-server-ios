@@ -74,7 +74,7 @@ struct LearningView: View {
             await overview
         }
         .scrollIndicators(.hidden)
-        .background(KnowledgePagePalette.surface.ignoresSafeArea())
+        .background(KnowledgePagePalette.canvas.ignoresSafeArea())
         .accessibilityIdentifier("knowledge-home")
         .appSheet(item: $presentedSection, onDismiss: resetSectionSelection) { section in
             knowledgeSection(section)
@@ -126,19 +126,19 @@ struct LearningView: View {
     }
 
     private var knowledgeHome: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            Text("知识")
-                .font(.largeTitle.bold())
-                .accessibilityAddTraits(.isHeader)
+        VStack(alignment: .leading, spacing: 23) {
+            KnowledgePageHeading(title: "知识")
             if let notice = store.savedContentNotice {
                 Label(notice, systemImage: "clock.arrow.circlepath")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("knowledge-saved-content")
             }
+
             investmentOverview
+
             VStack(alignment: .leading, spacing: 10) {
-                knowledgeHeading("阅读")
+                KnowledgeSectionHeading("阅读")
                 let layout = dynamicTypeSize.isAccessibilitySize
                     ? AnyLayout(VStackLayout(spacing: 10))
                     : AnyLayout(HStackLayout(alignment: .top, spacing: 10))
@@ -147,102 +147,95 @@ struct LearningView: View {
                     conceptCollection
                 }
             }
-            VStack(alignment: .leading, spacing: 7) {
-                knowledgeHeading("探索")
+
+            VStack(alignment: .leading, spacing: 9) {
+                KnowledgeSectionHeading("探索")
                 explorationDirectory
             }
         }
-        .frame(maxWidth: 600)
-        .padding(.horizontal, 18)
-        .padding(.top, 10)
-        .padding(.bottom, 20)
+        .frame(maxWidth: 610)
+        .padding(.horizontal, 20)
+        .padding(.top, 15)
+        .padding(.bottom, 26)
         .frame(maxWidth: .infinity)
     }
 
     private var investmentOverview: some View {
         let milestones = LearningMilestone.plan(from: store.catalog?.stockTopics ?? [])
         let completed = progressStore.completedCount(in: milestones.map(\.topic))
-        let currentIndex = milestones.firstIndex { !progressStore.isCompleted($0.topic.id) }
+        let index = milestones.firstIndex { !progressStore.isCompleted($0.topic.id) }
+            ?? milestones.indices.last
 
-        return VStack(spacing: 0) {
-            if let index = currentIndex ?? milestones.indices.last {
+        return VStack(alignment: .leading, spacing: 0) {
+            Button {
+                presentedSection = .investment
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: KnowledgeSection.investment.icon)
+                        .font(.body.weight(.semibold))
+                        .frame(width: 37, height: 37)
+                        .background(.white.opacity(0.12), in: .rect(cornerRadius: 10))
+                        .accessibilityHidden(true)
+
+                    Text("投资学习")
+                        .font(.title3.weight(.semibold))
+
+                    Spacer()
+
+                    Image(systemName: "arrow.up.right")
+                        .font(.footnote.weight(.semibold))
+                        .accessibilityHidden(true)
+                }
+                .padding(.horizontal, 17)
+                .padding(.vertical, 12)
+            }
+            .buttonStyle(LearningPressStyle())
+            .accessibilityIdentifier("knowledge-investment-entry")
+
+            Rectangle()
+                .fill(.white.opacity(0.18))
+                .frame(height: 1)
+                .padding(.horizontal, 17)
+
+            if let index {
                 let milestone = milestones[index]
-                let actionTitle = completed == milestones.count ? "复习课程" : "继续学习"
                 Button {
                     resumedLesson = route(for: milestone, at: index, total: milestones.count)
                 } label: {
                     VStack(alignment: .leading, spacing: 9) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text("股票入门")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(KnowledgePagePalette.accent)
-                            Spacer(minLength: 8)
-                            HStack(spacing: 5) {
-                                Text(actionTitle)
-                                Image(systemName: "arrow.right")
-                                    .accessibilityHidden(true)
-                            }
+                        Text("股票入门 · \(completed == milestones.count ? "复习课程" : "继续学习")")
                             .font(.footnote.weight(.semibold))
-                            .foregroundStyle(KnowledgePagePalette.accent)
-                        }
+                            .foregroundStyle(KnowledgePagePalette.heroTint)
 
                         Text(milestone.title)
-                            .font(.title3.bold())
-                            .foregroundStyle(.primary)
+                            .font(.title2.weight(.semibold))
                             .multilineTextAlignment(.leading)
 
                         ProgressView(value: Double(completed), total: Double(milestones.count))
-                            .tint(KnowledgePagePalette.accent)
+                            .tint(KnowledgePagePalette.heroTint)
                             .accessibilityHidden(true)
 
                         Text("已完成 \(completed) / \(milestones.count) 节")
                             .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.white.opacity(0.82))
                     }
-                    .padding(15)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(KnowledgePagePalette.accent.opacity(0.065))
+                    .padding(17)
                 }
                 .buttonStyle(LearningPressStyle())
                 .accessibilityIdentifier("knowledge-investment-resume")
+            } else {
+                Text(store.errorMessage != nil && store.catalog == nil
+                     ? "学习路径载入失败"
+                     : knowledgeStatus(count: store.videoLibrary?.lessons.count,
+                                       unit: "节视频课", error: store.videoLibraryErrorMessage))
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.82))
+                    .padding(17)
             }
-
-            investmentEntry(hasPath: !milestones.isEmpty)
         }
-        .knowledgeCard(cornerRadius: 18)
-    }
-
-    private func investmentEntry(hasPath: Bool) -> some View {
-        let lesson = store.videoLibrary?.lessons.first
-        let courseStatus: String
-        if !hasPath, store.errorMessage != nil {
-            courseStatus = "学习路径载入失败"
-        } else {
-            courseStatus = knowledgeStatus(
-                count: store.videoLibrary?.lessons.count,
-                unit: "节视频课",
-                error: store.videoLibraryErrorMessage
-            )
-        }
-
-        return Button {
-            presentedSection = .investment
-        } label: {
-            KnowledgeDirectoryRow(title: "投资学习", subtitle: courseStatus) {
-                KnowledgeHomeImage(url: lesson?.coverURL, size: CGSize(width: 112, height: 74)) { image in
-                    if let image {
-                        image.resizable().scaledToFill()
-                    } else {
-                        knowledgeSymbol(.investment)
-                    }
-                }
-                .frame(width: 62, height: 42)
-                .clipShape(.rect(cornerRadius: 8))
-            }
-            .padding(.horizontal, 12)
-        }
-        .buttonStyle(LearningPressStyle())
-        .accessibilityIdentifier("knowledge-investment-entry")
+        .foregroundStyle(.white)
+        .background(KnowledgePagePalette.hero, in: .rect(cornerRadius: 20))
     }
 
     private var bookCollection: some View {
@@ -308,13 +301,13 @@ struct LearningView: View {
                 }
             }
 
-            Divider().padding(.leading, 66)
+            Divider().padding(.leading, 64)
 
             directoryEntry(.ideology, subtitle: directoryStatus(for: ideologyPeople.count)) {
                 knowledgeSymbol(.ideology)
             }
 
-            Divider().padding(.leading, 66)
+            Divider().padding(.leading, 64)
 
             directoryEntry(.city, subtitle: "广东 · 21 个城市") {
                 Image("ShenzhenSkyline")
@@ -322,6 +315,8 @@ struct LearningView: View {
                     .scaledToFill()
             }
         }
+        .padding(.horizontal, 5)
+        .knowledgeCard(cornerRadius: 17)
     }
 
     private func directoryEntry<Artwork: View>(
@@ -343,18 +338,12 @@ struct LearningView: View {
         .accessibilityIdentifier(section.entryIdentifier)
     }
 
-    private func knowledgeHeading(_ title: String) -> some View {
-        Text(title)
-            .font(.headline)
-            .accessibilityAddTraits(.isHeader)
-    }
-
     private func knowledgeSymbol(_ section: KnowledgeSection) -> some View {
         Image(systemName: section.icon)
-            .font(.system(size: 20, weight: .medium))
+            .font(.body.weight(.medium))
             .foregroundStyle(section.tint)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(section.tint.opacity(0.09))
+            .background(section.tint.opacity(0.11))
     }
 
     private func directoryStatus(for count: Int) -> String {
@@ -376,18 +365,18 @@ struct LearningView: View {
     private func knowledgeSection(_ section: KnowledgeSection) -> some View {
         switch section {
         case .investment:
-            KnowledgeSectionPanel(title: section.title) {
+            KnowledgeSectionPanel(section: section) {
                 investmentContent
             }
             .appSheet(item: $selectedRoute) { route in
                 lessonDetail(route)
             }
         case .books:
-            KnowledgeSectionPanel(title: section.title) {
+            KnowledgeSectionPanel(section: section) {
                 booksContent
             }
         case .concepts:
-            KnowledgeSectionPanel(title: section.title) {
+            KnowledgeSectionPanel(section: section) {
                 conceptsContent
             }
             .appSheet(item: $selectedConcept) { concept in
@@ -401,6 +390,7 @@ struct LearningView: View {
                             url: url
                         )
                     )
+                    .environment(\.wikipediaReaderChrome, .knowledge)
                     .wikipediaReaderPresentation()
                 }
             }
@@ -413,10 +403,9 @@ struct LearningView: View {
             }
             #endif
         case .ideology:
-            KnowledgeSectionPanel(title: section.title) {
+            KnowledgeSectionPanel(section: section) {
                 ideologyCampPicker
                     .padding(.horizontal, 20)
-                    .padding(.bottom, 10)
                 ideologyContent
             }
             .appSheet(isPresented: ideologyPersonIsPresented) {
@@ -465,13 +454,17 @@ struct LearningView: View {
 
     @ViewBuilder
     private var investmentContent: some View {
-        videoLessons
-        if let catalog = store.catalog {
-            let milestones = LearningMilestone.plan(from: catalog.stockTopics)
+        let milestones = LearningMilestone.plan(from: store.catalog?.stockTopics ?? [])
+        if store.catalog != nil {
+            if store.errorMessage != nil {
+                Label("学习路径更新失败", systemImage: "clock.arrow.circlepath")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 20)
+            }
             WeeklyStudyCard(studiedDays: progressStore.studyDays())
                 .padding(.horizontal, 20)
             learningPath(milestones)
-            savedTopics(in: catalog, excluding: Set(milestones.map(\.topic.id)))
         } else if store.isLoading {
             InvestmentContentLoadingView()
         } else {
@@ -483,28 +476,24 @@ struct LearningView: View {
                 Button("重试") { Task { await store.load(force: true) } }
             }
             .frame(maxWidth: .infinity)
-            .padding(.top, 60)
+            .padding(.vertical, 14)
+        }
+        videoLessons
+        if let catalog = store.catalog {
+            savedTopics(in: catalog, excluding: Set(milestones.map(\.topic.id)))
         }
     }
 
     @ViewBuilder
     private var videoLessons: some View {
         if let lessons = store.videoLibrary?.lessons, !lessons.isEmpty {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("小Lin说")
-                        .font(.system(size: 20, weight: .bold, design: .serif))
-                    Text("投资视频课")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(KnowledgePagePalette.supportingText)
-                    Spacer()
-                    Label("\(lessons.count) 期", systemImage: "play.circle.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(KnowledgePagePalette.accent)
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
-                .padding(.bottom, 12)
+            VStack(alignment: .leading, spacing: 11) {
+                KnowledgeSectionHeading("小Lin说 · 投资视频课", detail: knowledgeStatus(
+                    count: lessons.count,
+                    unit: "期",
+                    error: store.videoLibraryErrorMessage
+                ))
+                    .padding(.horizontal, 20)
 
                 ScrollView(.horizontal) {
                     LazyHStack(spacing: 13) {
@@ -518,10 +507,11 @@ struct LearningView: View {
                             .accessibilityIdentifier("knowledge-video-\(lesson.id)")
                         }
                     }
-                    .padding(.horizontal, 20)
+                    .scrollTargetLayout()
                 }
+                .contentMargins(.horizontal, 20, for: .scrollContent)
+                .scrollTargetBehavior(.viewAligned)
                 .scrollIndicators(.hidden)
-                .padding(.bottom, 18)
             }
         } else if store.isVideoLibraryLoading {
             ContentLoadingPlaceholder(title: "正在载入课程视频", layout: .cards)
@@ -538,11 +528,8 @@ struct LearningView: View {
 
     @ViewBuilder
     private func learningPath(_ milestones: [LearningMilestone]) -> some View {
-        Text("股票入门路径")
-            .font(.system(size: 24, weight: .bold, design: .serif))
+        KnowledgeSectionHeading("股票入门路径", detail: milestones.isEmpty ? nil : "\(milestones.count) 节")
             .padding(.horizontal, 20)
-            .padding(.top, 26)
-            .padding(.bottom, 13)
 
         if milestones.isEmpty {
             ContentUnavailableView(
@@ -567,16 +554,25 @@ struct LearningView: View {
                             title: milestone.title,
                             topic: milestone.topic,
                             isCurrent: index == currentIndex,
-                            isCompleted: progressStore.isCompleted(milestone.topic.id),
-                            isLast: index == milestones.count - 1,
-                            completedCount: completedCount,
-                            totalCount: milestones.count
+                            isCompleted: progressStore.isCompleted(milestone.topic.id)
                         )
                     }
                     .buttonStyle(LearningPressStyle())
                     .accessibilityIdentifier("knowledge-lesson-\(milestone.topic.id)")
+                    if index != milestones.indices.last {
+                        Divider().padding(.leading, 53)
+                    }
                 }
+
+                ProgressView(value: Double(completedCount), total: Double(milestones.count)) {
+                    Text("已完成 \(completedCount) / \(milestones.count) 节")
+                        .font(.footnote.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                .tint(KnowledgePagePalette.accent)
+                .padding(13)
             }
+            .knowledgeCard()
             .padding(.horizontal, 20)
         }
     }
@@ -592,15 +588,8 @@ struct LearningView: View {
         if topics.isEmpty {
             EmptyView()
         } else {
-            Divider()
+            KnowledgeSectionHeading("稍后阅读")
                 .padding(.horizontal, 20)
-                .padding(.top, 20)
-
-            Text("稍后阅读")
-                .font(.system(size: 21, weight: .bold, design: .serif))
-                .padding(.horizontal, 20)
-                .padding(.top, 18)
-                .padding(.bottom, 7)
 
             VStack(spacing: 0) {
                 ForEach(topics) { topic in
@@ -621,87 +610,65 @@ struct LearningView: View {
 
     @ViewBuilder
     private var booksContent: some View {
-        let books = store.bookshelf?.books ?? []
-        if let bookshelf = store.bookshelf, !books.isEmpty {
-            Text("\(books.count) 本 · \(bookshelf.source)")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 12)
-        }
+        if let bookshelf = store.bookshelf, let book = bookshelf.books.first {
+            VStack(alignment: .leading, spacing: 13) {
+                Text(bookshelf.source + " · " + knowledgeStatus(
+                    count: bookshelf.books.count,
+                    unit: "本",
+                    error: store.bookshelfErrorMessage
+                ))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
 
-        if store.isBookshelfLoading && store.bookshelf == nil {
-            ContentLoadingPlaceholder(title: "正在载入书架", layout: .cards)
-        } else if store.bookshelfErrorMessage != nil && store.bookshelf == nil {
-            ContentUnavailableView {
-                Label("书架载入失败", systemImage: "wifi.exclamationmark")
-            } description: {
-                Text("请稍后重试")
-            } actions: {
-                Button("重新载入") {
-                    Task { await store.loadBookshelf(force: true) }
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.top, 36)
-        } else if books.isEmpty {
-            ContentUnavailableView(
-                "暂无可展示书籍",
-                systemImage: "books.vertical",
-                description: Text("稍后重新进入页面查看")
-            )
-            .frame(maxWidth: .infinity)
-            .padding(.top, 40)
-        } else {
-            BooksReadingSummaryCard(
-                bookshelf: store.bookshelf,
-                reminder: readingReminder
-            )
-            .padding(.horizontal, 20)
-            .padding(.bottom, 16)
-
-            if let book = books.first {
                 Button {
-                    if let url = book.openURL {
-                        openURL(url)
-                    }
+                    if let url = book.openURL { openURL(url) }
                 } label: {
-                    BookReadingDeskCard(
-                        book: book,
-                        source: store.bookshelf?.source ?? "微信读书"
-                    )
+                    BookReadingDeskCard(book: book, source: bookshelf.source)
                 }
                 .buttonStyle(LearningPressStyle())
-                .padding(.horizontal, 20)
+                .disabled(book.openURL == nil)
 
-                if books.count > 1 {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("书架")
-                            .font(.system(size: 17, weight: .bold, design: .serif))
+                BooksReadingSummaryCard(bookshelf: bookshelf, reminder: readingReminder)
+            }
+            .padding(.horizontal, 20)
 
-                        ForEach(Array(books.dropFirst().enumerated()), id: \.element.id) { index, recentBook in
+            if bookshelf.books.count > 1 {
+                VStack(alignment: .leading, spacing: 10) {
+                    KnowledgeSectionHeading("最近阅读")
+                    VStack(spacing: 0) {
+                        ForEach(Array(bookshelf.books.dropFirst().enumerated()), id: \.element.id) { index, recentBook in
                             Button {
-                                if let url = recentBook.openURL {
-                                    openURL(url)
-                                }
+                                if let url = recentBook.openURL { openURL(url) }
                             } label: {
-                                RecentKnowledgeBookRow(
-                                    book: recentBook,
-                                    paletteIndex: index + 1
-                                )
+                                RecentKnowledgeBookRow(book: recentBook, paletteIndex: index + 1)
+                                    .padding(.horizontal, 12)
                             }
                             .buttonStyle(LearningPressStyle())
+                            .disabled(recentBook.openURL == nil)
 
-                            if recentBook.id != books.last?.id {
-                                Divider()
-                                    .padding(.leading, 76)
+                            if recentBook.id != bookshelf.books.last?.id {
+                                Divider().padding(.leading, 88)
                             }
                         }
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 22)
+                    .knowledgeCard()
                 }
+                .padding(.horizontal, 20)
             }
+        } else if store.isBookshelfLoading && store.bookshelf == nil {
+            ContentLoadingPlaceholder(title: "正在载入书架", layout: .cards)
+        } else if let error = store.bookshelfErrorMessage, store.bookshelf == nil {
+            ContentUnavailableView {
+                Label("书架载入失败", systemImage: "wifi.exclamationmark")
+            } description: {
+                Text(error)
+            } actions: {
+                Button("重新载入") { Task { await store.loadBookshelf(force: true) } }
+            }
+            .frame(maxWidth: .infinity)
+        } else {
+            ContentUnavailableView("暂无书籍", systemImage: "books.vertical")
+                .frame(maxWidth: .infinity)
         }
     }
 
@@ -709,42 +676,22 @@ struct LearningView: View {
     private var conceptsContent: some View {
         if let library = store.conceptLibrary {
             let concepts = shuffledConcepts.isEmpty ? library.concepts : shuffledConcepts
-            VStack(alignment: .leading, spacing: 0) {
+            Group {
                 if concepts.isEmpty {
-                    ContentUnavailableView(
-                        "暂无概念",
-                        systemImage: "rectangle.stack",
-                        description: Text("稍后重新进入页面查看")
-                    )
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 36)
+                    ContentUnavailableView("暂无概念", systemImage: "rectangle.stack")
+                        .frame(maxWidth: .infinity)
                 } else {
-                    GeometryReader { proxy in
-                        ScrollView(.horizontal) {
-                            LazyHStack(spacing: 12) {
-                                ForEach(Array(concepts.enumerated()), id: \.element.id) { index, concept in
-                                    KnowledgeConceptCarouselCard(
-                                        concept: concept,
-                                        index: index,
-                                        count: concepts.count,
-                                        width: max(280, proxy.size.width - 40),
-                                        height: proxy.size.height
-                                    )
-                                    .frame(width: max(280, proxy.size.width - 40))
-                                    .id(concept.id)
-                                    .onTapGesture {
-                                        selectedConcept = concept
-                                    }
-                                }
-                            }
-                            .scrollTargetLayout()
+                    if store.conceptLibraryErrorMessage != nil {
+                        Label("概念更新失败", systemImage: "clock.arrow.circlepath")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                             .padding(.horizontal, 20)
-                        }
-                        .scrollIndicators(.hidden)
-                        .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
-                        .scrollPosition(id: $selectedConceptID)
                     }
-                    .frame(height: 540)
+                    KnowledgeConceptDeck(
+                        concepts: concepts,
+                        selectedID: $selectedConceptID,
+                        open: { selectedConcept = $0 }
+                    )
                 }
             }
             .onChange(of: library.concepts, initial: true) { _, loadedConcepts in
@@ -833,7 +780,7 @@ struct LearningView: View {
             .frame(maxWidth: .infinity)
             .padding(.top, 36)
         } else {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 17) {
                 ForEach(visibleIdeologyCamps) { camp in
                     ideologyCampSection(
                         title: camp.title,
@@ -855,44 +802,32 @@ struct LearningView: View {
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 4)
+            .padding(.horizontal, 20)
         }
     }
 
     private var ideologyCampPicker: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 5) {
             ForEach(IdeologyCampFilter.allCases) { filter in
                 Button {
-                    withAnimation(.snappy(duration: 0.2)) {
-                        ideologyCampFilter = filter
-                    }
+                    ideologyCampFilter = filter
                 } label: {
                     Text(filter.title)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(ideologyCampFilter == filter ? Color.primary : Color.secondary)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(ideologyCampFilter == filter ? KnowledgePagePalette.graph : .secondary)
                         .frame(maxWidth: .infinity)
                         .frame(minHeight: 44)
-                        .background {
-                            if ideologyCampFilter == filter {
-                                Capsule()
-                                    .fill(KnowledgePagePalette.surface)
-                                    .overlay {
-                                        Capsule()
-                                            .stroke(KnowledgePagePalette.stroke, lineWidth: 0.8)
-                                    }
-                            }
-                        }
+                        .background(
+                            KnowledgePagePalette.graph.opacity(ideologyCampFilter == filter ? 0.12 : 0),
+                            in: .rect(cornerRadius: 11)
+                        )
                 }
                 .buttonStyle(.plain)
+                .accessibilityAddTraits(ideologyCampFilter == filter ? .isSelected : [])
             }
         }
-        .padding(3)
-        .background(Color.primary.opacity(0.035), in: Capsule())
-        .overlay {
-            Capsule()
-                .stroke(KnowledgePagePalette.stroke, lineWidth: 0.7)
-        }
+        .padding(4)
+        .knowledgeCard(cornerRadius: 15)
         .sensoryFeedback(.selection, trigger: ideologyCampFilter)
     }
 
@@ -901,40 +836,42 @@ struct LearningView: View {
         color: Color,
         people: [SpecialPerson]
     ) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 11) {
             HStack(spacing: 8) {
-                Circle()
+                Capsule()
                     .fill(color)
-                    .frame(width: 8, height: 8)
-                Text(title)
-                    .font(.system(size: 17, weight: .semibold))
-                Text("\(people.count)")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .frame(width: 4, height: 17)
+                    .accessibilityHidden(true)
+                KnowledgeSectionHeading(title, detail: "\(people.count) 位")
             }
 
-            LazyVGrid(
-                columns: Array(
-                    repeating: GridItem(.flexible(), spacing: 8, alignment: .top),
-                    count: 5
-                ),
-                alignment: .leading,
-                spacing: 10
-            ) {
-                ForEach(people) { person in
-                    Button {
-                        selectedIdeologyPerson = person
-                    } label: {
-                        IdeologyPersonGridCell(
-                            person: person,
-                            baseURL: peopleStore.baseURL
-                        )
+            if people.isEmpty {
+                Text("暂无收录")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 8)
+            } else {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 125 : 73), spacing: 8)],
+                    alignment: .leading,
+                    spacing: 8
+                ) {
+                    ForEach(people) { person in
+                        Button {
+                            selectedIdeologyPerson = person
+                        } label: {
+                            IdeologyPersonGridCell(person: person, baseURL: peopleStore.baseURL)
+                                .padding(.vertical, 10)
+                                .background(color.opacity(0.07), in: .rect(cornerRadius: 12))
+                        }
+                        .buttonStyle(LearningPressStyle())
+                        .accessibilityIdentifier("ideology-person-\(person.id)")
                     }
-                    .buttonStyle(LearningPressStyle())
-                    .accessibilityIdentifier("ideology-person-\(person.id)")
                 }
             }
         }
+        .padding(13)
+        .knowledgeCard()
     }
 
     private var visibleIdeologyCamps: [IdeologyCamp] {
@@ -1012,9 +949,11 @@ private enum KnowledgeSection: String, Identifiable {
     var tint: Color {
         switch self {
         case .investment: KnowledgePagePalette.accent
-        case .books, .people: Color(red: 0.23, green: 0.40, blue: 0.32)
-        case .concepts: Color(red: 0.59, green: 0.33, blue: 0.16)
-        case .ideology, .city: Color(red: 0.30, green: 0.33, blue: 0.54)
+        case .books: KnowledgePagePalette.reading
+        case .concepts: KnowledgePagePalette.archive
+        case .people: KnowledgePagePalette.accent
+        case .ideology: KnowledgePagePalette.graph
+        case .city: KnowledgePagePalette.atlas
         }
     }
 }
@@ -1029,36 +968,33 @@ private struct KnowledgeCollectionTile<Artwork: View>: View {
 
     var body: some View {
         Button(action: open) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .top, spacing: 4) {
-                    Text(section.title)
-                        .font(.subheadline.weight(.semibold))
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 3)
-                        .accessibilityHidden(true)
-                }
-
-                HStack(alignment: .center, spacing: 7) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
                     artwork()
                         .accessibilityHidden(true)
-                    if let itemTitle {
-                        Text(itemTitle)
-                            .font(.footnote.weight(.medium))
-                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 3)
-                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "arrow.up.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(section.tint)
+                        .accessibilityHidden(true)
                 }
-
-                Text(status)
-                    .font(.caption.monospacedDigit())
+                Text(section.title)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Text(itemTitle ?? status)
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                if itemTitle != nil {
+                    Text(status)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(section.tint)
+                }
             }
             .multilineTextAlignment(.leading)
-            .padding(11)
+            .padding(13)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .knowledgeCard(cornerRadius: 14)
+            .background(section.tint.opacity(0.075), in: .rect(cornerRadius: 17))
         }
         .buttonStyle(LearningPressStyle())
         .accessibilityIdentifier(section.entryIdentifier)
@@ -1098,37 +1034,79 @@ private struct KnowledgeDirectoryRow<Artwork: View>: View {
 }
 
 private struct KnowledgeSectionPanel<Content: View>: View {
-    let title: String
+    let section: KnowledgeSection
     @ViewBuilder let content: () -> Content
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(spacing: 0) {
-            Text(title)
-                .font(.title2.bold())
-                .accessibilityAddTraits(.isHeader)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 8)
-                .background(KnowledgePagePalette.surface)
-
-            Divider()
-
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0, content: content)
-                    .padding(.top, 14)
-                    .padding(.bottom, 60)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 14) {
+                KnowledgePageHeading(title: section.title, icon: section.icon, tint: section.tint)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 4)
+                content()
             }
-            .scrollIndicators(.hidden)
+            .frame(maxWidth: 650)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 19)
+            .padding(.bottom, 80)
         }
-        .background(KnowledgePagePalette.surface.ignoresSafeArea())
-        .floatingSheetClose("关闭\(title)", action: dismiss.callAsFunction)
+        .scrollIndicators(.hidden)
+        .background(KnowledgePagePalette.canvas.ignoresSafeArea())
+        .floatingSheetClose("关闭\(section.title)", action: dismiss.callAsFunction)
         .readingSheetPresentation()
     }
 }
 
-private extension View {
-    func knowledgeCard(cornerRadius: CGFloat) -> some View {
+struct KnowledgePageHeading: View {
+    let title: String
+    var icon: String? = nil
+    var tint = KnowledgePagePalette.accent
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Text(title)
+                .font(.largeTitle.weight(.bold))
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 6)
+            if let icon {
+                Image(systemName: icon)
+                    .font(.title3.weight(.medium))
+                    .foregroundStyle(tint)
+                    .frame(width: 43, height: 43)
+                    .background(tint.opacity(0.11), in: .rect(cornerRadius: 13))
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+}
+
+struct KnowledgeSectionHeading: View {
+    let title: String
+    var detail: String?
+
+    init(_ title: String, detail: String? = nil) {
+        self.title = title
+        self.detail = detail
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(title)
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+            if let detail {
+                Text(detail)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+extension View {
+    func knowledgeCard(cornerRadius: CGFloat = 17) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius)
         return background(KnowledgePagePalette.surface, in: shape)
             .clipShape(shape)
@@ -1151,13 +1129,29 @@ private enum LearningRoute: Hashable, Identifiable {
     }
 }
 
-private enum KnowledgePagePalette {
-    static let accent = InvestmentDesign.accent
-    static let sage = Color(red: 0.40, green: 0.48, blue: 0.39)
-    static let canvas = InvestmentDesign.canvas
-    static let surface = InvestmentDesign.surface
-    static let stroke = InvestmentDesign.divider
-    static let supportingText = Color.secondary
+enum KnowledgePagePalette {
+    static let canvas = adaptive(light: 0xF5F4EF, dark: 0x141A21)
+    static let surface = adaptive(light: 0xFFFEFA, dark: 0x202831)
+    static let stroke = Color.primary.opacity(0.09)
+    static let accent = adaptive(light: 0x275477, dark: 0xA0CEF5)
+    static let reading = adaptive(light: 0x42664F, dark: 0xA6CCAC)
+    static let archive = adaptive(light: 0x92542F, dark: 0xE8B18C)
+    static let graph = adaptive(light: 0x6D527D, dark: 0xD6B7E8)
+    static let atlas = adaptive(light: 0x216D69, dark: 0x8BD4CA)
+    static let hero = Color(red: 0.10, green: 0.19, blue: 0.28)
+    static let heroTint = Color(red: 0.67, green: 0.83, blue: 0.92)
+
+    static func adaptive(light: UInt32, dark: UInt32) -> Color {
+        Color(uiColor: UIColor { traits in
+            let hex = traits.userInterfaceStyle == .dark ? dark : light
+            return UIColor(
+                red: CGFloat((hex >> 16) & 255) / 255,
+                green: CGFloat((hex >> 8) & 255) / 255,
+                blue: CGFloat(hex & 255) / 255,
+                alpha: 1
+            )
+        })
+    }
 }
 
 enum IdeologyCamp: String, CaseIterable, Identifiable {
@@ -1175,9 +1169,9 @@ enum IdeologyCamp: String, CaseIterable, Identifiable {
     var color: Color {
         switch self {
         case .loyalist:
-            KnowledgePagePalette.accent
+            KnowledgePagePalette.graph
         case .rebel:
-            Color(red: 0.20, green: 0.38, blue: 0.58)
+            KnowledgePagePalette.accent
         }
     }
 
@@ -1218,10 +1212,10 @@ private struct IdeologyPersonGridCell: View {
             )
 
             Text(person.name)
-                .font(.system(size: 12, weight: .medium))
+                .font(.footnote.weight(.medium))
                 .foregroundStyle(.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 4)
         }
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
@@ -1235,27 +1229,14 @@ private struct WeeklyStudyCard: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            HStack(alignment: .firstTextBaseline, spacing: 7) {
-                Text("本周学习")
-                    .font(.system(size: 16, weight: .semibold))
-                Text("\(studiedDays.count)")
-                    .font(.system(size: 25, weight: .bold, design: .serif))
-                    .foregroundStyle(KnowledgePagePalette.accent)
-                Text("天")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(KnowledgePagePalette.supportingText)
-                Spacer()
-                Text(studiedDays.isEmpty ? "完成课程后记录" : "保持节奏")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(KnowledgePagePalette.supportingText)
-            }
+            KnowledgeSectionHeading("本周学习", detail: "\(studiedDays.count) 天")
 
             HStack {
                 ForEach(Array(days.enumerated()), id: \.offset) { index, day in
                     VStack(spacing: 9) {
                         Text(day)
                             .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(KnowledgePagePalette.supportingText)
+                            .foregroundStyle(.secondary)
                         Circle()
                             .fill(
                                 studiedDays.contains(index)
@@ -1270,13 +1251,8 @@ private struct WeeklyStudyCard: View {
                 }
             }
         }
-        .padding(17)
-        .background(KnowledgePagePalette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(KnowledgePagePalette.stroke, lineWidth: 0.8)
-        }
+        .padding(14)
+        .knowledgeCard()
         .accessibilityElement(children: .combine)
         .accessibilityLabel("本周学习\(studiedDays.count)天")
     }
@@ -1332,7 +1308,7 @@ private struct LearningVideoLessonCard: View {
                     .multilineTextAlignment(.leading)
                 Text(lesson.creator)
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(KnowledgePagePalette.supportingText)
+                    .foregroundStyle(.secondary)
             }
             .padding(11)
         }
@@ -1372,6 +1348,9 @@ private struct LearningVideoLessonDetailView: View {
             KnowledgePagePalette.canvas.ignoresSafeArea()
             VStack(spacing: 0) {
                 videoSurface
+                    .clipShape(.rect(cornerRadius: 16))
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10)
 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -1382,10 +1361,11 @@ private struct LearningVideoLessonDetailView: View {
                         relatedTopics
                         sourceNote
                     }
-                    .padding(.bottom, 44)
+                    .padding(.bottom, 80)
                 }
                 .scrollIndicators(.hidden)
             }
+            .frame(maxWidth: 650)
         }
         .overlay(alignment: .bottomTrailing) {
             DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭视频详情")
@@ -1527,9 +1507,9 @@ private struct LearningVideoLessonDetailView: View {
             .foregroundStyle(.secondary)
 
             Text(lesson.title)
-                .font(.system(size: 29, weight: .bold, design: .serif))
+                .font(.largeTitle.weight(.bold))
                 .foregroundStyle(.primary)
-                .tracking(-0.3)
+                .accessibilityAddTraits(.isHeader)
                 .lineSpacing(2)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -1545,7 +1525,7 @@ private struct LearningVideoLessonDetailView: View {
                 .font(.system(size: 25, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 62, height: 62)
-                .background(KnowledgePagePalette.accent.opacity(0.94), in: Circle())
+                .background(KnowledgePagePalette.hero.opacity(0.94), in: Circle())
                 .shadow(color: .black.opacity(0.28), radius: 9, y: 4)
         }
         .buttonStyle(.plain)
@@ -1729,15 +1709,18 @@ private struct LearningVideoLessonDetailView: View {
                                     .font(.system(size: 18))
                                     .foregroundStyle(KnowledgePagePalette.accent)
                             }
-                            .padding(.vertical, 14)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 12)
+                            .frame(minHeight: 44)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         if index != lesson.chapters.indices.last {
-                            Divider().padding(.leading, 55)
+                            Divider().padding(.leading, 67)
                         }
                     }
                 }
+                .knowledgeCard()
             }
         }
         .padding(.horizontal, 20)
@@ -1748,10 +1731,7 @@ private struct LearningVideoLessonDetailView: View {
     private var relatedTopics: some View {
         if !lesson.relatedTopics.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
-                sectionTitle("顺着学")
-                Text("这些概念能帮你把视频里的方法落到具体知识上。")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
+                sectionTitle("相关知识")
                 ScrollView(.horizontal) {
                     HStack(spacing: 8) {
                         ForEach(lesson.relatedTopics) { topic in
@@ -1780,8 +1760,7 @@ private struct LearningVideoLessonDetailView: View {
     }
 
     private func sectionTitle(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 21, weight: .bold, design: .serif))
+        KnowledgeSectionHeading(title)
     }
 }
 
@@ -2113,181 +2092,90 @@ private struct LearningMilestoneRow: View {
     let topic: LearningTopic
     let isCurrent: Bool
     let isCompleted: Bool
-    let isLast: Bool
-    let completedCount: Int
-    let totalCount: Int
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(spacing: 0) {
-                Circle()
-                    .fill(
-                        isCompleted
-                            ? KnowledgePagePalette.sage
-                            : (isCurrent ? KnowledgePagePalette.accent : KnowledgePagePalette.canvas)
-                    )
-                    .frame(width: 27, height: 27)
-                    .overlay {
-                        Circle().stroke(
-                            (isCurrent || isCompleted)
-                                ? .clear
-                                : Color.secondary.opacity(0.35),
-                            lineWidth: 1
-                        )
-                        if isCompleted {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(.white)
-                        } else {
-                            Text("\(number)")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(isCurrent ? .white : .secondary)
-                        }
-                    }
-                if !isLast {
-                    Rectangle()
-                        .fill(KnowledgePagePalette.stroke)
-                        .frame(width: 1)
-                        .frame(maxHeight: .infinity)
-                }
-            }
-            .frame(width: 28)
-            .frame(maxHeight: .infinity, alignment: .top)
-
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text(title)
-                        .font(.system(size: 17, weight: .semibold))
-                    Spacer()
-                    Image(systemName: isCurrent ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                }
-
-                if isCurrent {
-                    HStack(spacing: 12) {
-                        Circle()
-                            .fill(KnowledgePagePalette.accent)
-                            .frame(width: 7, height: 7)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(topic.title)
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                            Text(topic.hasVideo == true ? "含视频" : topic.category)
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Text("继续")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 13)
-                            .frame(height: 36)
-                            .background(KnowledgePagePalette.accent, in: RoundedRectangle(cornerRadius: 9))
-                    }
-                    .padding(12)
-                    .background(KnowledgePagePalette.surface)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(KnowledgePagePalette.stroke, lineWidth: 0.7)
-                    }
-
-                    HStack(spacing: 10) {
-                        Text("已完成 \(completedCount)/\(totalCount)")
-                        GeometryReader { geometry in
-                            ZStack(alignment: .leading) {
-                                Capsule().fill(KnowledgePagePalette.stroke)
-                                Capsule()
-                                    .fill(KnowledgePagePalette.accent)
-                                    .frame(
-                                        width: totalCount > 0
-                                            ? geometry.size.width * CGFloat(completedCount) / CGFloat(totalCount)
-                                            : 0
-                                    )
-                            }
-                        }
-                        .frame(height: 2)
-                    }
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .padding(.bottom, 12)
+        let tint = isCompleted ? KnowledgePagePalette.reading : KnowledgePagePalette.accent
+        HStack(spacing: 11) {
+            Group {
+                if isCompleted {
+                    Image(systemName: "checkmark")
                 } else {
-                    Text(topic.title)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .padding(.bottom, 18)
+                    Text("\(number)")
+                        .monospacedDigit()
                 }
             }
-            .padding(.top, 3)
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(tint)
+            .frame(width: 30, height: 30)
+            .background(tint.opacity(0.12), in: .rect(cornerRadius: 8))
+            .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(topic.title)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if isCurrent {
+                Text("继续")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(tint)
+            }
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(isCurrent ? tint : .secondary)
+                .accessibilityHidden(true)
         }
+        .padding(12)
+        .frame(minHeight: 48)
+        .background(isCurrent ? tint.opacity(0.075) : .clear)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(number)，\(title)，\(topic.title)")
-        .accessibilityHint("打开课程")
+        .accessibilityHint(isCompleted ? "已完成，可打开复习" : "打开课程")
     }
 }
 
 private struct BookReadingDeskCard: View {
     let book: KnowledgeBook
     let source: String
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        HStack(spacing: 16) {
-            ZStack(alignment: .topLeading) {
-                KnowledgeBookCover(book: book, paletteIndex: 0)
-                    .frame(width: 92, height: 132)
-                    .shadow(color: .black.opacity(0.18), radius: 7, x: 0, y: 5)
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 14))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 15))
+        layout {
+            KnowledgeBookCover(book: book, paletteIndex: 0)
+                .frame(width: 86, height: 124)
+                .shadow(color: .black.opacity(0.17), radius: 7, x: 0, y: 5)
 
-                Text("继续读")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 4)
-                    .background(KnowledgePagePalette.accent, in: Capsule())
-                    .offset(x: -7, y: 8)
-            }
-
-            VStack(alignment: .leading, spacing: 0) {
-                Text("最近阅读")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(KnowledgePagePalette.accent)
-
+            VStack(alignment: .leading, spacing: 7) {
                 Text(book.title)
-                    .font(.system(size: 18, weight: .bold, design: .serif))
+                    .font(.title3.weight(.semibold))
                     .foregroundStyle(.primary)
-                    .lineLimit(3)
-                    .padding(.top, 7)
-
+                    .multilineTextAlignment(.leading)
                 Text(book.author)
-                    .font(.system(size: 12))
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .padding(.top, 5)
-
                 BookMetadataLine(book: book)
-                    .padding(.top, 6)
-
-                Spacer(minLength: 8)
-
                 BookReadingProgressView(book: book)
-
-                HStack(spacing: 5) {
-                    Text(book.isFinished ? "再次阅读" : "继续阅读")
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .bold))
+                if book.openURL != nil {
+                    Label(book.isFinished ? "再次阅读" : "继续阅读", systemImage: "arrow.up.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(KnowledgePagePalette.reading)
                 }
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(KnowledgePagePalette.accent)
-                .padding(.top, 9)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 8)
+        .padding(15)
+        .background(KnowledgePagePalette.reading.opacity(0.095), in: .rect(cornerRadius: 18))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(book.title)，作者\(book.author)")
-        .accessibilityHint("在\(source)继续阅读")
+        .accessibilityHint(book.openURL != nil ? "在\(source)打开" : "")
     }
 }
 
@@ -2545,19 +2433,19 @@ final class ReadingReminderManager {
 }
 
 private struct BooksReadingSummaryCard: View {
-    let bookshelf: LearningBookshelf?
+    let bookshelf: LearningBookshelf
     let reminder: ReadingReminderManager
 
     private var remainingText: String {
-        bookshelf?.books.first(where: { !$0.isFinished })?.estimatedRemainingText ?? "暂无估算"
+        bookshelf.books.first(where: { !$0.isFinished })?.estimatedRemainingText ?? "暂无估算"
     }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                metric(title: "今日阅读", value: bookshelf?.todayReadingText ?? "暂无数据")
+                metric(title: "今日阅读", value: bookshelf.todayReadingSeconds == nil ? "暂无数据" : bookshelf.todayReadingText)
                 Divider().frame(height: 34).padding(.horizontal, 10)
-                metric(title: "昨日阅读", value: bookshelf?.yesterdayReadingText ?? "暂无数据")
+                metric(title: "昨日阅读", value: bookshelf.yesterdayReadingSeconds == nil ? "暂无数据" : bookshelf.yesterdayReadingText)
                 Divider().frame(height: 34).padding(.horizontal, 10)
                 metric(title: "当前书籍", value: remainingText)
             }
@@ -2598,8 +2486,7 @@ private struct BooksReadingSummaryCard: View {
             .disabled(reminder.isUpdating)
         }
         .padding(.horizontal, 14)
-        .overlay(alignment: .top) { Divider() }
-        .overlay(alignment: .bottom) { Divider() }
+        .knowledgeCard()
     }
 
     private func metric(title: String, value: String) -> some View {

@@ -276,11 +276,28 @@ struct WikipediaEntityCard: View {
     }
 }
 
+enum WikipediaReaderChrome {
+    case standard
+    case knowledge
+}
+
+private struct WikipediaReaderChromeKey: EnvironmentKey {
+    static let defaultValue: WikipediaReaderChrome = .standard
+}
+
+extension EnvironmentValues {
+    var wikipediaReaderChrome: WikipediaReaderChrome {
+        get { self[WikipediaReaderChromeKey.self] }
+        set { self[WikipediaReaderChromeKey.self] = newValue }
+    }
+}
+
 struct WikipediaReaderView: View {
     let entity: WikipediaEntity
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.wikipediaReaderChrome) private var chrome
     @StateObject private var browser = WikipediaBrowserModel()
     @State private var presentedLink: WikipediaEntity?
     @State private var article: WikipediaRelayArticle?
@@ -314,7 +331,7 @@ struct WikipediaReaderView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             readerToolbar
         }
-        .background(Color(uiColor: .systemBackground))
+        .background(chromeBackground)
         .task(id: entity.url) { await loadArticle() }
         .appSheet(item: $presentedLink) { linkedEntity in
             if linkedEntity.url.isWikipediaURL {
@@ -389,8 +406,8 @@ struct WikipediaReaderView: View {
             .padding(.trailing, 8)
         }
         .accessibilityValue("第 \(browser.pageIndex + 1) 页，共 \(browser.pageCount) 页")
-        .frame(height: 52)
-        .background(Color(uiColor: .systemBackground))
+        .frame(minHeight: 52)
+        .background(chromeBackground)
         .overlay(alignment: .top) { Divider() }
     }
 
@@ -400,10 +417,22 @@ struct WikipediaReaderView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .font(.system(size: 13, weight: .semibold))
+            Group {
+                if chrome == .knowledge {
+                    VStack(spacing: 3) {
+                        Image(systemName: systemImage)
+                            .accessibilityHidden(true)
+                        Text(title)
+                    }
+                    .font(.caption.weight(.semibold))
+                } else {
+                    Label(title, systemImage: systemImage)
+                        .font(.system(size: 13, weight: .semibold))
+                }
+            }
                 .foregroundStyle(archiveAccent)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.vertical, 5)
+                .frame(maxWidth: .infinity, minHeight: 48)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -415,8 +444,13 @@ struct WikipediaReaderView: View {
         return min(1, max(0.02, Double(browser.pageIndex + 1) / Double(max(1, browser.pageCount))))
     }
 
+    private var chromeBackground: Color {
+        chrome == .knowledge ? KnowledgePagePalette.surface : Color(uiColor: .systemBackground)
+    }
+
     private var archiveAccent: Color {
-        colorScheme == .dark
+        if chrome == .knowledge { return KnowledgePagePalette.archive }
+        return colorScheme == .dark
             ? Color(red: 0.87, green: 0.60, blue: 0.47)
             : Color(red: 0.55, green: 0.25, blue: 0.16)
     }

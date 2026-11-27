@@ -81,11 +81,6 @@ enum CityRegions {
     }
 }
 
-private enum CityDashboardTab: String, CaseIterable, Identifiable {
-    case overview = "概览", cities = "城市", data = "数据", industry = "产业", transport = "交通", culture = "文旅"
-    var id: String { rawValue }
-}
-
 private enum CityMapNavigationDirection {
     case forward
     case backward
@@ -94,11 +89,9 @@ private enum CityMapNavigationDirection {
 
 struct CityNewsView: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.rootBottomChromeHeight) private var bottomChromeHeight
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var journey: CityRegionJourney
     @State private var selectedID: String?
-    @State private var selectedTab: CityDashboardTab = .overview
     @State private var showsList = false
     @State private var showsMap = false
     @State private var mapNavigationDirection: CityMapNavigationDirection = .forward
@@ -126,34 +119,20 @@ struct CityNewsView: View {
         let scope = journey.mapScope
         let selected = selectedRegion(in: scope.children)
 
-        VStack(spacing: 0) {
-            topBar
-
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    header(region)
-                        .padding(.horizontal, 20)
-                        .padding(.top, 8)
-
-                    tabBar
-                        .padding(.top, 8)
-
-                    Group {
-                        switch selectedTab {
-                        case .overview, .cities:
-                            mapSection(scope: scope, selected: selected)
-                        case .data, .industry, .transport, .culture:
-                            ContentUnavailableView("\(selectedTab.rawValue)内容暂未接入", systemImage: "tray")
-                        }
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 12)
-                }
-                .padding(.bottom, max(bottomChromeHeight, 78) + 20)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                KnowledgePageHeading(title: "城市观察", icon: "map", tint: CityDesign.accent)
+                header(region)
+                mapSection(scope: scope, selected: selected)
             }
-            .scrollIndicators(.hidden)
+            .frame(maxWidth: 650)
+            .padding(.horizontal, 20)
+            .padding(.top, 19)
+            .padding(.bottom, 80)
+            .frame(maxWidth: .infinity)
         }
-        .background(CityDesign.canvas.ignoresSafeArea())
+        .scrollIndicators(.hidden)
+        .background(KnowledgePagePalette.canvas.ignoresSafeArea())
         .floatingSheetClose("关闭城市观察", action: dismiss.callAsFunction)
         .tint(CityDesign.accent)
         .sensoryFeedback(.selection, trigger: selectedID)
@@ -171,20 +150,6 @@ struct CityNewsView: View {
         }
         .appFullScreenCover(isPresented: $showsMap) {
             CityFullScreenMap(scope: scope, selection: $selectedID)
-        }
-    }
-
-    private var topBar: some View {
-        Text("城市观察")
-            .font(.title2.bold())
-            .accessibilityAddTraits(.isHeader)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.leading, 20)
-        .padding(.trailing, 12)
-        .padding(.vertical, 8)
-        .background(CityDesign.canvas)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(CityDesign.divider).frame(height: 0.5)
         }
     }
 
@@ -254,218 +219,128 @@ struct CityNewsView: View {
         }
     }
 
-    @ViewBuilder
     private func header(_ region: CityRegion) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if journey.canGoBack {
-                Button { navigateBack() } label: {
-                    Label(journey.parent?.name ?? CityRegions.root.name, systemImage: "chevron.left")
+        VStack(alignment: .leading, spacing: 6) {
+            if let parent = journey.parent {
+                Button {
+                    navigateBack()
+                } label: {
+                    Label(parent.name, systemImage: "chevron.left")
                         .font(.subheadline.weight(.semibold))
                         .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(CityPressStyle())
-                .padding(.bottom, 2)
+                .accessibilityLabel("返回\(parent.name)")
             }
 
-            Text(eyebrow(region))
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(CityDesign.accent)
-
             Text(region.name)
-                .font(.system(size: 23, weight: .bold, design: .rounded))
-                .padding(.top, 5)
+                .font(.title.weight(.semibold))
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier("city-current-title")
 
-            factCard(region)
-                .padding(.top, 9)
+            Text(region.children.isEmpty
+                 ? region.level.rawValue
+                 : "\(region.level.rawValue) · \(region.children.count) 个下级地区")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         }
+        .padding(.horizontal, 15)
+        .padding(.top, journey.parent == nil ? 15 : 2)
+        .padding(.bottom, 15)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(CityDesign.accent.opacity(0.085), in: .rect(cornerRadius: 16))
     }
 
-    private func eyebrow(_ region: CityRegion) -> String {
-        if let parent = journey.parent {
-            return "\(parent.name) · \(region.level.rawValue)"
-        }
-        return "中国"
-    }
-
-    private func headerFacts(_ region: CityRegion) -> [(String, String, String)] {
-        var facts = [("级别", region.level.rawValue, "map.fill")]
-        if let parent = journey.parent {
-            facts.append(("所属", parent.name, "mappin.and.ellipse"))
-        }
-        if !region.children.isEmpty {
-            facts.append(("地图收录", "\(region.children.count)个下级地区", "square.3.layers.3d"))
-        }
-        return facts
-    }
-
-    private func factCard(_ region: CityRegion) -> some View {
-        let facts = headerFacts(region)
-        return HStack(spacing: 0) {
-            ForEach(Array(facts.enumerated()), id: \.offset) { index, item in
-                HStack(spacing: 9) {
-                    Image(systemName: item.2)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(CityDesign.accent)
-                        .frame(width: 27, height: 27)
-                        .background(CityDesign.accentSoft, in: Circle())
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(item.0).font(.system(size: 10)).foregroundStyle(.secondary)
-                        Text(item.1).font(.system(size: 14, weight: .bold)).lineLimit(1).minimumScaleFactor(0.72)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxWidth: .infinity)
-                if index < facts.count - 1 {
-                    Rectangle().fill(CityDesign.divider).frame(width: 1, height: 25).padding(.horizontal, 5)
-                }
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(CityDesign.surface, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 15).stroke(Color.primary.opacity(0.04), lineWidth: 0.7) }
-        .shadow(color: .black.opacity(0.035), radius: 8, y: 4)
-    }
-
-    private var tabBar: some View {
-        HStack(spacing: 0) {
-            ForEach(CityDashboardTab.allCases) { tab in
-                Button {
-                    selectedTab = tab
-                } label: {
-                    VStack(spacing: 5) {
-                        Text(tab.rawValue)
-                            .font(.system(size: 13, weight: selectedTab == tab ? .bold : .medium))
-                            .foregroundStyle(selectedTab == tab ? CityDesign.accent : .secondary)
-                        Capsule().fill(selectedTab == tab ? CityDesign.accent : .clear).frame(width: 34, height: 2.5)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(CityPressStyle())
-            }
-        }
-        .padding(.horizontal, 18)
-        .overlay(alignment: .bottom) { Rectangle().fill(CityDesign.divider).frame(height: 0.5) }
-    }
-
-    private func mapSection(
-        scope: CityRegion,
-        selected: CityRegion?
-    ) -> some View {
+    private func mapSection(scope: CityRegion, selected: CityRegion?) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(scope.level.childTitle ?? "区域地图").font(.system(size: 17, weight: .bold))
-                Spacer()
+            HStack(alignment: .center, spacing: 8) {
+                KnowledgeSectionHeading(scope.level.childTitle ?? "区域地图")
                 if !scope.children.isEmpty {
                     Button { showsList = true } label: {
-                        HStack(spacing: 5) {
-                            Text("查看全部 \(scope.children.count)个")
-                            Image(systemName: "chevron.right").font(.caption.weight(.bold))
-                        }
-                        .font(.system(size: 11, weight: .medium))
-                        .frame(minHeight: 44)
+                        Label("全部 \(scope.children.count) 个", systemImage: "list.bullet")
+                            .font(.footnote.weight(.semibold))
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(CityPressStyle())
-                    .accessibilityValue(showsList ? "已展开" : "已收起")
+                    .accessibilityLabel("查看全部 \(scope.children.count) 个地区")
                 }
             }
 
             VStack(spacing: 0) {
                 ZStack(alignment: .bottomTrailing) {
-                    CityDesign.mapGradient.allowsHitTesting(false)
-                    Circle().fill(.white.opacity(0.45)).frame(width: 240, height: 240).blur(radius: 10).offset(x: 100, y: -120)
-                        .allowsHitTesting(false)
-                    ZStack {
-                        CityAdministrativeMap(
-                            scope: scope,
-                            selectedRegionID: selected?.id,
-                            onSelect: select
-                        )
+                    CityDesign.mapBackground
+                    CityAdministrativeMap(scope: scope, selectedRegionID: selected?.id, onSelect: select)
                         .id(scope.id)
                         .transition(mapTransition)
-                    }
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 8)
-                    .clipped()
+                        .padding(10)
                     Button { showsMap = true } label: {
-                        Label("全屏地图", systemImage: "arrow.up.left.and.arrow.down.right")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 7)
-                            .background(.ultraThinMaterial, in: Capsule())
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(CityDesign.accent)
+                            .frame(width: 44, height: 44)
+                            .knowledgeCard(cornerRadius: 12)
                     }
                     .buttonStyle(CityPressStyle())
-                    .padding(9)
+                    .accessibilityLabel("全屏地图")
+                    .padding(10)
                 }
-                .frame(height: 190)
-                .contentShape(Rectangle())
+                .frame(height: 260)
+                .clipped()
 
                 if let selected {
                     selectedCard(selected)
                         .id(selected.id)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        .transition(.opacity)
                 }
             }
-            .background(CityDesign.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay { RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.04), lineWidth: 0.7) }
-            .shadow(color: CityDesign.accent.opacity(0.075), radius: 11, y: 5)
+            .knowledgeCard(cornerRadius: 18)
         }
     }
 
     private func selectedCard(_ region: CityRegion) -> some View {
-        HStack(spacing: 9) {
+        HStack(spacing: 10) {
             Group {
                 if region.adcode == 440300 {
                     Image("ShenzhenSkyline")
                         .resizable()
                         .scaledToFill()
                 } else {
-                    ZStack {
-                        LinearGradient(colors: [CityDesign.accent.opacity(0.85), .cyan.opacity(0.50)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                        Image(systemName: region.level == .district ? "building.columns.fill" : "building.2.fill")
-                            .font(.system(size: 27, weight: .medium))
-                            .foregroundStyle(.white)
-                            .symbolRenderingMode(.hierarchical)
-                    }
+                    Image(systemName: "mappin.and.ellipse")
+                        .font(.title3)
+                        .foregroundStyle(CityDesign.accent)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(CityDesign.accent.opacity(0.10))
                 }
             }
-            .frame(width: 65, height: 68)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .frame(width: 42, height: 42)
+            .clipShape(.rect(cornerRadius: 9))
+            .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 5) {
-                    Text(region.name).font(.system(size: 16, weight: .bold)).lineLimit(1)
-                    Text(region.id == journey.current.id ? "当前地区" : "当前选择")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(CityDesign.accent)
-                        .padding(.horizontal, 6).padding(.vertical, 3)
-                        .background(CityDesign.accentSoft, in: Capsule())
-                }
-                Text(region.level.rawValue).font(.caption).foregroundStyle(.secondary)
+                Text(region.name)
+                    .font(.headline)
+                Text(region.id == journey.current.id ? "当前地区" : region.level.rawValue)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
             if region.id != journey.current.id {
                 Button { navigate(to: region) } label: {
-                    HStack(spacing: 4) {
-                        Text(navigationLabel(for: region))
-                        Image(systemName: "chevron.right")
-                    }
-                    .font(.system(size: 10, weight: .bold))
-                    .fixedSize()
-                    .frame(minWidth: 50, minHeight: 36)
+                    Label(navigationLabel(for: region), systemImage: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(CityDesign.accent)
+                        .padding(.horizontal, 9)
+                        .frame(minHeight: 44)
+                        .background(CityDesign.accent.opacity(0.10), in: .rect(cornerRadius: 10))
                 }
                 .buttonStyle(CityPressStyle())
                 .accessibilityLabel("\(navigationLabel(for: region))\(region.name)")
             }
         }
-        .padding(8)
-        .background(CityDesign.surface)
-        .overlay(alignment: .top) { Rectangle().fill(CityDesign.divider).frame(height: 0.5) }
+        .padding(12)
     }
 
     private func navigationLabel(for region: CityRegion) -> String {
@@ -481,17 +356,11 @@ struct CityNewsView: View {
 }
 
 private enum CityDesign {
-    static let accent = Color(red: 0.04, green: 0.43, blue: 0.97)
-    static let accentSoft = accent.opacity(0.10)
-    static let canvas = Color(red: 0.982, green: 0.987, blue: 0.997)
-    static let surface = Color(uiColor: .systemBackground)
-    static let divider = Color(uiColor: .separator).opacity(0.18)
-    static let mapFill = Color(red: 0.36, green: 0.63, blue: 0.94)
-    static let mapGradient = LinearGradient(
-        colors: [Color(red: 0.91, green: 0.96, blue: 1), Color(red: 0.85, green: 0.94, blue: 0.99), Color(red: 0.93, green: 0.98, blue: 1)],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
+    static let accent = KnowledgePagePalette.atlas
+    static let mapBackground = KnowledgePagePalette.adaptive(light: 0xE5EEE8, dark: 0x203730)
+    static let mapFill = KnowledgePagePalette.adaptive(light: 0x4B8B78, dark: 0x60AE9B)
+    static let outline = KnowledgePagePalette.adaptive(light: 0xF4F7ED, dark: 0x22372F)
+    static let marker = Color(red: 0.10, green: 0.34, blue: 0.32)
 }
 
 private struct CityPressStyle: ButtonStyle {
@@ -512,27 +381,48 @@ private struct CityRegionList: View {
 
     var body: some View {
         let title = scope.level.childTitle ?? "区域列表"
-        VStack(spacing: 0) {
-            List(scope.children) { region in
-                Button { onSelect(region) } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "mappin.circle.fill").foregroundStyle(CityDesign.accent)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(region.name).font(.body.weight(.semibold)).foregroundStyle(.primary)
-                            Text(region.level.rawValue).font(.caption).foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 13) {
+                KnowledgePageHeading(title: title, icon: "list.bullet", tint: CityDesign.accent)
+                LazyVStack(spacing: 0) {
+                    ForEach(scope.children) { region in
+                        Button { onSelect(region) } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "mappin.and.ellipse")
+                                    .foregroundStyle(CityDesign.accent)
+                                    .accessibilityHidden(true)
+                                Text(region.name)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                if region.id == selection {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(CityDesign.accent)
+                                        .accessibilityHidden(true)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .frame(minHeight: 48)
+                            .contentShape(Rectangle())
                         }
-                        Spacer()
-                        if region.id == selection { Image(systemName: "checkmark.circle.fill").foregroundStyle(CityDesign.accent) }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(region.id == selection ? .isSelected : [])
+                        if region.id != scope.children.last?.id {
+                            Divider().padding(.leading, 40)
+                        }
                     }
                 }
-                .buttonStyle(.plain)
+                .knowledgeCard()
+                .accessibilityIdentifier("city-region-list-\(title)")
             }
-            .accessibilityIdentifier("city-region-list-\(title)")
-            .contentMargins(.bottom, 76, for: .scrollContent)
+            .frame(maxWidth: 650)
+            .padding(.horizontal, 20)
+            .padding(.top, 19)
+            .padding(.bottom, 80)
+            .frame(maxWidth: .infinity)
         }
-        .overlay(alignment: .bottomTrailing) {
-            DetailSheetControls(closeLabel: "完成", onClose: dismiss.callAsFunction).padding(12)
-        }
+        .background(KnowledgePagePalette.canvas.ignoresSafeArea())
+        .floatingSheetClose("关闭区域列表", action: dismiss.callAsFunction)
     }
 }
 
@@ -542,11 +432,21 @@ private struct CityFullScreenMap: View {
     @Binding var selection: String?
 
     var body: some View {
-        ZStack {
-            CityDesign.mapGradient.ignoresSafeArea()
+        VStack(alignment: .leading, spacing: 10) {
+            KnowledgePageHeading(title: scope.name, icon: "map", tint: CityDesign.accent)
+            if let selected = scope.children.first(where: { $0.id == selection }) {
+                Label(selected.name, systemImage: "mappin.and.ellipse")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(CityDesign.accent)
+            }
             CityAdministrativeMap(scope: scope, selectedRegionID: selection) { selection = $0.id }
-                .padding(18)
+                .padding(8)
+                .background(CityDesign.mapBackground, in: .rect(cornerRadius: 18))
         }
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 76)
+        .background(KnowledgePagePalette.canvas.ignoresSafeArea())
         .floatingSheetClose("关闭全屏地图", action: dismiss.callAsFunction)
     }
 }
@@ -573,10 +473,10 @@ private struct CityAdministrativeMap: View {
                         for feature in features {
                             let path = feature.geometry.outline
                             let color = feature.id == selectedAdcode
-                                ? CityDesign.accent.opacity(0.72)
+                                ? CityDesign.mapFill.opacity(0.89)
                                 : CityDesign.mapFill.opacity(regionByAdcode[feature.id] == nil ? 0.14 : 0.34)
                             projected.fill(path, with: .color(color), style: FillStyle(eoFill: true))
-                            projected.stroke(path, with: .color(.white.opacity(0.92)), lineWidth: 0.85 / projection.scale)
+                            projected.stroke(path, with: .color(CityDesign.outline), lineWidth: 0.85 / projection.scale)
                         }
                     }
                     Color.clear
@@ -627,7 +527,7 @@ private struct CityAdministrativeMap: View {
                 .font(.system(size: min(max(labelSize + 1, 10), 14), weight: .bold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 10).padding(.vertical, 7)
-                .background(CityDesign.accent, in: Capsule())
+                .background(CityDesign.marker, in: Capsule())
                 .shadow(color: CityDesign.accent.opacity(0.25), radius: 6, y: 3)
                 .allowsHitTesting(false)
         } else {
@@ -636,7 +536,7 @@ private struct CityAdministrativeMap: View {
                 Text(value).font(.system(size: min(max(labelSize, 8), 12), weight: .semibold)).foregroundStyle(Color.primary.opacity(0.78))
             }
             .padding(.horizontal, 3).padding(.vertical, 2)
-            .background(.white.opacity(0.22), in: Capsule())
+            .background(CityDesign.mapBackground.opacity(0.68), in: Capsule())
             .allowsHitTesting(false)
         }
     }
