@@ -1083,8 +1083,6 @@ struct NewsFeedView: View {
             Color.clear.frame(
                 height: FeedChromeLayout.headerReservationHeight(isHidden: isFeedChromeHidden)
             )
-            weiboSectionSelector
-            Divider().opacity(0.5)
             if weiboSection == .hot {
                 let posts = model.posts(for: .weibo)
                 ZStack {
@@ -1096,6 +1094,16 @@ struct NewsFeedView: View {
             } else {
                 weiboFollowingFeed
             }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                Divider().opacity(0.5)
+                weiboSectionSelector
+            }
+            .padding(.bottom, FeedChromeLayout.sourceSelectorBottomPadding(
+                rootBottomChromeHeight: rootBottomChromeHeight
+            ))
+            .background(Color(uiColor: .systemBackground))
         }
         .task(id: rootTabIsActive) {
             if rootTabIsActive, weiboSection == .following {
@@ -1109,7 +1117,7 @@ struct NewsFeedView: View {
     }
 
     private var weiboSectionSelector: some View {
-        HStack(spacing: 28) {
+        HStack(spacing: 16) {
             ForEach(WeiboSection.allCases) { section in
                 Button {
                     withAnimation(.easeOut(duration: 0.18)) {
@@ -1127,13 +1135,15 @@ struct NewsFeedView: View {
                             .fill(weiboSection == section ? InvestmentDesign.accent : .clear)
                             .frame(width: 16, height: 2)
                     }
-                    .frame(width: 42, height: 34)
+                    .frame(minWidth: 52, minHeight: 44)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(weiboSection == section ? .isSelected : [])
             }
         }
-        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .sensoryFeedback(.selection, trigger: weiboSection)
     }
 
@@ -1166,7 +1176,6 @@ struct NewsFeedView: View {
                             .font(.footnote)
                             .padding(16)
                         }
-                        Color.clear.frame(height: 55)
                     }
                 }
             } else if weiboFollowingModel.isLoading {
@@ -1576,7 +1585,9 @@ struct NewsFeedView: View {
                             }
                                 .font(.footnote).padding(16)
                         }
-                        Color.clear.frame(height: 55)
+                        if source != .weibo {
+                            Color.clear.frame(height: 55)
+                        }
                     }
                     .background(SourceScrollOffsetPreserver(source: source, store: scrollPositionStore))
                     .frame(maxWidth: .infinity)
@@ -3025,7 +3036,7 @@ private struct WeiboFollowingRow: View {
     let post: Post
 
     private var contentParts: (body: String, context: String?) {
-        let content = post.weiboFollowingListContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        let content = post.weiboFollowingListContent
         let separators = ["//@","// @"]
         guard let match = separators.compactMap({ separator in
             content.range(of: separator).map { ($0, separator) }
@@ -3043,6 +3054,7 @@ private struct WeiboFollowingRow: View {
     }
 
     var body: some View {
+        let content = contentParts
         HStack(alignment: .top, spacing: 10) {
             AvatarView(url: post.avatarURL, name: post.authorName, size: 32)
 
@@ -3063,17 +3075,19 @@ private struct WeiboFollowingRow: View {
                     Spacer(minLength: 0)
                 }
 
-                InlineEmojiText(
-                    text: contentParts.body,
-                    emojis: post.weiboInlineEmojis,
-                    fontSize: 16,
-                    lineSpacing: 4,
-                    maximumNumberOfLines: 4,
-                    allowsTextSelection: false
-                )
+                if !content.body.isEmpty {
+                    InlineEmojiText(
+                        text: content.body,
+                        emojis: post.weiboInlineEmojis,
+                        fontSize: 16,
+                        lineSpacing: 4,
+                        maximumNumberOfLines: 4,
+                        allowsTextSelection: false
+                    )
                     .frame(maxWidth: .infinity, alignment: .leading)
+                }
 
-                if let context = contentParts.context {
+                if let context = content.context {
                     HStack(alignment: .firstTextBaseline, spacing: 5) {
                         Image(systemName: "arrow.2.squarepath")
                             .font(.system(size: 11, weight: .medium))
