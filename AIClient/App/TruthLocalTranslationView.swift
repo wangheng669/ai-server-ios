@@ -226,7 +226,11 @@ final class FeedTranslationCache {
         return status
     }
 
-    func requestDownloadAutomatically(for language: String) -> Bool {
+    func canRequestDownloadAutomatically(for language: String) -> Bool {
+        !automaticallyRequestedLanguages.contains(language)
+    }
+
+    func beginAutomaticDownload(for language: String) -> Bool {
         automaticallyRequestedLanguages.insert(language).inserted
     }
 
@@ -648,6 +652,7 @@ private struct FeedDeviceTranslatedText: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var configuration: TranslationSession.Configuration?
     @State private var phase = Phase.preparing
+    @State private var automaticallyDownloading = false
 
     private let cache = FeedTranslationCache.shared
     private var source: Locale.Language { Locale.Language(identifier: sourceIdentifier) }
@@ -689,7 +694,7 @@ private struct FeedDeviceTranslatedText: View {
 
             if detail {
                 if display.text == nil, phase == .needsDownload {
-                    Button("下载翻译语言包", action: start)
+                    Button("下载翻译语言包") { start() }
                     .font(.callout)
                     .accessibilityIdentifier("feed-translation-enable")
                 } else if display.text == nil, phase == .failed {
@@ -723,6 +728,14 @@ private struct FeedDeviceTranslatedText: View {
                 try await cache.acquire()
                 defer { cache.release() }
                 guard display.text == nil, scenePhase != .background else { return }
+                if automaticallyDownloading, await cache.availability(for: sourceIdentifier) == .supported {
+                    try Task.checkCancellation()
+                    guard display.text == nil else { return }
+                    guard cache.beginAutomaticDownload(for: sourceIdentifier) else {
+                        phase = .needsDownload
+                        return
+                    }
+                }
                 let response = try await session.translate(original)
                 try Task.checkCancellation()
                 cache.languageWasInstalled(sourceIdentifier)
@@ -756,7 +769,8 @@ private struct FeedDeviceTranslatedText: View {
         }
     }
 
-    private func start() {
+    private func start(automaticallyDownloading: Bool = false) {
+        self.automaticallyDownloading = automaticallyDownloading
         phase = .translating
         if configuration != nil { configuration?.invalidate() }
         else { configuration = .init(source: source, target: target) }
@@ -771,8 +785,8 @@ private struct FeedDeviceTranslatedText: View {
         case .installed:
             start()
         case .supported:
-            if detail, cache.requestDownloadAutomatically(for: sourceIdentifier) {
-                start()
+            if detail, cache.canRequestDownloadAutomatically(for: sourceIdentifier) {
+                start(automaticallyDownloading: true)
             } else {
                 phase = .needsDownload
             }
