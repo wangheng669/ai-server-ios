@@ -169,6 +169,9 @@ struct MarketStockHistory {
         switch chart.market {
         case "US": (currency, closingMinute) = ("USD", 16 * 60)
         case "HK": (currency, closingMinute) = ("HKD", 16 * 60 + 10)
+        case "CN": (currency, closingMinute) = ("CNY", 15 * 60)
+        case "JP": (currency, closingMinute) = ("JPY", 15 * 60 + 30)
+        case "KR": (currency, closingMinute) = ("KRW", 15 * 60 + 30)
         default: return nil
         }
         var calendar = Calendar(identifier: .gregorian)
@@ -178,7 +181,7 @@ struct MarketStockHistory {
               let hour = now.hour, let minute = now.minute else { return nil }
         let localDate = String(format: "%04d-%02d-%02d", year, month, day)
         // Some feeds publish a same-day daily bar while continuous trading is still open.
-        let acceptsToday = chart.quality.isFinal && hour * 60 + minute >= closingMinute
+        let acceptsToday = chart.quality.isFinal && chart.tradingDate == localDate && hour * 60 + minute >= closingMinute
         bars = chart.candles.filter {
             guard let date = $0.tradingDate, $0.state == "confirmed", $0.close.isFinite, $0.close > 0 else { return false }
             return date < localDate || (date == localDate && acceptsToday)
@@ -186,10 +189,15 @@ struct MarketStockHistory {
         isComplete = chart.quality.status == .complete
     }
 
+    var previousClose: Double? {
+        guard isComplete, let latest = bars.last, let previous = bars.dropLast().last,
+              latest.source == previous.source else { return nil }
+        return previous.close
+    }
+
     var confirmedClose: MarketStockPrice? {
         guard let latest = bars.last, let date = latest.tradingDate else { return nil }
-        let previous = isComplete ? bars.dropLast().last : nil
-        let change = previous.map { (latest.close / $0.close - 1) * 100 }
+        let change = previousClose.map { (latest.close / $0 - 1) * 100 }
         return MarketStockPrice(amount: latest.close, currency: currency, change: change, label: "\(date) 收盘")
     }
 }

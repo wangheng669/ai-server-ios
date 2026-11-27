@@ -718,6 +718,7 @@ private struct MarketInstrumentDetailView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var selectedPeriod: MarketChartPeriod
     @State private var presentedValuation: CompanyValuationHistoryRoute?
+    @State private var stockValuationHistory: MarketCompanyValuationHistory?
     @State private var openingStockApp: MarketStockApp?
     @State private var stockAppError: String?
 
@@ -856,7 +857,7 @@ private struct MarketInstrumentDetailView: View {
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .appSheet(item: $presentedValuation) { route in
-            CompanyValuationHistorySheet(route: route)
+            CompanyValuationHistorySheet(route: route, preloadedHistory: stockValuationHistory)
                 .appPresentationDetents([.large])
                 .appPresentationCornerRadius(28)
         }
@@ -890,6 +891,11 @@ private struct MarketInstrumentDetailView: View {
         .task(id: isStock ? symbol : nil, priority: .utility) {
             guard isStock else { return }
             await store.stockQuotes.runUpdates(symbols: [symbol])
+        }
+        .task(id: standaloneValuationSymbol, priority: .utility) {
+            guard let symbol = standaloneValuationSymbol, stockValuationHistory?.symbol != symbol,
+                  let history = try? await store.companyValuationHistory(symbol: symbol), !Task.isCancelled else { return }
+            stockValuationHistory = history
         }
     }
 
@@ -964,7 +970,7 @@ private struct MarketInstrumentDetailView: View {
                     .foregroundStyle(.secondary)
                     .frame(minHeight: 70)
             }
-            if let quote, let lastTrade = store.lastSessionTrade(for: quote) {
+            if let lastTrade = latestSessionTrade {
                 MarketLastSessionTradeNote(trade: lastTrade, symbol: symbol)
             }
         }
@@ -1106,6 +1112,11 @@ private struct MarketInstrumentDetailView: View {
     private var unavailableQuote: MarketDashboardQuoteEntry.Unavailable? {
         guard quote == nil else { return nil }
         return store.dashboard?.unavailableQuote(symbol: symbol)
+    }
+
+    private var latestSessionTrade: MarketLastSessionTrade? {
+        if let quote { return store.lastSessionTrade(for: quote) }
+        return store.lastSessionTrade(symbol: symbol, asOf: unavailableQuote?.quality.asOfTimestamp)
     }
 
     private var quoteStatus: String {
@@ -1250,31 +1261,57 @@ private struct MarketInstrumentDetailView: View {
     private var keyData: some View {
         let columns = Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .leading),
                             count: dynamicTypeSize.isAccessibilitySize ? 2 : 3)
+        let regularQuote = isStock && (quote?.stale == true || quote?.quality?.fallbackUsed == true) ? nil : quote
+        let history = isStock && regularQuote == nil ? store.stockQuotes.snapshots[symbol]?.history : nil
+        let bar = history?.bars.last
+        let high = bar?.high ?? regularQuote?.high
+        let low = bar?.low ?? regularQuote?.low
+        let previousClose = regularQuote?.previousClose ?? history?.previousClose
+        let showsRegularClose = isStock ? regularQuote?.tradingSession.isExtended == true || bar != nil
+            : regularQuote?.hasActiveExtendedSessionQuote == true
+        let change = bar.flatMap { bar in previousClose.map { bar.close - $0 } } ?? regularQuote?.changeValue
+        let dailyStreak = quote?.dailyStreak ?? unavailableQuote?.dailyStreak
         return VStack(alignment: .leading, spacing: isStock ? 13 : 10) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("行情数据")
                     .font(isStock ? .title3.weight(.semibold) : .headline)
                     .accessibilityIdentifier("market-detail-statistics")
                 Spacer(minLength: 0)
-                if quote?.hasActiveExtendedSessionQuote == true {
-                    Text(yearChart.map { "常规盘 · \($0.tradingDate)" } ?? "最近常规盘")
+                if let date = bar?.tradingDate {
+                    Text("已收盘 · \(date)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else if showsRegularClose {
+                    Text("最近常规盘")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
             }
             LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
-                metric(isCrypto ? "24H开盘" : "开盘", quote?.openPrice)
-                metric("最高", quote?.high)
-                metric("最低", quote?.low)
-                metric(quote?.hasActiveExtendedSessionQuote == true ? "常规收盘" : "昨收",
-                       quote?.hasActiveExtendedSessionQuote == true ? quote?.price : quote?.previousClose)
-                metric("成交量", quote?.volume, compact: true)
-                textMetric("振幅", amplitudeText)
-                metric("涨跌额", quote?.changeValue)
+                metric(isCrypto ? "24H开盘" : "开盘", bar?.open ?? regularQuote?.openPrice)
+                metric("最高", high)
+                metric("最低", low)
+                if showsRegularClose {
+                    metric("常规收盘", bar?.close ?? regularQuote?.price)
+                }
+                if isStock || !showsRegularClose {
+                    metric("昨收", previousClose)
+                }
+                metric("成交量", bar?.volume ?? regularQuote?.volume, compact: true)
+                if isStock {
+                    textMetric("成交额", regularQuote?.turnover.map {
+                        marketFinancialAmount($0, currency: regularQuote?.currency ?? "")
+                    } ?? "—")
+                }
+                textMetric("振幅", amplitudeText(high: high, low: low, previousClose: previousClose))
+                metric("涨跌额", change)
                 metric("52周最高", market52WeekHigh(yearChart, symbol: chartSymbol))
-                metric("52周最低", quote?.week52Low ?? market52WeekLow(yearChart))
+                metric("52周最低", companyFundamentals?.week52Low ?? market52WeekLow(yearChart))
             }
             Divider()
+            if isStock, let streak = dailyStreak?.detailText {
+                companyMetric("连续交易日表现", value: streak)
+            }
             companyMetric("年化波动率", value: detailVolatilityText)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("年化波动率")
@@ -1294,28 +1331,53 @@ private struct MarketInstrumentDetailView: View {
         store.chart(symbol: chartSymbol, range: .year)
     }
 
+    private var companyFundamentals: (any MarketCompanyFundamentals)? {
+        if let quote { return quote }
+        return unavailableQuote
+    }
+
+    private var standaloneValuationSymbol: String? {
+        guard route.companyName != nil, companyFundamentals == nil else { return nil }
+        return symbol
+    }
+
+    private var standaloneValuationHistory: MarketCompanyValuationHistory? {
+        guard stockValuationHistory?.symbol == standaloneValuationSymbol else { return nil }
+        return stockValuationHistory
+    }
+
     private var showsCompanyProfile: Bool {
-        !isIndex && (constituent != nil || quote?.marketCap != nil || quote?.peStatic != nil || quote?.pe != nil)
+        !isIndex && (constituent != nil || companyFundamentals?.marketCap != nil || companyFundamentals?.peStatic != nil
+                     || companyFundamentals?.pe != nil || companyFundamentals?.netIncomeTTM != nil || standaloneValuationHistory != nil)
     }
 
     private var companyProfile: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let fundamentals = companyFundamentals
+        let valuation = standaloneValuationHistory
+        let currency = fundamentals?.fundamentalsCurrency ?? fundamentals?.currency ?? ""
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
                 Text("公司资料").font(.headline)
                 Spacer()
                 Text(companyMarketLabel(symbol)).font(.caption2).foregroundStyle(.secondary)
             }
-            if let marketCap = quote?.marketCap {
-                companyMetric("总市值", value: compactNumber(marketCap))
+            if let marketCap = fundamentals?.marketCap {
+                companyMetric("总市值", value: marketFinancialAmount(marketCap, currency: currency))
             }
-            valuationMetric(.staticPE, value: quote?.peStatic)
-            valuationMetric(.ttm, value: quote?.pe)
-            companyMetric("归母净利润（TTM）", value: formattedNetIncome)
-            if let fiscalYear = quote?.fiscalYear, !fiscalYear.isEmpty {
+            valuationMetric(.staticPE, value: fundamentals?.peStatic, historicalPoint: valuation?.peStatic.last)
+            valuationMetric(.ttm, value: fundamentals?.pe, historicalPoint: valuation?.peTTM.last)
+            if fundamentals != nil {
+                companyMetric("归母净利润（TTM）", value: fundamentals?.netIncomeTTM.map {
+                    marketFinancialAmount($0, currency: currency)
+                } ?? "—")
+            }
+            if let fiscalYear = fundamentals?.fiscalYear, !fiscalYear.isEmpty {
                 companyMetric("财报基准", value: "FY\(fiscalYear)")
             }
-            if let source = quote?.fundamentalsSource, !source.isEmpty {
-                companyMetric("基础数据", value: source)
+            if let source = fundamentals?.fundamentalsSource ?? valuation?.source, !source.isEmpty {
+                let asOf = fundamentals?.fundamentalsAsOf ?? valuation?.asOf
+                let date = asOf.flatMap { $0.count >= 10 ? String($0.prefix(10)) : nil }
+                companyMetric("基础数据", value: [source, date].compactMap { $0 }.joined(separator: " · "))
             }
         }
         .padding(.horizontal, isStock ? 0 : 14)
@@ -1327,12 +1389,7 @@ private struct MarketInstrumentDetailView: View {
         }
     }
 
-    private var formattedNetIncome: String {
-        guard let quote, let netIncome = quote.netIncomeTTM else { return "—" }
-        return marketFinancialAmount(netIncome, currency: quote.fundamentalsCurrency ?? quote.currency ?? "")
-    }
-
-    private func valuationMetric(_ kind: CompanyPEKind, value: Double?) -> some View {
+    private func valuationMetric(_ kind: CompanyPEKind, value: Double?, historicalPoint: MarketCompanyPEPoint?) -> some View {
         Button {
             presentedValuation = valuationRoute(kind: kind)
         } label: {
@@ -1340,9 +1397,16 @@ private struct MarketInstrumentDetailView: View {
                 Text(kind.metricTitle)
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 4)
-                Text(value.map { number($0, digits: 2) } ?? "—")
-                    .monospacedDigit()
-                    .foregroundStyle(.primary)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text((value ?? historicalPoint?.value).map { number($0, digits: 2) } ?? "—")
+                        .monospacedDigit()
+                        .foregroundStyle(.primary)
+                    if let historicalPoint {
+                        Text(historicalPoint.date)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Image(systemName: "chart.xyaxis.line")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(kind.color)
@@ -1370,7 +1434,7 @@ private struct MarketInstrumentDetailView: View {
     private func valuationRoute(kind: CompanyPEKind) -> CompanyValuationHistoryRoute {
         CompanyValuationHistoryRoute(
             symbol: quote?.symbol ?? symbol,
-            name: quote?.presentationName ?? symbol,
+            name: instrumentName,
             initialKind: kind
         )
     }
@@ -1400,11 +1464,9 @@ private struct MarketInstrumentDetailView: View {
         .accessibilityIdentifier("market-detail-metric-\(title)")
     }
 
-    private var amplitudeText: String {
-        guard let quote, let high = quote.high, let low = quote.low else { return "—" }
-        let baseline = quote.previousClose ?? low
-        guard baseline != 0 else { return "—" }
-        return "\(number((high - low) / baseline * 100, digits: 2))%"
+    private func amplitudeText(high: Double?, low: Double?, previousClose: Double?) -> String {
+        guard let high, let low, let previousClose, high >= low, previousClose > 0 else { return "—" }
+        return "\(number((high - low) / previousClose * 100, digits: 2))%"
     }
 
     private var componentStocks: some View {
@@ -1525,6 +1587,7 @@ private enum CompanyPETimeRange: String, CaseIterable, Identifiable {
 struct CompanyValuationHistorySheet: View {
     @Environment(\.dismiss) private var dismiss
     let route: CompanyValuationHistoryRoute
+    private let preloadedHistory: MarketCompanyValuationHistory?
     @State private var selectedKind: CompanyPEKind
     @State private var selectedRange: CompanyPETimeRange = .all
     @State private var selectedDate: Date?
@@ -1535,8 +1598,9 @@ struct CompanyValuationHistorySheet: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
 
-    init(route: CompanyValuationHistoryRoute) {
+    init(route: CompanyValuationHistoryRoute, preloadedHistory: MarketCompanyValuationHistory? = nil) {
         self.route = route
+        self.preloadedHistory = preloadedHistory
         _selectedKind = State(initialValue: route.initialKind)
     }
 
@@ -1912,8 +1976,13 @@ struct CompanyValuationHistorySheet: View {
         errorMessage = nil
         defer { isLoading = false }
         do {
-            let loadedHistory = try await MarketService(baseURL: ServerConfiguration.currentURL)
-                .companyValuationHistory(symbol: route.symbol)
+            let loadedHistory: MarketCompanyValuationHistory
+            if let preloadedHistory, preloadedHistory.symbol == route.symbol {
+                loadedHistory = preloadedHistory
+            } else {
+                loadedHistory = try await MarketService(baseURL: ServerConfiguration.currentURL)
+                    .companyValuationHistory(symbol: route.symbol)
+            }
             guard !Task.isCancelled else { return }
             history = loadedHistory
             staticPoints = Self.parsedPoints(loadedHistory.peStatic)
