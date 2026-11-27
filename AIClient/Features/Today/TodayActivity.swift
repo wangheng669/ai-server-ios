@@ -278,6 +278,8 @@ private struct TodayActivitySummary: View {
     var body: some View {
         if item.post.xBodyContainsOnlyLinks {
             linkPreview
+        } else if item.post.xBodyHasNoLanguageText {
+            Text(item.originalSummary)
         } else {
             translatedSummary
         }

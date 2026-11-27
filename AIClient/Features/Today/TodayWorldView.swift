@@ -777,6 +777,9 @@ struct TodayInlineSourceView: View {
                     Text(source.originalText)
                         .textSelection(.enabled)
                 }
+            } else if source.post.xBodyHasNoLanguageText {
+                Text(source.originalText)
+                    .textSelection(.enabled)
             } else {
                 FeedReaderTranslationText(
                     original: source.originalText, chinese: chineseText, field: .body, isActive: allowsTranslation,
