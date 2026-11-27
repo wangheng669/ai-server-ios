@@ -208,7 +208,6 @@ struct MarketAgendaView: View {
             .environment(\.colorScheme, .light)
         }
         .task(id: queryKey) { await load() }
-        .refreshable { await load() }
     }
 
     private var header: some View {
