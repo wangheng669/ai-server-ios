@@ -372,6 +372,7 @@ private struct XiaohongshuNoteReader: View {
     @State private var failed = false
     @State private var openFailed = false
     @State private var retry = 0
+    @State private var contentHeight: CGFloat = 230
 
     var body: some View {
         ScrollView {
@@ -402,9 +403,12 @@ private struct XiaohongshuNoteReader: View {
             .padding(.top, 24)
             .padding(.bottom, 80)
             .frame(maxWidth: .infinity)
-            .measureReadingSheetContent(when: true)
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.height.rounded(.up) }) { height in
+                contentHeight = max(230, height)
+            }
         }
         .background(InvestmentDesign.surface)
+        .appPresentationContentHeight(contentHeight)
         .overlay(alignment: .bottom) { controls }
         .accessibilityAction(.escape) { onClose() }
         .alert("无法打开小红书原帖", isPresented: $openFailed) {
