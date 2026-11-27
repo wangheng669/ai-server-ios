@@ -4,24 +4,32 @@ import SwiftUI
 import UIKit
 
 struct RetailInvestorView: View {
-    fileprivate static let closeClearance: CGFloat = 60
-    private static let estimatedSourceHeight: CGFloat = 44
+    private enum Platform: String, CaseIterable {
+        case douyin = "抖音"
+        case xiaohongshu = "小红书"
+    }
+
+    static let closeClearance: CGFloat = 60
+    private static let estimatedPlatformPickerHeight: CGFloat = 70
     private static let estimatedHeaderHeight: CGFloat = 80
     private static let estimatedEmptyHeight: CGFloat = 130
+    private static let estimatedNotesHeight: CGFloat = 160
 
     let store: InvestorMoodStore
     let onClose: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var platform: Platform = .douyin
     @State private var selectedID: InvestorMoodAuthor.ID?
-    @State private var destination: RetailInvestorDestination?
-    @State private var sourceHeight: CGFloat?
+    @State private var selectedVideo: InvestorMoodItem?
+    @State private var platformPickerHeight: CGFloat?
     @State private var headerHeight: CGFloat?
     @State private var emptyHeight: CGFloat?
+    @State private var notesHeight: CGFloat?
     @State private var listHeights: [InvestorMoodAuthor.ID: CGFloat] = [:]
 
     static func initialContentHeight(for author: InvestorMoodAuthor?) -> CGFloat {
-        guard let author else { return estimatedSourceHeight + estimatedEmptyHeight }
-        return estimatedSourceHeight + estimatedHeaderHeight
+        guard let author else { return estimatedPlatformPickerHeight + estimatedEmptyHeight }
+        return estimatedPlatformPickerHeight + estimatedHeaderHeight
             + CGFloat(author.videos.count) * InvestorMoodVideoRow.minimumHeight + closeClearance
     }
 
@@ -32,23 +40,32 @@ struct RetailInvestorView: View {
     var body: some View {
         let authors = store.authors
         let author = authors.isEmpty ? nil : authors[selectedIndex]
+        let showsDouyin = platform == .douyin
         VStack(spacing: 0) {
-            sourceLink
+            platformPicker
                 .onGeometryChange(for: CGFloat.self, of: { $0.size.height.rounded(.up) }) {
-                    sourceHeight = $0
+                    platformPickerHeight = $0
                 }
-            if let author {
-                authorHeader(author)
-                    .onGeometryChange(for: CGFloat.self, of: { $0.size.height.rounded(.up) }) {
-                        headerHeight = $0
-                    }
-                pager
-            } else {
-                emptyState
+
+            ZStack(alignment: .top) {
+                douyinContent(author)
+                    .opacity(showsDouyin ? 1 : 0)
+                    .allowsHitTesting(showsDouyin)
+                    .accessibilityHidden(!showsDouyin)
+
+                XiaohongshuMoodView(isActive: !showsDouyin, load: store.xiaohongshuMood) {
+                    notesHeight = $0
+                }
+                .opacity(showsDouyin ? 0 : 1)
+                .allowsHitTesting(!showsDouyin)
+                .accessibilityHidden(showsDouyin)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .appPresentationContentHeight(contentHeight(for: author))
+        .appPresentationContentHeight(
+            (platformPickerHeight ?? Self.estimatedPlatformPickerHeight)
+                + (showsDouyin ? douyinHeight(for: author) : notesHeight ?? Self.estimatedNotesHeight)
+        )
         .background(InvestmentDesign.surface)
         .floatingSheetClose("关闭散户观点", action: onClose)
         .accessibilityAction(.escape) { onClose() }
@@ -60,46 +77,61 @@ struct RetailInvestorView: View {
                 self.selectedID = ids.first
             }
         }
-        .appSheet(item: $destination) { destination in
-            switch destination {
-            case .video(let item):
-                InvestorMoodVideoDetailSheet(item: item)
-            case .xiaohongshu:
-                XiaohongshuMoodSheet(load: store.xiaohongshuMood)
-                    .readingSheetPresentation()
-                    .appPresentationBackground(InvestmentDesign.surface)
-            }
+        .appSheet(item: $selectedVideo) { item in
+            InvestorMoodVideoDetailSheet(item: item)
         }
     }
 
-    private var sourceLink: some View {
-        Button {
-            destination = .xiaohongshu
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "bubble.left.and.bubble.right")
-                Text("小红书")
-                Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.semibold))
+    private var platformPicker: some View {
+        HStack(spacing: 4) {
+            ForEach(Platform.allCases, id: \.self) { option in
+                let isSelected = platform == option
+                Button {
+                    platform = option
+                } label: {
+                    Text(option.rawValue)
+                        .font(.subheadline.weight(isSelected ? .semibold : .medium))
+                        .foregroundStyle(isSelected ? ResearchDesign.accent : .secondary)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(isSelected ? ResearchDesign.selection : .clear,
+                                    in: RoundedRectangle(cornerRadius: 10))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .accessibilityIdentifier(option == .douyin ? "retail-investor-douyin" : "retail-investor-xiaohongshu")
             }
-            .font(.subheadline.weight(.medium))
-            .foregroundStyle(ResearchDesign.accent)
-            .frame(minHeight: Self.estimatedSourceHeight)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("retail-investor-xiaohongshu")
-        .frame(maxWidth: TodayBriefStyle.maximumCardWidth, alignment: .trailing)
+        .padding(4)
+        .background(ResearchDesign.fill, in: RoundedRectangle(cornerRadius: 14))
+        .frame(maxWidth: TodayBriefStyle.maximumCardWidth)
         .padding(.horizontal, TodayBriefStyle.horizontalInset)
+        .padding(.top, 14)
+        .padding(.bottom, 4)
         .frame(maxWidth: .infinity)
     }
 
-    private func contentHeight(for author: InvestorMoodAuthor?) -> CGFloat {
-        let source = sourceHeight ?? Self.estimatedSourceHeight
-        guard let author else { return source + (emptyHeight ?? Self.estimatedEmptyHeight) }
+    @ViewBuilder
+    private func douyinContent(_ author: InvestorMoodAuthor?) -> some View {
+        if let author {
+            VStack(spacing: 0) {
+                authorHeader(author)
+                    .onGeometryChange(for: CGFloat.self, of: { $0.size.height.rounded(.up) }) {
+                        headerHeight = $0
+                    }
+                pager
+            }
+        } else {
+            emptyState
+        }
+    }
+
+    private func douyinHeight(for author: InvestorMoodAuthor?) -> CGFloat {
+        guard let author else { return emptyHeight ?? Self.estimatedEmptyHeight }
         let listHeight = listHeights[author.id] ?? CGFloat(author.videos.count) * InvestorMoodVideoRow.minimumHeight
             + Self.closeClearance
-        return source + (headerHeight ?? Self.estimatedHeaderHeight) + listHeight
+        return (headerHeight ?? Self.estimatedHeaderHeight) + listHeight
     }
 
     private func authorHeader(_ author: InvestorMoodAuthor) -> some View {
@@ -148,7 +180,7 @@ struct RetailInvestorView: View {
                 LazyHStack(spacing: 0) {
                     ForEach(store.authors) { author in
                         InvestorMoodAuthorPage(author: author) {
-                            destination = .video($0)
+                            selectedVideo = $0
                         } onHeightChange: {
                             listHeights[author.id] = $0
                         }
@@ -193,18 +225,6 @@ struct RetailInvestorView: View {
         guard store.authors.indices.contains(destination) else { return }
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) {
             selectedID = store.authors[destination].id
-        }
-    }
-}
-
-private enum RetailInvestorDestination: Identifiable {
-    case video(InvestorMoodItem)
-    case xiaohongshu
-
-    var id: String {
-        switch self {
-        case .video(let item): "video-\(item.id)"
-        case .xiaohongshu: "xiaohongshu"
         }
     }
 }
