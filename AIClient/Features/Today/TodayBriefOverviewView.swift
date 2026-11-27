@@ -1113,6 +1113,8 @@ private struct TodayBriefDeckLayers<Layer: View>: View, Animatable {
 }
 
 private struct TodayCompanyStockPrice: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     let stock: TodayCompanyStock
     let marketStore: MarketStore
     let onOpen: () -> Void
@@ -1122,14 +1124,32 @@ private struct TodayCompanyStockPrice: View {
         let price = quotes.currentQuote(for: stock.symbol, marketStore: marketStore)
             ?? quotes.confirmedClose(for: stock.symbol, marketStore: marketStore)
         let status = quotes.snapshots[stock.symbol] == nil ? "股价读取中" : "股价暂缺"
+        let amount = price?.formattedAmount(symbol: stock.symbol)
+        let change = price?.changePercent
+        let changeText = change.map(marketFormattedChangePercent) ?? "涨跌幅暂缺"
+        let animation: Animation? = reduceMotion ? nil : .easeOut(duration: 0.28)
         Button(action: onOpen) {
             VStack(alignment: .trailing, spacing: 2) {
-                if let price {
-                    Text(price.formattedAmount(symbol: stock.symbol))
+                if let price, let amount {
+                    Text(amount)
                         .font(.body.weight(.semibold))
                         .foregroundStyle(TodayBriefStyle.ink)
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
+                        .contentTransition(reduceMotion ? .identity : .numericText(value: price.amount))
+                        .animation(animation, value: amount)
+                    HStack(spacing: 3) {
+                        if let change, change != 0 {
+                            Image(systemName: change > 0 ? "arrow.up" : "arrow.down")
+                        }
+                        Text(changeText)
+                            .contentTransition(reduceMotion ? .identity : .numericText(value: change ?? 0))
+                            .animation(animation, value: changeText)
+                    }
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(price.changeColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                 }
                 Text(price?.label ?? status)
                     .font(.caption2)
@@ -1143,7 +1163,10 @@ private struct TodayCompanyStockPrice: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(stock.name)股价")
-        .accessibilityValue(price.map { "\($0.formattedAmount(symbol: stock.symbol))，\($0.label)" } ?? status)
+        .accessibilityValue(price.map {
+            let changeDescription = change == nil ? changeText : "涨跌幅 \(changeText)"
+            return [amount, changeDescription, $0.label].compactMap { $0 }.joined(separator: "，")
+        } ?? status)
         .accessibilityHint("打开股价详情")
         .accessibilityIdentifier("today-stock-\(stock.symbol)")
     }
