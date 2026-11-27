@@ -55,6 +55,7 @@ final class FeedTranslationCache {
     private var persistTask: Task<Void, Never>?
     private var hasUnsavedEntries = false
     private var availabilityByLanguage: [String: LanguageStatus] = [:]
+    private var automaticallyRequestedLanguages = Set<String>()
     @Observable final class LanguageState { var revision = 0 }
     let languageState = LanguageState()
 
@@ -207,8 +208,8 @@ final class FeedTranslationCache {
     }
     func release() { translating = false }
     @available(iOS 18.0, *)
-    func availability(for language: String) async -> LanguageAvailability.Status {
-        if let saved = availabilityByLanguage[language], Date().timeIntervalSince(saved.checkedAt) < 30 {
+    func availability(for language: String, refresh: Bool = false) async -> LanguageAvailability.Status {
+        if !refresh, let saved = availabilityByLanguage[language], Date().timeIntervalSince(saved.checkedAt) < 30 {
             switch saved.value {
             case .installed: return .installed
             case .downloadable: return .supported
@@ -225,7 +226,13 @@ final class FeedTranslationCache {
         return status
     }
 
+    func requestDownloadAutomatically(for language: String) -> Bool {
+        automaticallyRequestedLanguages.insert(language).inserted
+    }
+
     func languageWasInstalled(_ language: String) {
+        let requestedDownload = automaticallyRequestedLanguages.remove(language) != nil
+        guard requestedDownload || availabilityByLanguage[language]?.value != .installed else { return }
         availabilityByLanguage[language] = LanguageStatus(value: .installed, checkedAt: Date())
         languageState.revision += 1
     }
@@ -622,6 +629,11 @@ struct XDeviceTranslation: View {
 private struct FeedDeviceTranslatedText: View {
     private enum Phase { case preparing, translating, needsDownload, unavailable, failed }
 
+    private struct PreparationID: Equatable {
+        let scenePhase: ScenePhase
+        let languageRevision: Int
+    }
+
     let original: String
     let detail: Bool
     let sourceIdentifier: String
@@ -636,7 +648,6 @@ private struct FeedDeviceTranslatedText: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var configuration: TranslationSession.Configuration?
     @State private var phase = Phase.preparing
-    @State private var permitsDownload = false
 
     private let cache = FeedTranslationCache.shared
     private var source: Locale.Language { Locale.Language(identifier: sourceIdentifier) }
@@ -678,10 +689,7 @@ private struct FeedDeviceTranslatedText: View {
 
             if detail {
                 if display.text == nil, phase == .needsDownload {
-                    Button("启用本机翻译") {
-                        permitsDownload = true
-                        start()
-                    }
+                    Button("下载翻译语言包", action: start)
                     .font(.callout)
                     .accessibilityIdentifier("feed-translation-enable")
                 } else if display.text == nil, phase == .failed {
@@ -698,27 +706,26 @@ private struct FeedDeviceTranslatedText: View {
                 }
             }
         }
-        .task(id: cache.languageState.revision) { await prepare() }
+        .task(id: PreparationID(scenePhase: scenePhase, languageRevision: cache.languageState.revision)) {
+            await prepare()
+        }
         .onChange(of: display.text, initial: true) { _, text in
             if let text { onTranslation?(text) }
         }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active, configuration == nil { Task { await prepare() } }
-            else if phase == .background { configuration = nil }
+        .onChange(of: scenePhase) { _, next in
+            if next == .background {
+                configuration = nil
+                if phase == .translating { phase = .preparing }
+            }
         }
         .translationTask(configuration) { session in
-            defer { permitsDownload = false }
             do {
                 try await cache.acquire()
                 defer { cache.release() }
-                guard display.text == nil, cache.canAttempt(key), scenePhase == .active else { return }
-                if permitsDownload {
-                    try await session.prepareTranslation()
-                    cache.languageWasInstalled(sourceIdentifier)
-                }
-                phase = .translating
+                guard display.text == nil, scenePhase != .background else { return }
                 let response = try await session.translate(original)
                 try Task.checkCancellation()
+                cache.languageWasInstalled(sourceIdentifier)
                 guard let result = LocalTranslatedText.validTranslation(response.targetText, original: original) else {
                     cache.failed(key)
                     phase = .failed
@@ -728,8 +735,10 @@ private struct FeedDeviceTranslatedText: View {
             } catch is CancellationError {
                 return
             } catch {
+                guard !Task.isCancelled, display.text == nil else { return }
+                let status = await cache.availability(for: sourceIdentifier, refresh: true)
                 guard !Task.isCancelled else { return }
-                if permitsDownload, await cache.availability(for: sourceIdentifier) == .supported {
+                if status == .supported {
                     phase = .needsDownload
                 } else {
                     cache.failed(key)
@@ -742,24 +751,31 @@ private struct FeedDeviceTranslatedText: View {
     private func status(for field: FeedTranslationField) -> String {
         switch phase {
         case .preparing, .translating: "\(field.rawValue)翻译中"
-        case .needsDownload: detail ? "\(field.rawValue)待翻译" : "\(field.rawValue)待翻译 · 点开启用"
+        case .needsDownload: detail ? "\(field.rawValue)待下载语言包" : "\(field.rawValue)待翻译 · 点开下载语言包"
         case .unavailable, .failed: detail ? "\(field.rawValue)译文暂不可用" : "\(field.rawValue)译文暂不可用 · 点开查看"
         }
     }
 
     private func start() {
+        phase = .translating
         if configuration != nil { configuration?.invalidate() }
         else { configuration = .init(source: source, target: target) }
     }
 
     private func prepare() async {
-        guard scenePhase == .active, display.text == nil, !original.isEmpty, !permitsDownload else { return }
+        guard scenePhase == .active, display.text == nil, !original.isEmpty, phase != .translating else { return }
         guard cache.canAttempt(key) else { phase = .failed; return }
-        let status = await cache.availability(for: sourceIdentifier)
-        guard !Task.isCancelled, display.text == nil, !permitsDownload else { return }
+        let status = await cache.availability(for: sourceIdentifier, refresh: phase == .needsDownload)
+        guard !Task.isCancelled, scenePhase == .active, display.text == nil, phase != .translating else { return }
         switch status {
-        case .installed: phase = .translating; start()
-        case .supported: phase = .needsDownload
+        case .installed:
+            start()
+        case .supported:
+            if detail, cache.requestDownloadAutomatically(for: sourceIdentifier) {
+                start()
+            } else {
+                phase = .needsDownload
+            }
         case .unsupported: phase = .unavailable
         @unknown default: phase = .unavailable
         }
