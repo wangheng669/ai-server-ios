@@ -276,37 +276,25 @@ struct WikipediaEntityCard: View {
     }
 }
 
-enum WikipediaReaderChrome {
-    case standard
-    case knowledge
-}
-
-private struct WikipediaReaderChromeKey: EnvironmentKey {
-    static let defaultValue: WikipediaReaderChrome = .standard
-}
-
-extension EnvironmentValues {
-    var wikipediaReaderChrome: WikipediaReaderChrome {
-        get { self[WikipediaReaderChromeKey.self] }
-        set { self[WikipediaReaderChromeKey.self] = newValue }
-    }
+struct WikipediaChapter: Equatable, Identifiable {
+    let id: Int
+    let title: String
+    let depth: Int
 }
 
 struct WikipediaReaderView: View {
     let entity: WikipediaEntity
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.wikipediaReaderChrome) private var chrome
     @StateObject private var browser = WikipediaBrowserModel()
     @State private var presentedLink: WikipediaEntity?
     @State private var article: WikipediaRelayArticle?
     @State private var loadError: String?
+    @State private var showsChapters = false
 
     var body: some View {
         VStack(spacing: 0) {
             readerHeader
-
             Group {
                 if let article {
                     WikipediaWebView(
@@ -331,20 +319,22 @@ struct WikipediaReaderView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             readerToolbar
         }
-        .background(chromeBackground)
+        .background(KnowledgePagePalette.surface)
+        .knowledgeWebLinks()
         .task(id: entity.url) { await loadArticle() }
+        .appSheet(isPresented: $showsChapters) {
+            chapterSheet
+                .readingSheetPresentation()
+        }
         .appSheet(item: $presentedLink) { linkedEntity in
             if linkedEntity.url.isWikipediaURL {
                 WikipediaReaderView(entity: linkedEntity)
                     .wikipediaReaderPresentation()
             } else {
                 ServerArticleReaderView(url: linkedEntity.url)
-                    .overlay(alignment: .bottomTrailing) {
-                        DetailSheetControls(closeLabel: "关闭网页详情", onClose: { presentedLink = nil })
-                            .padding(12)
-                    }
-                .appPresentationDetents([.large])
-                .appPresentationCornerRadius(24)
+                    .environment(\.knowledgeReading, true)
+                    .floatingSheetClose("关闭网页详情") { presentedLink = nil }
+                    .readingSheetPresentation()
             }
         }
     }
@@ -356,103 +346,140 @@ struct WikipediaReaderView: View {
             article = try await APIClient(baseURL: ServerConfiguration.currentURL)
                 .fetchWikipediaArticle(title: entity.title, language: language)
         } catch {
+            guard !Task.isCancelled else { return }
             article = nil
             loadError = NetworkErrorPresentation.message(for: error)
         }
     }
 
     private var readerHeader: some View {
-        GeometryReader { proxy in
-            Rectangle()
-                .fill(archiveAccent)
-                .frame(width: proxy.size.width * CGFloat(displayedProgress))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("维基百科", systemImage: "book.pages")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(KnowledgePagePalette.archive)
+                Spacer()
+                if browser.isReaderReady {
+                    Text(browser.isOriginalMode
+                         ? "\(Int(browser.scrollProgress * 100))%"
+                         : "\(browser.pageIndex + 1) / \(browser.pageCount)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel(browser.isOriginalMode
+                            ? "阅读进度 \(Int(browser.scrollProgress * 100))%"
+                            : "第 \(browser.pageIndex + 1) 页，共 \(browser.pageCount) 页")
+                }
+            }
+            ProgressView(value: displayedProgress)
+                .tint(KnowledgePagePalette.archive)
+                .accessibilityHidden(true)
         }
-        .frame(height: 2)
+        .padding(.horizontal, 20)
+        .padding(.top, 14)
+        .padding(.bottom, 8)
     }
 
     private var readerToolbar: some View {
-        HStack(spacing: 0) {
-            readerToolbarButton("上一页", systemImage: "chevron.left") {
-                browser.goToPreviousPage()
-            }
-            .disabled(!browser.canGoToPreviousPage)
-
-            Divider().frame(height: 24)
-
-            readerToolbarButton("目录", systemImage: "list.bullet") {
-                browser.toggleTableOfContents()
-            }
-            .disabled(!entity.url.isWikipediaURL || !browser.isReaderReady)
-
-            Divider().frame(height: 24)
-
-            readerToolbarButton(
-                browser.isOriginalMode ? "幻灯片" : "原文",
-                systemImage: browser.isOriginalMode ? "rectangle.on.rectangle" : "doc.text"
-            ) {
+        HStack(spacing: 4) {
+            readerAction("目录", symbol: "list.bullet.indent") { showsChapters = true }
+                .disabled(browser.chapters.isEmpty)
+            readerAction(browser.isOriginalMode ? "幻灯片" : "原文", symbol: browser.isOriginalMode ? "rectangle.on.rectangle" : "text.alignleft") {
                 browser.toggleOriginalMode()
             }
             .disabled(!browser.isReaderReady)
-
-            Divider().frame(height: 24)
-
-            readerToolbarButton("原站", systemImage: "arrow.up.right.square") {
-                openURL(browser.currentURL ?? entity.url)
+            if !browser.isOriginalMode {
+                readerAction("上一页", symbol: "chevron.left") { browser.goToPreviousPage() }
+                    .disabled(!browser.canGoToPreviousPage)
+                readerAction("下一页", symbol: "chevron.right") { browser.goToNextPage() }
+                    .disabled(browser.pageIndex + 1 >= browser.pageCount)
             }
-            DetailSheetCloseButton(
-                action: dismiss.callAsFunction,
-                accessibilityLabel: entity.url.isWikipediaURL ? "关闭维基百科" : "关闭网页"
-            )
-            .padding(.trailing, 8)
+            Menu {
+                Button("打开原站", systemImage: "safari") {
+                    openURL(browser.currentURL ?? entity.url)
+                }
+                ShareLink(item: browser.currentURL ?? entity.url)
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(width: 44, height: 44)
+                    .foregroundStyle(KnowledgePagePalette.archive)
+            }
+            .accessibilityLabel("更多阅读操作")
+            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭维基百科")
         }
-        .accessibilityValue("第 \(browser.pageIndex + 1) 页，共 \(browser.pageCount) 页")
-        .frame(minHeight: 52)
-        .background(chromeBackground)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .background(KnowledgePagePalette.surface)
         .overlay(alignment: .top) { Divider() }
     }
 
-    private func readerToolbarButton(
-        _ title: String,
-        systemImage: String,
-        action: @escaping () -> Void
-    ) -> some View {
+    private func readerAction(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Group {
-                if chrome == .knowledge {
-                    VStack(spacing: 3) {
-                        Image(systemName: systemImage)
-                            .accessibilityHidden(true)
-                        Text(title)
-                    }
-                    .font(.caption.weight(.semibold))
-                } else {
-                    Label(title, systemImage: systemImage)
-                        .font(.system(size: 13, weight: .semibold))
-                }
+            ViewThatFits(in: .horizontal) {
+                Label(title, systemImage: symbol).fixedSize()
+                Image(systemName: symbol)
             }
-                .foregroundStyle(archiveAccent)
-                .padding(.vertical, 5)
-                .frame(maxWidth: .infinity, minHeight: 48)
-                .contentShape(Rectangle())
+            .font(.footnote.weight(.semibold))
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .foregroundStyle(KnowledgePagePalette.archive)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(title)
+    }
+
+    private var chapterSheet: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text(entity.title)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                KnowledgePageHeading(title: "目录", icon: "list.bullet.indent", tint: KnowledgePagePalette.archive)
+                LazyVStack(spacing: 0) {
+                    ForEach(browser.chapters) { chapter in
+                        Button {
+                            browser.goToChapter(chapter.id)
+                            showsChapters = false
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: chapter.depth == 2 ? "text.alignleft" : "arrow.turn.down.right")
+                                    .font(.footnote.weight(.semibold))
+                                    .foregroundStyle(KnowledgePagePalette.archive)
+                                    .accessibilityHidden(true)
+                                Text(chapter.title)
+                                    .font(chapter.depth == 2 ? .body.weight(.semibold) : .subheadline)
+                                    .foregroundStyle(.primary)
+                                    .multilineTextAlignment(.leading)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.leading, chapter.depth == 2 ? 12 : 24)
+                            .padding(.trailing, 12)
+                            .padding(.vertical, 8)
+                            .frame(minHeight: 46)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        if chapter.id != browser.chapters.last?.id {
+                            Divider().padding(.leading, 34)
+                        }
+                    }
+                }
+                .knowledgeCard(cornerRadius: 14)
+            }
+            .frame(maxWidth: 650)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 18)
+            .padding(.bottom, 64)
+            .frame(maxWidth: .infinity)
+        }
+        .background(KnowledgePagePalette.canvas.ignoresSafeArea())
+        .floatingSheetClose("关闭百科目录") { showsChapters = false }
     }
 
     private var displayedProgress: Double {
         if browser.isLoading { return browser.progress }
-        if browser.isOriginalMode { return max(0.02, browser.scrollProgress) }
-        return min(1, max(0.02, Double(browser.pageIndex + 1) / Double(max(1, browser.pageCount))))
-    }
-
-    private var chromeBackground: Color {
-        chrome == .knowledge ? KnowledgePagePalette.surface : Color(uiColor: .systemBackground)
-    }
-
-    private var archiveAccent: Color {
-        if chrome == .knowledge { return KnowledgePagePalette.archive }
-        return colorScheme == .dark
-            ? Color(red: 0.87, green: 0.60, blue: 0.47)
-            : Color(red: 0.55, green: 0.25, blue: 0.16)
+        if browser.isOriginalMode { return browser.scrollProgress }
+        return Double(browser.pageIndex + 1) / Double(browser.pageCount)
     }
 }
 
@@ -466,7 +493,10 @@ final class WikipediaBrowserModel: ObservableObject {
     @Published var currentURL: URL?
     @Published var pageIndex = 0
     @Published var pageCount = 1
-    @Published var isOriginalMode = false
+    @Published var isOriginalMode = true
+    private var originalChapters: [WikipediaChapter] = []
+    private var deckChapters: [WikipediaChapter] = []
+    var chapters: [WikipediaChapter] { isOriginalMode ? originalChapters : deckChapters }
     @Published private(set) var isReaderReady = false
     fileprivate weak var webView: WKWebView?
 
@@ -497,8 +527,18 @@ final class WikipediaBrowserModel: ObservableObject {
         }
     }
 
-    func toggleTableOfContents() {
-        webView?.evaluateJavaScript("window.__aiserverToggleTOC?.()")
+    func goToNextPage() {
+        webView?.evaluateJavaScript("window.__aiserverDeckNext?.()")
+    }
+
+    func goToChapter(_ id: Int) {
+        webView?.evaluateJavaScript("window.__aiserverGoToChapter?.(\(id))")
+    }
+
+    func updateChapters(original: [WikipediaChapter], deck: [WikipediaChapter]) {
+        originalChapters = original
+        deckChapters = deck
+        objectWillChange.send()
     }
 
     func toggleOriginalMode() {
@@ -549,23 +589,23 @@ enum WikipediaReaderStyle {
         style.textContent = `
           :root {
             color-scheme: light dark !important;
-            --aiserver-paper: #ffffff;
-            --aiserver-card: #f2f2f7;
-            --aiserver-ink: #27231f;
-            --aiserver-muted: #746d64;
-            --aiserver-accent: #8c4029;
-            --aiserver-link: #745344;
-            --aiserver-rule: rgba(109, 72, 52, 0.22);
+            --aiserver-paper: #fdfbf7;
+            --aiserver-card: #f0eae0;
+            --aiserver-ink: #242720;
+            --aiserver-muted: #615a50;
+            --aiserver-accent: #805431;
+            --aiserver-link: #795031;
+            --aiserver-rule: rgba(94, 70, 45, 0.20);
           }
 
           @media (prefers-color-scheme: dark) {
             :root {
-              --aiserver-paper: #000000;
-              --aiserver-card: #1c1c1e;
-              --aiserver-ink: #f2f2f7;
-              --aiserver-muted: #aeaeb2;
-              --aiserver-accent: #de9979;
-              --aiserver-link: #de9979;
+              --aiserver-paper: #1d2429;
+              --aiserver-card: #29333a;
+              --aiserver-ink: #f1eee7;
+              --aiserver-muted: #c6bdb0;
+              --aiserver-accent: #e8b991;
+              --aiserver-link: #e8b991;
               --aiserver-rule: rgba(255, 255, 255, 0.18);
             }
           }
@@ -573,9 +613,9 @@ enum WikipediaReaderStyle {
           html, body {
             background: var(--aiserver-paper) !important;
             color: var(--aiserver-ink) !important;
-            font-family: "Songti SC", Georgia, "Times New Roman", serif !important;
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif !important;
             font-size: 18px !important;
-            line-height: 1.76 !important;
+            line-height: 1.8 !important;
             margin: 0 !important;
             padding: 0 !important;
             overflow-x: hidden !important;
@@ -622,34 +662,34 @@ enum WikipediaReaderStyle {
             padding: 22px 22px 132px !important;
           }
 
-          #firstHeading {
-            border-bottom: 1px solid var(--aiserver-rule) !important;
-            color: var(--aiserver-accent) !important;
-            font-family: "Songti SC", Georgia, "Times New Roman", serif !important;
-            font-size: 2.25rem !important;
-            font-weight: 700 !important;
-            letter-spacing: -0.02em !important;
-            line-height: 1.16 !important;
-            margin: 0 0 24px !important;
-            padding: 0 0 20px !important;
+          #firstHeading, .mw-parser-output {
+            box-sizing: border-box !important;
+            margin-inline: auto !important;
+            max-width: 680px !important;
           }
 
-          #firstHeading::before {
-            color: var(--aiserver-muted);
-            content: "来自维基百科，自由的百科全书";
-            display: block;
-            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
-            font-size: 0.64rem;
-            font-weight: 600;
-            letter-spacing: 0.08em;
-            line-height: 1.4;
-            margin-bottom: 14px;
+          #firstHeading {
+            border-bottom: 1px solid var(--aiserver-rule) !important;
+            color: var(--aiserver-ink) !important;
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif !important;
+            font-size: clamp(2rem, 8vw, 3rem) !important;
+            font-weight: 750 !important;
+            line-height: 1.2 !important;
+            margin-block: 0 22px !important;
+            padding: 24px 22px 16px !important;
           }
 
           .mw-parser-output {
             color: var(--aiserver-ink) !important;
             font-size: 1rem !important;
-            line-height: 1.76 !important;
+            line-height: 1.84 !important;
+            overflow-wrap: anywhere;
+            padding: 0 22px 44px !important;
+          }
+
+          .mw-parser-output .mw-parser-output {
+            padding: 0 !important;
+            max-width: none !important;
           }
 
           .mw-parser-output p {
@@ -657,14 +697,15 @@ enum WikipediaReaderStyle {
           }
 
           .mw-parser-output h2 {
-            border-bottom: 1px solid var(--aiserver-rule) !important;
-            color: var(--aiserver-accent) !important;
-            font-family: "Songti SC", Georgia, "Times New Roman", serif !important;
-            font-size: 1.55rem !important;
+            border-inline-start: 3px solid var(--aiserver-accent) !important;
+            color: var(--aiserver-ink) !important;
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif !important;
+            font-size: 1.42rem !important;
             font-weight: 700 !important;
             line-height: 1.3 !important;
             margin: 1.65em 0 0.8em !important;
-            padding-bottom: 0.35em !important;
+            padding-inline-start: 12px !important;
+            scroll-margin-top: 12px;
           }
 
           .mw-parser-output h3,
@@ -778,94 +819,12 @@ enum WikipediaReaderStyle {
             line-height: 0 !important;
           }
 
-          #aiserver-archive-toc {
-            -webkit-backdrop-filter: blur(22px);
-            backdrop-filter: blur(22px);
-            background: rgba(251, 247, 237, 0.96);
-            border: 1px solid var(--aiserver-rule);
-            border-radius: 22px;
-            box-shadow: 0 22px 64px rgba(58, 39, 27, 0.22);
-            box-sizing: border-box;
-            color: var(--aiserver-ink);
-            left: 16px;
-            max-height: min(68vh, 560px);
-            opacity: 1;
-            overflow: hidden;
-            position: fixed;
-            right: 16px;
-            top: 18px;
-            transform: translateY(0);
-            transition: opacity 180ms ease, transform 180ms ease, visibility 180ms;
-            visibility: visible;
-            z-index: 2147483647;
-          }
-
-          #aiserver-archive-toc.aiserver-hidden {
-            opacity: 0;
-            pointer-events: none;
-            transform: translateY(-10px);
-            visibility: hidden;
-          }
-
-          .aiserver-toc-header {
-            align-items: center;
-            border-bottom: 1px solid var(--aiserver-rule);
-            display: flex;
-            justify-content: space-between;
-            padding: 17px 18px 14px;
-          }
-
-          .aiserver-toc-title {
-            color: var(--aiserver-accent);
-            font-size: 1.18rem;
-            font-weight: 700;
-          }
-
-          .aiserver-toc-close {
-            appearance: none;
-            background: rgba(140, 64, 41, 0.08);
-            border: 0;
-            border-radius: 50%;
-            color: var(--aiserver-accent);
-            font-size: 1.3rem;
-            height: 32px;
-            line-height: 1;
-            width: 32px;
-          }
-
-          .aiserver-toc-list {
-            box-sizing: border-box;
-            max-height: calc(min(68vh, 560px) - 66px);
-            overflow-y: auto;
-            padding: 8px 18px 18px;
-          }
-
-          .aiserver-toc-item {
-            appearance: none;
-            background: transparent;
-            border: 0;
-            border-bottom: 1px solid rgba(109, 72, 52, 0.10);
-            color: var(--aiserver-ink);
-            display: block;
-            font-family: "Songti SC", Georgia, serif;
-            font-size: 0.98rem;
-            padding: 12px 2px;
-            text-align: left;
-            width: 100%;
-          }
-
-          .aiserver-toc-item.aiserver-toc-subitem {
-            color: var(--aiserver-muted);
-            font-size: 0.88rem;
-            padding-left: 16px;
-          }
-
           body.aiserver-deck-mode {
             height: 100vh !important;
             overflow: hidden !important;
           }
 
-          body.aiserver-deck-mode > :not(#aiserver-deck-root):not(#aiserver-deck-toc) {
+          body.aiserver-deck-mode > :not(#aiserver-deck-root) {
             display: none !important;
           }
 
@@ -913,7 +872,7 @@ enum WikipediaReaderStyle {
 
           .aiserver-deck-section {
             align-items: flex-end;
-            background: var(--aiserver-accent);
+            background: #293747;
             color: #fff8ed;
             display: flex;
             padding-bottom: 40px;
@@ -953,8 +912,8 @@ enum WikipediaReaderStyle {
 
           .aiserver-deck-slide-title {
             border-bottom: 1px solid var(--aiserver-rule);
-            color: var(--aiserver-accent);
-            font-family: "Songti SC", Georgia, serif;
+            color: var(--aiserver-ink);
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
             font-size: 1.75rem;
             font-weight: 700;
             line-height: 1.2;
@@ -964,8 +923,8 @@ enum WikipediaReaderStyle {
 
           .aiserver-deck-body {
             color: var(--aiserver-ink);
-            font-family: "Songti SC", Georgia, serif;
-            font-size: clamp(1rem, 4.5vw, 1.2rem);
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+            font-size: clamp(1rem, 4.5vw, 1.14rem);
             line-height: 1.78;
             min-height: 0;
             overflow-y: auto;
@@ -1029,107 +988,9 @@ enum WikipediaReaderStyle {
             padding: 9px 7px !important;
           }
 
-          #aiserver-deck-toc {
-            background: rgba(251, 247, 237, 0.98);
-            inset: 0;
-            overflow-y: auto;
-            padding: 26px 22px 110px;
-            position: fixed;
-            transform: translateY(0);
-            transition: opacity 180ms ease, transform 180ms ease, visibility 180ms;
-            z-index: 2147483647;
-          }
-
-          #aiserver-deck-toc.aiserver-hidden {
-            opacity: 0;
-            pointer-events: none;
-            transform: translateY(14px);
-            visibility: hidden;
-          }
-
-          .aiserver-deck-toc-top {
-            align-items: center;
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 20px;
-          }
-
-          .aiserver-deck-toc-heading {
-            color: var(--aiserver-accent);
-            font-family: "Songti SC", Georgia, serif;
-            font-size: 2rem;
-            font-weight: 700;
-          }
-
-          .aiserver-deck-toc-list button {
-            align-items: center;
-            appearance: none;
-            background: transparent;
-            border: 0;
-            border-bottom: 1px solid var(--aiserver-rule);
-            color: var(--aiserver-ink);
-            display: flex;
-            font-family: "Songti SC", Georgia, serif;
-            font-size: 1.05rem;
-            gap: 16px;
-            padding: 15px 0;
-            text-align: left;
-            width: 100%;
-          }
-
-          .aiserver-deck-toc-index {
-            color: var(--aiserver-accent);
-            font-family: Georgia, serif;
-            font-size: 0.82rem;
-            min-width: 30px;
-          }
         `;
 
         document.documentElement.appendChild(style);
-      };
-
-      const installTableOfContents = () => {
-        if (!document.body || document.getElementById("aiserver-archive-toc")) return;
-
-        const headings = Array.from(document.querySelectorAll(".mw-parser-output h2, .mw-parser-output h3"))
-          .filter((heading) => heading.textContent.trim().length > 0);
-        if (!headings.length) return;
-
-        const panel = document.createElement("section");
-        panel.id = "aiserver-archive-toc";
-        panel.className = "aiserver-hidden";
-        panel.setAttribute("aria-label", "本文目录");
-
-        const header = document.createElement("div");
-        header.className = "aiserver-toc-header";
-        const title = document.createElement("div");
-        title.className = "aiserver-toc-title";
-        title.textContent = "本文目录";
-        const close = document.createElement("button");
-        close.className = "aiserver-toc-close";
-        close.type = "button";
-        close.setAttribute("aria-label", "关闭目录");
-        close.textContent = "×";
-        header.append(title, close);
-
-        const list = document.createElement("div");
-        list.className = "aiserver-toc-list";
-        headings.forEach((heading, index) => {
-          const button = document.createElement("button");
-          button.type = "button";
-          button.className = `aiserver-toc-item${heading.tagName === "H3" ? " aiserver-toc-subitem" : ""}`;
-          button.textContent = heading.textContent.trim();
-          button.addEventListener("click", () => {
-            heading.scrollIntoView({ behavior: "smooth", block: "start" });
-            panel.classList.add("aiserver-hidden");
-          });
-          list.appendChild(button);
-        });
-
-        close.addEventListener("click", () => panel.classList.add("aiserver-hidden"));
-        panel.append(header, list);
-        document.body.appendChild(panel);
-        window.__aiserverToggleTOC = () => panel.classList.toggle("aiserver-hidden");
       };
 
       const installDeck = () => {
@@ -1366,40 +1227,26 @@ enum WikipediaReaderStyle {
           root.appendChild(slide);
         });
 
-        const toc = document.createElement("aside");
-        toc.id = "aiserver-deck-toc";
-        toc.className = "aiserver-hidden";
-        const tocTop = document.createElement("div");
-        tocTop.className = "aiserver-deck-toc-top";
-        const tocHeading = document.createElement("div");
-        tocHeading.className = "aiserver-deck-toc-heading";
-        tocHeading.textContent = "目录";
-        const tocClose = document.createElement("button");
-        tocClose.className = "aiserver-toc-close";
-        tocClose.type = "button";
-        tocClose.textContent = "×";
-        tocClose.setAttribute("aria-label", "关闭目录");
-        tocTop.append(tocHeading, tocClose);
-        const tocList = document.createElement("div");
-        tocList.className = "aiserver-deck-toc-list";
-        sectionEntries.forEach((entry, index) => {
-          const button = document.createElement("button");
-          button.type = "button";
-          const number = document.createElement("span");
-          number.className = "aiserver-deck-toc-index";
-          number.textContent = String(index + 1).padStart(2, "0");
-          const title = document.createElement("span");
-          title.textContent = entry.title;
-          button.append(number, title);
-          button.addEventListener("click", () => {
-            goToPage(entry.slideIndex);
-            toc.classList.add("aiserver-hidden");
-          });
-          tocList.appendChild(button);
+        const originalHeadingTitle = (node) => {
+          if (node.querySelector(".mw-headline")) return textOf(node.querySelector(".mw-headline"));
+          const copy = node.cloneNode(true);
+          copy.querySelectorAll(".mw-editsection").forEach((child) => child.remove());
+          return textOf(copy);
+        };
+        const chapters = Array.from(article.querySelectorAll("h2, h3, h4"))
+          .map((node, id) => ({
+            node,
+            id,
+            title: originalHeadingTitle(node),
+            depth: Number(node.tagName.slice(1))
+          }))
+          .filter((chapter) => chapter.title.length > 0);
+        root.classList.add("aiserver-hidden");
+        document.body.append(root);
+        window.webkit?.messageHandlers?.wikipediaDeck?.postMessage({
+          chapters: chapters.map(({ id, title, depth }) => ({ id, title, depth })),
+          deckChapters: sectionEntries.map(({ title, slideIndex }) => ({ id: slideIndex, title, depth: 2 }))
         });
-        toc.append(tocTop, tocList);
-        document.body.append(root, toc);
-        document.body.classList.add("aiserver-deck-mode");
 
         let currentIndex = 0;
         let scrollTimer;
@@ -1424,14 +1271,21 @@ enum WikipediaReaderStyle {
             postState();
           }, 90);
         }, { passive: true });
-        tocClose.addEventListener("click", () => toc.classList.add("aiserver-hidden"));
         window.__aiserverDeckPrevious = () => goToPage(currentIndex - 1);
         window.__aiserverDeckNext = () => goToPage(currentIndex + 1);
-        window.__aiserverToggleTOC = () => toc.classList.toggle("aiserver-hidden");
+        window.__aiserverGoToChapter = (id) => {
+          if (document.body.classList.contains("aiserver-deck-mode")) {
+            goToPage(id);
+          } else {
+            chapters.find((chapter) => chapter.id === id)?.node.scrollIntoView({
+              behavior: "smooth", block: "start"
+            });
+          }
+        };
         window.__aiserverToggleOriginal = () => {
           const deckMode = document.body.classList.toggle("aiserver-deck-mode");
           root.classList.toggle("aiserver-hidden", !deckMode);
-          toc.classList.add("aiserver-hidden");
+          if (deckMode) goToPage(currentIndex);
           postState();
         };
         postState();
@@ -1595,6 +1449,23 @@ private struct WikipediaWebView: UIViewRepresentable {
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard message.name == "wikipediaDeck",
                   let state = message.body as? [String: Any] else { return }
+            if let original = state["chapters"] as? [[String: Any]],
+               let deck = state["deckChapters"] as? [[String: Any]] {
+                func decode(_ rows: [[String: Any]]) -> [WikipediaChapter] {
+                    rows.compactMap { row in
+                        guard let id = row["id"] as? Int,
+                              let title = row["title"] as? String,
+                              let depth = row["depth"] as? Int else { return nil }
+                        return WikipediaChapter(id: id, title: title, depth: depth)
+                    }
+                }
+                let originalChapters = decode(original)
+                let deckChapters = decode(deck)
+                Task { @MainActor in
+                    self.model.updateChapters(original: originalChapters, deck: deckChapters)
+                }
+                return
+            }
             let pageIndex = state["pageIndex"] as? Int ?? 0
             let pageCount = state["pageCount"] as? Int ?? 1
             let isOriginalMode = state["isOriginalMode"] as? Bool ?? false
@@ -1655,7 +1526,7 @@ enum WikipediaRelayedHTML {
         <!doctype html>
         <html lang="zh">
           <head>
-            <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+            <meta name="viewport" content="width=device-width,initial-scale=1">
             <base href="\(escape(baseURL.absoluteString))">
             <title>\(escape(title))</title>
           </head>

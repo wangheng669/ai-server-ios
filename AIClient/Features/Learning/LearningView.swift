@@ -126,8 +126,8 @@ struct LearningView: View {
     }
 
     private var knowledgeHome: some View {
-        VStack(alignment: .leading, spacing: 23) {
-            KnowledgePageHeading(title: "知识")
+        VStack(alignment: .leading, spacing: 18) {
+            KnowledgePageHeading(title: "知识", icon: "books.vertical")
             if let notice = store.savedContentNotice {
                 Label(notice, systemImage: "clock.arrow.circlepath")
                     .font(.footnote)
@@ -137,15 +137,14 @@ struct LearningView: View {
 
             investmentOverview
 
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 9) {
                 KnowledgeSectionHeading("阅读")
-                let layout = dynamicTypeSize.isAccessibilitySize
-                    ? AnyLayout(VStackLayout(spacing: 10))
-                    : AnyLayout(HStackLayout(alignment: .top, spacing: 10))
-                layout {
+                VStack(spacing: 0) {
                     bookCollection
+                    Divider().padding(.leading, 77)
                     conceptCollection
                 }
+                .knowledgeCard(cornerRadius: 15)
             }
 
             VStack(alignment: .leading, spacing: 9) {
@@ -153,10 +152,10 @@ struct LearningView: View {
                 explorationDirectory
             }
         }
-        .frame(maxWidth: 610)
+        .frame(maxWidth: 650)
         .padding(.horizontal, 20)
-        .padding(.top, 15)
-        .padding(.bottom, 26)
+        .padding(.top, 16)
+        .padding(.bottom, 28)
         .frame(maxWidth: .infinity)
     }
 
@@ -166,64 +165,46 @@ struct LearningView: View {
         let index = milestones.firstIndex { !progressStore.isCompleted($0.topic.id) }
             ?? milestones.indices.last
 
-        return VStack(alignment: .leading, spacing: 0) {
+        return VStack(alignment: .leading, spacing: 12) {
             Button {
                 presentedSection = .investment
             } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: KnowledgeSection.investment.icon)
-                        .font(.body.weight(.semibold))
-                        .frame(width: 37, height: 37)
-                        .background(.white.opacity(0.12), in: .rect(cornerRadius: 10))
-                        .accessibilityHidden(true)
-
-                    Text("投资学习")
-                        .font(.title3.weight(.semibold))
-
-                    Spacer()
-
+                HStack(spacing: 8) {
+                    Label("投资学习", systemImage: KnowledgeSection.investment.icon)
+                        .font(.subheadline.weight(.semibold))
+                    Spacer(minLength: 4)
                     Image(systemName: "arrow.up.right")
                         .font(.footnote.weight(.semibold))
                         .accessibilityHidden(true)
                 }
-                .padding(.horizontal, 17)
-                .padding(.vertical, 12)
+                .frame(minHeight: 44)
+                .foregroundStyle(KnowledgePagePalette.heroTint)
+                .contentShape(Rectangle())
             }
-            .buttonStyle(LearningPressStyle())
+            .buttonStyle(.plain)
             .accessibilityIdentifier("knowledge-investment-entry")
-
-            Rectangle()
-                .fill(.white.opacity(0.18))
-                .frame(height: 1)
-                .padding(.horizontal, 17)
 
             if let index {
                 let milestone = milestones[index]
-                Button {
-                    resumedLesson = route(for: milestone, at: index, total: milestones.count)
-                } label: {
-                    VStack(alignment: .leading, spacing: 9) {
-                        Text("股票入门 · \(completed == milestones.count ? "复习课程" : "继续学习")")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(KnowledgePagePalette.heroTint)
-
-                        Text(milestone.title)
-                            .font(.title2.weight(.semibold))
-                            .multilineTextAlignment(.leading)
-
-                        ProgressView(value: Double(completed), total: Double(milestones.count))
-                            .tint(KnowledgePagePalette.heroTint)
-                            .accessibilityHidden(true)
-
-                        Text("已完成 \(completed) / \(milestones.count) 节")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.white.opacity(0.82))
+                Text(milestone.title)
+                    .font(.title.weight(.bold))
+                    .multilineTextAlignment(.leading)
+                    .foregroundStyle(.white)
+                ProgressView(value: Double(completed), total: Double(milestones.count))
+                    .tint(KnowledgePagePalette.heroTint)
+                    .accessibilityLabel("课程进度")
+                    .accessibilityValue("已完成 \(completed) 节，共 \(milestones.count) 节")
+                ViewThatFits(in: .horizontal) {
+                    HStack {
+                        progressText(completed, total: milestones.count)
+                        Spacer(minLength: 4)
+                        resumeButton(milestone, index: index, total: milestones.count, isReview: completed == milestones.count)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(17)
+                    VStack(alignment: .leading, spacing: 9) {
+                        progressText(completed, total: milestones.count)
+                        resumeButton(milestone, index: index, total: milestones.count, isReview: completed == milestones.count)
+                    }
                 }
-                .buttonStyle(LearningPressStyle())
-                .accessibilityIdentifier("knowledge-investment-resume")
             } else {
                 Text(store.errorMessage != nil && store.catalog == nil
                      ? "学习路径载入失败"
@@ -231,11 +212,37 @@ struct LearningView: View {
                                        unit: "节视频课", error: store.videoLibraryErrorMessage))
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.82))
-                    .padding(17)
             }
         }
-        .foregroundStyle(.white)
-        .background(KnowledgePagePalette.hero, in: .rect(cornerRadius: 20))
+        .padding(16)
+        .background {
+            RoundedRectangle(cornerRadius: 18)
+                .fill(LinearGradient(
+                    colors: [KnowledgePagePalette.hero, Color(red: 0.18, green: 0.28, blue: 0.38)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                ))
+        }
+    }
+
+    private func progressText(_ completed: Int, total: Int) -> some View {
+        Text("股票入门 · \(completed) / \(total) 节")
+            .font(.footnote.weight(.medium).monospacedDigit())
+            .foregroundStyle(.white.opacity(0.80))
+    }
+
+    private func resumeButton(_ milestone: LearningMilestone, index: Int, total: Int, isReview: Bool) -> some View {
+        Button {
+            resumedLesson = route(for: milestone, at: index, total: total)
+        } label: {
+            Label(isReview ? "复习课程" : "继续学习", systemImage: "arrow.right")
+                .font(.footnote.weight(.semibold))
+                .padding(.horizontal, 12)
+                .frame(minHeight: 44)
+                .foregroundStyle(KnowledgePagePalette.hero)
+                .background(KnowledgePagePalette.heroTint, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("knowledge-investment-resume")
     }
 
     private var bookCollection: some View {
@@ -430,6 +437,7 @@ struct LearningView: View {
                 LearningVideoLessonDetailView(seed: lesson)
             }
         }
+        .knowledgeWebLinks()
         .appPresentationDetents([.large])
         .appPresentationCornerRadius(28)
         .appPresentationScrollsWithoutExpanding()
@@ -451,9 +459,9 @@ struct LearningView: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 20)
             }
+            learningPath(milestones)
             WeeklyStudyCard(studiedDays: progressStore.studyDays())
                 .padding(.horizontal, 20)
-            learningPath(milestones)
         } else if store.isLoading {
             InvestmentContentLoadingView()
         } else {
@@ -619,9 +627,11 @@ struct LearningView: View {
                     unit: "本",
                     error: store.bookshelfErrorMessage
                 ))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(KnowledgePagePalette.reading)
+                BooksReadingSummaryCard(bookshelf: bookshelf, reminder: readingReminder)
 
+                KnowledgeSectionHeading("最近打开")
                 Button {
                     if let url = book.openURL { openURL(url) }
                 } label: {
@@ -629,14 +639,12 @@ struct LearningView: View {
                 }
                 .buttonStyle(LearningPressStyle())
                 .disabled(book.openURL == nil)
-
-                BooksReadingSummaryCard(bookshelf: bookshelf, reminder: readingReminder)
             }
             .padding(.horizontal, 20)
 
             if bookshelf.books.count > 1 {
                 VStack(alignment: .leading, spacing: 10) {
-                    KnowledgeSectionHeading("最近阅读")
+                    KnowledgeSectionHeading("书架")
                     VStack(spacing: 0) {
                         ForEach(Array(bookshelf.books.dropFirst().enumerated()), id: \.element.id) { index, recentBook in
                             Button {
@@ -854,7 +862,7 @@ struct LearningView: View {
                     .padding(.vertical, 8)
             } else {
                 LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 125 : 73), spacing: 8)],
+                    columns: [GridItem(.adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 245 : 145), spacing: 8)],
                     alignment: .leading,
                     spacing: 8
                 ) {
@@ -863,8 +871,8 @@ struct LearningView: View {
                             selectedIdeologyPerson = person
                         } label: {
                             IdeologyPersonGridCell(person: person, baseURL: peopleStore.baseURL)
-                                .padding(.vertical, 10)
-                                .background(color.opacity(0.07), in: .rect(cornerRadius: 12))
+                                .padding(9)
+                                .background(color.opacity(0.08), in: .rect(cornerRadius: 11))
                         }
                         .buttonStyle(LearningPressStyle())
                         .accessibilityIdentifier("ideology-person-\(person.id)")
@@ -970,33 +978,35 @@ private struct KnowledgeCollectionTile<Artwork: View>: View {
 
     var body: some View {
         Button(action: open) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    artwork()
-                        .accessibilityHidden(true)
-                    Spacer(minLength: 0)
-                    Image(systemName: "arrow.up.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(section.tint)
-                        .accessibilityHidden(true)
-                }
-                Text(section.title)
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                Text(itemTitle ?? status)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
-                if itemTitle != nil {
+            HStack(spacing: 12) {
+                artwork()
+                    .frame(width: 53)
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(section.title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    if let itemTitle {
+                        Text(itemTitle)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                    }
                     Text(status)
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(section.tint)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(section.tint)
+                    .accessibilityHidden(true)
             }
             .multilineTextAlignment(.leading)
-            .padding(13)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(section.tint.opacity(0.075), in: .rect(cornerRadius: 17))
+            .padding(12)
+            .contentShape(Rectangle())
         }
         .buttonStyle(LearningPressStyle())
         .accessibilityIdentifier(section.entryIdentifier)
@@ -1056,6 +1066,7 @@ private struct KnowledgeSectionPanel<Content: View>: View {
         .scrollIndicators(.hidden)
         .background(KnowledgePagePalette.canvas.ignoresSafeArea())
         .floatingSheetClose("关闭\(section.title)", action: dismiss.callAsFunction)
+        .knowledgeWebLinks()
         .readingSheetPresentation()
     }
 }
@@ -1067,18 +1078,18 @@ struct KnowledgePageHeading: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            Text(title)
-                .font(.largeTitle.weight(.bold))
-                .accessibilityAddTraits(.isHeader)
-            Spacer(minLength: 6)
             if let icon {
                 Image(systemName: icon)
                     .font(.title3.weight(.medium))
                     .foregroundStyle(tint)
-                    .frame(width: 43, height: 43)
-                    .background(tint.opacity(0.11), in: .rect(cornerRadius: 13))
+                    .frame(width: 44, height: 44)
+                    .background(tint.opacity(0.11), in: .rect(cornerRadius: 11))
                     .accessibilityHidden(true)
             }
+            Text(title)
+                .font(.largeTitle.weight(.bold))
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 0)
         }
     }
 }
@@ -1117,6 +1128,38 @@ extension View {
                     .allowsHitTesting(false)
             }
     }
+}
+
+private struct KnowledgeReadingKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var knowledgeReading: Bool {
+        get { self[KnowledgeReadingKey.self] }
+        set { self[KnowledgeReadingKey.self] = newValue }
+    }
+}
+
+private struct KnowledgeWebLinks: ViewModifier {
+    @State private var link: InAppBrowserDestination?
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.openURL, OpenURLAction { url in
+                guard let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http" else {
+                    return .systemAction
+                }
+                link = InAppBrowserDestination(url: url)
+                return .handled
+            })
+            .inAppBrowserCover(item: $link)
+            .environment(\.knowledgeReading, true)
+    }
+}
+
+extension View {
+    func knowledgeWebLinks() -> some View { modifier(KnowledgeWebLinks()) }
 }
 
 private enum LearningRoute: Hashable, Identifiable {
@@ -1205,21 +1248,25 @@ private struct IdeologyPersonGridCell: View {
     let baseURL: URL
 
     var body: some View {
-        VStack(spacing: 5) {
+        HStack(spacing: 8) {
             AvatarView(
                 url: person.avatarURL(baseURL: baseURL),
                 name: person.name,
-                size: 50,
+                size: 34,
                 assetName: person.avatarAssetName
             )
-
-            Text(person.name)
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.primary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 4)
+            .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(person.name).font(.subheadline.weight(.semibold))
+                if let organization = person.organizationName, !organization.isEmpty {
+                    Text(organization).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
+            }
+            .multilineTextAlignment(.leading)
+            .foregroundStyle(.primary)
+            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
@@ -1362,9 +1409,9 @@ private struct LearningVideoLessonDetailView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         heroMetadata
+                        chapters
                         introduction
                         watchPoints
-                        chapters
                         relatedTopics
                         if detailState == .failed {
                             Button {
@@ -1390,27 +1437,41 @@ private struct LearningVideoLessonDetailView: View {
         .background(InteractivePopGestureEnabler())
         .toolbar(.hidden, for: .navigationBar)
         .appFullScreenCover(isPresented: $showsFullscreenPlayer) {
-            GeometryReader { geometry in
-                ZStack {
-                    Color.black.ignoresSafeArea()
-                    if let player {
-                        LearningInlineVideoPlayer(
-                            player: player,
-                            posterURL: lesson.coverURL,
-                            posterImage: posterImage,
-                            isPlaying: $isPlaying,
-                            currentTime: $currentPlaybackTime,
-                            duration: $playbackDuration,
-                            isFullscreen: true
-                        ) {
-                            dismissFullscreenPlayer()
+            ZStack {
+                Color.black.ignoresSafeArea()
+                if let player {
+                    LearningInlineVideoPlayer(
+                        player: player,
+                        posterURL: lesson.coverURL,
+                        posterImage: posterImage,
+                        isPlaying: $isPlaying,
+                        currentTime: $currentPlaybackTime,
+                        duration: $playbackDuration,
+                        isFullscreen: true,
+                        title: lesson.title,
+                        chapters: lesson.chapters,
+                        onFullscreen: dismissFullscreenPlayer
+                    )
+                } else {
+                    VStack(spacing: 15) {
+                        if playbackState == .loading {
+                            ProgressView("正在加载视频")
+                        } else {
+                            Label("视频暂时无法播放", systemImage: "exclamationmark.circle")
+                            Button("重新加载", systemImage: "arrow.clockwise") { startPlayback(at: lastPlaybackSecond) }
+                                .buttonStyle(.bordered)
                         }
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                        .clipped()
+                    }
+                    .foregroundStyle(.white)
+                    .tint(.white)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(alignment: .bottomTrailing) {
+                        DetailSheetCloseButton(action: dismissFullscreenPlayer, accessibilityLabel: "关闭全屏视频")
+                            .padding(16)
                     }
                 }
-                .frame(width: geometry.size.width, height: geometry.size.height)
             }
+            .preferredColorScheme(.dark)
             .persistentSystemOverlays(.hidden)
             .onDisappear {
                 AppOrientationController.shared.setVideoFullscreen(false)
@@ -1447,6 +1508,10 @@ private struct LearningVideoLessonDetailView: View {
             player?.pause()
             player = nil
         }
+    }
+
+    private var lastPlaybackSecond: Int {
+        currentPlaybackTime.isFinite ? Int(max(0, currentPlaybackTime)) : 0
     }
 
     private var videoSurface: some View {
@@ -1817,7 +1882,11 @@ private struct LearningInlineVideoPlayer: View {
     @Binding var currentTime: Double
     @Binding var duration: Double
     var isFullscreen = false
+    var title: String? = nil
+    var chapters: [LearningVideoChapter] = []
     let onFullscreen: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     @State private var showsControls = true
     @State private var controlsTask: Task<Void, Never>?
     @State private var isSeeking = false
@@ -1867,83 +1936,48 @@ private struct LearningInlineVideoPlayer: View {
             }
 
             if showsControls {
-                HStack(spacing: 28) {
-                    seekButton(seconds: -15, symbol: "gobackward.15")
+                LinearGradient(
+                    colors: [.black.opacity(0.70), .clear, .clear, .black.opacity(0.83)],
+                    startPoint: .top, endPoint: .bottom
+                )
+                .allowsHitTesting(false)
 
-                    Button {
-                        togglePlayback()
-                    } label: {
-                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 23, weight: .bold))
+                VStack(spacing: 0) {
+                    if let title {
+                        Text(title)
+                            .font(.headline)
                             .foregroundStyle(.white)
-                            .frame(width: 58, height: 58)
-                            .background(.white.opacity(0.18), in: Circle())
-                            .overlay {
-                                Circle().stroke(.white.opacity(0.28), lineWidth: 0.8)
-                            }
+                            .lineLimit(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 12)
+                            .padding(.leading, 12)
+                            .padding(.trailing, 60)
+                            .allowsHitTesting(false)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(isPlaying ? "暂停" : "播放")
 
-                    seekButton(seconds: 15, symbol: "goforward.15")
+                    Spacer(minLength: 0)
+                    if isFullscreen {
+                        fullscreenControls
+                    } else {
+                        scrubber
+                            .padding(.horizontal, 12)
+                            .padding(.bottom, 6)
+                    }
                 }
+                .padding(.horizontal, isFullscreen ? 12 : 0)
 
-                VStack {
-                    Spacer()
-                    HStack(spacing: 9) {
-                        Text(timeText(isSeeking ? seekPreview : currentTime))
-                            .frame(width: 38, alignment: .leading)
-
-                        Slider(
-                            value: Binding(
-                                get: {
-                                    min(
-                                        max(isSeeking ? seekPreview : currentTime, 0),
-                                        max(duration, 1)
-                                    )
-                                },
-                                set: { seekPreview = $0 }
-                            ),
-                            in: 0...max(duration, 1),
-                            onEditingChanged: { editing in
-                                isSeeking = editing
-                                if editing {
-                                    seekPreview = currentTime
-                                    controlsTask?.cancel()
-                                } else {
-                                    seek(to: seekPreview)
-                                    if isPlaying { scheduleControlsDismissal() }
-                                }
-                            }
-                        )
-                        .tint(KnowledgePagePalette.accent)
-
-                        Text(timeText(duration))
-                            .frame(width: 38, alignment: .trailing)
+                if !isFullscreen {
+                    HStack(spacing: 16) {
+                        seekButton(seconds: -15, symbol: "gobackward.15")
+                        playPauseButton(diameter: 52)
+                        seekButton(seconds: 15, symbol: "goforward.15")
                     }
-                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .shadow(color: .black.opacity(0.72), radius: 2, y: 1)
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 10)
                 }
             }
         }
         .overlay(alignment: .topTrailing) {
-            Button {
-                controlsTask?.cancel()
-                onFullscreen()
-            } label: {
-                Image(systemName: isFullscreen ? "xmark" : "arrow.up.left.and.arrow.down.right")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .background(.black.opacity(0.55), in: Circle())
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(isFullscreen ? "关闭全屏视频" : "全屏播放")
-            .padding(16)
+            fullscreenButton
+                .padding(isFullscreen ? 14 : 8)
         }
         .onAppear {
             if isPlaying { scheduleControlsDismissal() }
@@ -1963,6 +1997,111 @@ private struct LearningInlineVideoPlayer: View {
         .accessibilityValue("\(Int(currentTime))")
     }
 
+    private var fullscreenButton: some View {
+        Button {
+            controlsTask?.cancel()
+            onFullscreen()
+        } label: {
+            Image(systemName: isFullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(.black.opacity(0.72), in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isFullscreen ? "退出全屏" : "全屏播放")
+    }
+
+    private var fullscreenControls: some View {
+        VStack(spacing: 3) {
+            scrubber
+            ZStack {
+                HStack(spacing: 11) {
+                    seekButton(seconds: -15, symbol: "gobackward.15")
+                    playPauseButton(diameter: 48)
+                    seekButton(seconds: 15, symbol: "goforward.15")
+                }
+                .frame(maxWidth: .infinity)
+
+                if !chapters.isEmpty {
+                    HStack {
+                        Spacer()
+                        Menu {
+                            ForEach(chapters) { chapter in
+                                Button("\(chapter.timestampText)  \(chapter.title)") {
+                                    seek(to: min(Double(chapter.startSeconds), max(duration, 0)))
+                                    if isPlaying { scheduleControlsDismissal() }
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "list.bullet")
+                                .frame(width: 44, height: 44)
+                        }
+                        .accessibilityLabel("视频章节")
+                        .simultaneousGesture(TapGesture().onEnded { controlsTask?.cancel() })
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .foregroundStyle(.white)
+        .background(Color(red: 0.09, green: 0.12, blue: 0.16).opacity(0.92), in: .rect(cornerRadius: 16))
+        .frame(maxWidth: 620)
+        .frame(maxWidth: .infinity)
+        .padding(.bottom, 9)
+    }
+
+    private func playPauseButton(diameter: CGFloat) -> some View {
+        Button(action: togglePlayback) {
+            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(KnowledgePagePalette.hero)
+                .frame(width: diameter, height: diameter)
+                .background(KnowledgePagePalette.heroTint, in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isPlaying ? "暂停" : "播放")
+    }
+
+    private var scrubber: some View {
+        HStack(spacing: 9) {
+            Text(timeText(isSeeking ? seekPreview : currentTime))
+            Slider(
+                value: Binding(
+                    get: { min(max(isSeeking ? seekPreview : currentTime, 0), max(duration, 1)) },
+                    set: { seekPreview = $0 }
+                ),
+                in: 0...max(duration, 1),
+                onEditingChanged: { editing in
+                    isSeeking = editing
+                    if editing {
+                        seekPreview = currentTime
+                        controlsTask?.cancel()
+                    } else {
+                        seek(to: seekPreview)
+                        if isPlaying { scheduleControlsDismissal() }
+                    }
+                }
+            )
+            .tint(KnowledgePagePalette.heroTint)
+            .accessibilityLabel("播放进度")
+            .accessibilityValue("\(timeText(currentTime))，总时长 \(timeText(duration))")
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment: seek(to: min(currentTime + 15, max(duration, 0)))
+                case .decrement: seek(to: max(0, currentTime - 15))
+                @unknown default: break
+                }
+            }
+            Text(timeText(duration))
+        }
+        .font(.caption2.weight(.semibold).monospacedDigit())
+        .foregroundStyle(.white)
+    }
+
     private func seekButton(seconds: Double, symbol: String) -> some View {
         Button {
             let target = min(max(currentTime + seconds, 0), max(duration, 0))
@@ -1972,7 +2111,7 @@ private struct LearningInlineVideoPlayer: View {
             Image(systemName: symbol)
                 .font(.system(size: 21, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 42, height: 42)
+                .frame(width: 44, height: 44)
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -2005,10 +2144,11 @@ private struct LearningInlineVideoPlayer: View {
 
     private func scheduleControlsDismissal() {
         controlsTask?.cancel()
+        guard !voiceOverEnabled else { return }
         controlsTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(3))
             guard !Task.isCancelled, isPlaying, !isSeeking else { return }
-            withAnimation(.easeOut(duration: 0.2)) {
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
                 showsControls = false
             }
         }

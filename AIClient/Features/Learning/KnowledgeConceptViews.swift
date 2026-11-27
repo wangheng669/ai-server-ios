@@ -111,26 +111,23 @@ struct KnowledgeConceptDeck: View {
                         .font(.body)
                         .foregroundStyle(.primary)
                         .lineSpacing(5)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(4)
 
-                    if concept.wikipediaURL != nil {
-                        Button {
-                            open(concept)
-                        } label: {
-                            HStack {
-                                Label("阅读维基百科", systemImage: "book.pages")
-                                Spacer()
-                                Image(systemName: "arrow.up.right")
-                                    .accessibilityHidden(true)
-                            }
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(accent)
-                            .padding(12)
-                            .frame(minHeight: 44)
-                            .background(accent.opacity(0.10), in: .rect(cornerRadius: 12))
+                    Button {
+                        open(concept)
+                    } label: {
+                        HStack {
+                            Label("阅读概念详情", systemImage: "book.pages")
+                            Spacer()
+                            Image(systemName: "arrow.right").accessibilityHidden(true)
                         }
-                        .buttonStyle(.plain)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(accent)
+                        .padding(12)
+                        .frame(minHeight: 44)
+                        .background(accent.opacity(0.10), in: .rect(cornerRadius: 11))
                     }
+                    .buttonStyle(.plain)
 
                     if !concept.imageAttribution.isEmpty {
                         Text(concept.imageAttribution)
@@ -232,11 +229,23 @@ private struct KnowledgeConceptDetailPage: View {
                             heading("相关概念")
                             ForEach(detail.related) { related in
                                 NavigationLink(value: related.id) {
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(related.title).font(.subheadline.weight(.semibold))
-                                        Text(related.subtitle).font(.caption).foregroundStyle(.secondary)
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(related.title).font(.headline)
+                                            if !related.subtitle.isEmpty {
+                                                Text(related.subtitle).font(.footnote).foregroundStyle(.secondary)
+                                            }
+                                        }
+                                        .foregroundStyle(.primary)
+                                        Spacer(minLength: 6)
+                                        Image(systemName: "chevron.right")
+                                            .font(.footnote.weight(.semibold))
+                                            .foregroundStyle(KnowledgePagePalette.archive)
+                                            .accessibilityHidden(true)
                                     }
-                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                    .padding(11)
+                                    .frame(minHeight: 44)
+                                    .knowledgeCard(cornerRadius: 11)
                                 }
                             }
                         }
@@ -257,9 +266,14 @@ private struct KnowledgeConceptDetailPage: View {
                             summary: card.summary, url: url
                         )
                     } label: {
-                        Label("维基百科原文", systemImage: "doc.text.magnifyingglass")
+                            Label("阅读维基百科", systemImage: "book.pages")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(KnowledgePagePalette.archive)
+                            .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+                            .padding(.horizontal, 12)
+                            .knowledgeCard(cornerRadius: 12)
                     }
-                    .frame(minHeight: 44)
+                    .buttonStyle(.plain)
                 }
             }
             .frame(maxWidth: 640, alignment: .leading)
@@ -283,20 +297,43 @@ private struct KnowledgeConceptDetailPage: View {
         }
         .appSheet(item: $reference) { entity in
             WikipediaReaderView(entity: entity)
-                .environment(\.wikipediaReaderChrome, .knowledge)
                 .wikipediaReaderPresentation()
         }
     }
 
     private func header(_ card: KnowledgeConceptCard) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(card.subtitle).font(.subheadline).foregroundStyle(.secondary)
-            Text(card.title).font(.largeTitle.weight(.bold)).accessibilityAddTraits(.isHeader)
-            Text(card.summary)
+        VStack(alignment: .leading, spacing: 12) {
+            if let url = card.coverURL {
+                KnowledgeConceptCachedImage(url: url) { image in
+                    image.resizable().scaledToFit()
+                } placeholder: { loading in
+                    if loading { ProgressView().frame(maxWidth: .infinity, minHeight: 70) }
+                }
+                .frame(maxWidth: .infinity, maxHeight: 265)
+                .clipShape(.rect(cornerRadius: 12))
+                if !card.imageAttribution.isEmpty {
+                    Text(card.imageAttribution).font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            Text(card.kind.title)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(KnowledgePagePalette.archive)
+            Text(card.title)
+                .font(.largeTitle.weight(.bold))
+                .accessibilityAddTraits(.isHeader)
+            if !card.subtitle.isEmpty {
+                Text(card.subtitle).font(.subheadline).foregroundStyle(.secondary)
+            }
+            Text(card.summary).font(.body).lineSpacing(5)
             if !card.importance.isEmpty {
-                Text(card.importance).foregroundStyle(.secondary)
+                Label(card.importance, systemImage: "lightbulb")
+                    .font(.subheadline)
+                    .foregroundStyle(KnowledgePagePalette.archive)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(15)
+        .background(KnowledgePagePalette.archive.opacity(0.07), in: .rect(cornerRadius: 16))
     }
 
     @ViewBuilder
@@ -306,9 +343,12 @@ private struct KnowledgeConceptDetailPage: View {
             VStack(alignment: .leading, spacing: 8) {
                 heading(title)
                 ForEach(Array(content.enumerated()), id: \.offset) { _, line in
-                    Text(line).font(.subheadline)
+                    Text(line).font(.body).lineSpacing(4).textSelection(.enabled)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
+            .knowledgeCard(cornerRadius: 13)
         }
     }
 
@@ -318,10 +358,17 @@ private struct KnowledgeConceptDetailPage: View {
             VStack(alignment: .leading, spacing: 12) {
                 heading("时间线")
                 ForEach(Array(points.enumerated()), id: \.offset) { _, point in
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(point.date).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                        Text(point.title).font(.subheadline.weight(.semibold))
-                        Text(point.description).font(.subheadline)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(point.date)
+                            .font(.footnote.monospacedDigit().weight(.semibold))
+                            .foregroundStyle(KnowledgePagePalette.archive)
+                        Text(point.title).font(.headline)
+                        Text(point.description).font(.subheadline).lineSpacing(4)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 10)
+                    .overlay(alignment: .leading) {
+                        Capsule().fill(KnowledgePagePalette.archive.opacity(0.4)).frame(width: 2)
                     }
                 }
             }

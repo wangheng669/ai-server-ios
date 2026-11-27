@@ -86,6 +86,7 @@ struct PostDetailView: View {
     @State private var xueqiuOpenFailed = false
     @State private var presentedArticleLink: InAppBrowserDestination?
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.knowledgeReading) private var knowledgeReading
 
     init(
         post: Post,
@@ -128,6 +129,22 @@ struct PostDetailView: View {
             else if post.isWeiboRSS { weiboDetail }
             else if post.isRSS { rssDetail }
             else { standardDetail }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if knowledgeReading && post.sourceName != "X" {
+                HStack(spacing: 7) {
+                    Image(systemName: "doc.text").accessibilityHidden(true)
+                    Text(post.sourceName.isEmpty ? "动态详情" : post.sourceName)
+                        .accessibilityAddTraits(.isHeader)
+                    Spacer()
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(KnowledgePagePalette.accent)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(KnowledgePagePalette.surface)
+                .overlay(alignment: .bottom) { Divider() }
+            }
         }
         .floatingSheetClose(
             post.isNewYorkTimes ? "关闭文章" : post.isBilibili ? "关闭视频详情" : "关闭动态详情",
@@ -1970,14 +1987,17 @@ struct PostDetailView: View {
     private var xDetail: some View {
         VStack(spacing: 0) {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
+                LazyVStack(alignment: .leading, spacing: knowledgeReading ? 10 : 0) {
+                    if knowledgeReading {
+                        KnowledgeSectionHeading("动态详情", detail: "X")
+                    }
                     VStack(alignment: .leading, spacing: 0) {
                         xAuthorHeader
                         VStack(alignment: .leading, spacing: 16) {
                             ForEach(Array(xDisplayedDetailParagraphs.enumerated()), id: \.offset) { _, paragraph in
                                 Text(xStyledParagraph(paragraph))
-                                    .font(.system(size: 17, weight: .regular))
-                                    .lineSpacing(3)
+                                    .font(knowledgeReading ? .body : .system(size: 17, weight: .regular))
+                                    .lineSpacing(knowledgeReading ? 6 : 3)
                                     .fixedSize(horizontal: false, vertical: true)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
@@ -2082,11 +2102,12 @@ struct PostDetailView: View {
                         .foregroundStyle(.secondary)
                         .padding(.top, 18)
                     }
-                    .padding(.horizontal, 10)
+                    .padding(.horizontal, knowledgeReading ? 14 : 10)
                     .padding(.top, 14)
                     .padding(.bottom, 12)
+                    .background(knowledgeReading ? KnowledgePagePalette.surface : .clear, in: .rect(cornerRadius: 15))
 
-                    Divider()
+                    if !knowledgeReading { Divider() }
                     FeedEngagementRow(
                         post: xLiveDetail.map { post.replacingXLiveDetail(with: $0) } ?? post,
                         showsOnlyLikeAndBookmark: true,
@@ -2094,19 +2115,22 @@ struct PostDetailView: View {
                     )
                         .padding(.horizontal, 15)
                         .frame(height: 44)
+                        .background(knowledgeReading ? KnowledgePagePalette.surface : .clear, in: .rect(cornerRadius: 12))
                     if isLoadingXComments || xCommentsError != nil || !xComments.isEmpty {
-                        Divider()
-                        HStack {
-                            Text("回复").font(.system(size: 17, weight: .bold))
-                            Spacer()
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.top, 18)
-                        .padding(.bottom, 8)
+                        if !knowledgeReading { Divider() }
+                        KnowledgeSectionHeading("回复")
+                            .padding(.horizontal, 12)
+                            .padding(.top, 12)
+                            .padding(.bottom, 6)
 
                         xCommentsSection
+                            .background(knowledgeReading ? KnowledgePagePalette.surface : .clear, in: .rect(cornerRadius: 15))
                     }
                 }
+                .frame(maxWidth: knowledgeReading ? 650 : .infinity)
+                .padding(.horizontal, knowledgeReading ? 16 : 0)
+                .padding(.top, knowledgeReading ? 15 : 0)
+                .frame(maxWidth: .infinity)
                 .padding(.bottom, 76)
                 .measureReadingSheetContent(
                     when: hasFinishedLoadingDetail && !isLoadingXFullText && !isLoadingXComments && !xDetailHasMedia
@@ -2115,7 +2139,7 @@ struct PostDetailView: View {
             // Keep scrolled content inside the viewport, below the status bar.
             .clipped()
         }
-        .background(Color(uiColor: .systemBackground))
+        .background(knowledgeReading ? KnowledgePagePalette.canvas : Color(uiColor: .systemBackground))
         .overlay(alignment: .bottomTrailing) {
             DetailSheetControls(closeLabel: "关闭动态详情", onClose: dismiss.callAsFunction) {
                 if post.linkURL != nil {
@@ -3904,6 +3928,7 @@ struct XAuthorPostsView: View {
     @State private var selectedPost: Post?
     @State private var isResolvingAuthor = true
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.knowledgeReading) private var knowledgeReading
 
     init(author: XAuthorDestination) {
         self.author = author
@@ -3924,7 +3949,7 @@ struct XAuthorPostsView: View {
                 }
                 .accessibilityLabel("返回")
                 Spacer()
-                Text(author.name).font(.headline).lineLimit(1)
+                Text(knowledgeReading ? "作者动态" : author.name).font(.headline).lineLimit(1)
                 Spacer()
                 Color.clear.frame(width: 44, height: 44)
             }
@@ -3932,17 +3957,22 @@ struct XAuthorPostsView: View {
             .foregroundStyle(.primary)
 
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
+                LazyVStack(alignment: .leading, spacing: knowledgeReading ? 10 : 0) {
                     HStack(spacing: 12) {
                         AvatarView(url: author.resolvedAvatarURL(in: model.posts), name: author.name, size: 56)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(author.name).font(.title3.bold())
+                            Text(author.name)
+                                .font(knowledgeReading ? .title2.bold() : .title3.bold())
+                                .accessibilityAddTraits(.isHeader)
                             Text("@" + author.normalizedHandle).font(.subheadline).foregroundStyle(.secondary)
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(16)
-                    Text("帖子").font(.headline).padding(.horizontal, 16).padding(.bottom, 12)
-                    Divider()
+                    .background(knowledgeReading ? KnowledgePagePalette.accent.opacity(0.09) : .clear, in: .rect(cornerRadius: 15))
+                    KnowledgeSectionHeading("帖子")
+                        .padding(.horizontal, knowledgeReading ? 0 : 16)
+                    if !knowledgeReading { Divider() }
                     if (isResolvingAuthor || model.isLoading) && model.posts.isEmpty {
                         ProgressView("正在加载帖子…").frame(maxWidth: .infinity).padding(32)
                     } else if let error = model.errorMessage, model.posts.isEmpty {
@@ -3964,7 +3994,8 @@ struct XAuthorPostsView: View {
                                     // clear footer can stay unrealized at the scroll boundary.
                                     Task { await model.loadMoreIfNeeded(current: post) }
                                 }
-                            Divider()
+                                .background(knowledgeReading ? KnowledgePagePalette.surface : .clear, in: .rect(cornerRadius: 14))
+                            if !knowledgeReading { Divider() }
                         }
                         if model.isLoadingMore {
                             ProgressView().frame(maxWidth: .infinity).padding(20)
@@ -3991,11 +4022,15 @@ struct XAuthorPostsView: View {
                         }
                     }
                 }
+                .frame(maxWidth: knowledgeReading ? 650 : .infinity)
+                .padding(.horizontal, knowledgeReading ? 16 : 0)
+                .padding(.top, knowledgeReading ? 10 : 0)
+                .frame(maxWidth: .infinity)
             }
             .accessibilityIdentifier("x-author-posts")
             .clipped()
         }
-        .background(Color(uiColor: .systemBackground))
+        .background(knowledgeReading ? KnowledgePagePalette.canvas : Color(uiColor: .systemBackground))
         .toolbar(.hidden, for: .navigationBar)
         .appSheet(item: $selectedPost) { post in
             NavigationStack {

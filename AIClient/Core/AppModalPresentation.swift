@@ -113,8 +113,15 @@ private struct AppModalPresenter<Sheet: View>: UIViewControllerRepresentable {
         coordinator.initialContentHeight = initialContentHeight
         let openURL = context.environment.openURL
         let scenePhase = context.environment.scenePhase
+        let knowledgeReading = context.environment.knowledgeReading
         coordinator.content = content.map { content in
-            ContentView(content: content, identity: identity, openURL: openURL, scenePhase: scenePhase) { [weak coordinator] options in
+            ContentView(
+                content: content,
+                identity: identity,
+                openURL: openURL,
+                scenePhase: scenePhase,
+                knowledgeReading: knowledgeReading
+            ) { [weak coordinator] options in
                 coordinator?.updateOptions(options)
             }
         }
@@ -149,6 +156,7 @@ private struct AppModalPresenter<Sheet: View>: UIViewControllerRepresentable {
         let identity: AnyHashable?
         let openURL: OpenURLAction
         let scenePhase: ScenePhase
+        let knowledgeReading: Bool
         let onOptions: (AppModalOptions) -> Void
         var body: some View {
             content
@@ -157,6 +165,7 @@ private struct AppModalPresenter<Sheet: View>: UIViewControllerRepresentable {
                 .onPreferenceChange(AppModalOptionsKey.self, perform: onOptions)
                 .environment(\.openURL, openURL)
                 .environment(\.scenePhase, scenePhase)
+                .environment(\.knowledgeReading, knowledgeReading)
                 .environment(\.rootTabIsActive, true)
                 .environment(\.rootBottomChromeHeight, 0)
         }
