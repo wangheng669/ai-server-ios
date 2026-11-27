@@ -1504,26 +1504,29 @@ private struct PersonProfileView: View {
 
             if !person.relatedPeople.isEmpty {
                 profileSection("相关人物") {
-                    HStack(alignment: .top, spacing: 12) {
-                        ForEach(person.relatedPeople.prefix(3)) { related in
-                            VStack(spacing: 6) {
-                                AvatarView(
-                                    url: related.avatarURL(baseURL: ServerConfiguration.currentURL),
-                                    name: related.name,
-                                    size: 46,
-                                    assetName: related.avatarAssetName
-                                )
-                                Text(related.name)
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .lineLimit(1)
-                                Text(related.relationship)
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
+                    ScrollView(.horizontal) {
+                        LazyHStack(alignment: .top, spacing: 12) {
+                            ForEach(person.relatedPeople) { related in
+                                VStack(spacing: 6) {
+                                    AvatarView(
+                                        url: related.avatarURL(baseURL: ServerConfiguration.currentURL),
+                                        name: related.name,
+                                        size: 46,
+                                        assetName: related.avatarAssetName
+                                    )
+                                    Text(related.name)
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .lineLimit(1)
+                                    Text(related.relationship)
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                                .frame(width: 88)
                             }
-                            .frame(maxWidth: .infinity)
                         }
                     }
+                    .scrollIndicators(.hidden)
                 }
             }
 

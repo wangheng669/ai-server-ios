@@ -45,6 +45,10 @@ struct LearningService {
         try await fetch(learningURL.appending(path: "concepts"), onCached: onCached)
     }
 
+    func fetchConcept(id: String) async throws -> KnowledgeConceptDetail {
+        try await fetch(learningURL.appending(path: "concepts").appending(path: id))
+    }
+
     func fetchVideoLessons(onCached: (@MainActor (LearningVideoLibrary) -> Void)? = nil) async throws -> LearningVideoLibrary {
         try await fetch(learningURL.appending(path: "video-lessons"), onCached: onCached)
     }
