@@ -2,8 +2,12 @@ import SwiftUI
 
 private struct AgendaEvent: Decodable, Identifiable {
     let id, date, title, kind, region, status, detail, source: String
-    let time, publishedAt: String?
+    let time, publishedAt, endDate: String?
     let sourceURL: URL
+    func overlaps(_ start: String, _ end: String) -> Bool {
+        date <= end && (endDate ?? date) >= start
+    }
+
     var statusLabel: String {
         switch status {
         case "announced": "官方日程"
@@ -73,13 +77,14 @@ struct MarketAgendaView: View {
         let end = Self.calendar.date(byAdding: .day, value: range == .week ? 6 : 29, to: today) ?? today
         return all.filter { e in
             guard markets[filter].map({ $0 == e.region }) ?? true, kinds[category].map({ $0 == e.kind }) ?? true else { return false }
-            if range == .day { return selected.map { key($0) == e.date } ?? false }
-            return e.date >= key(today) && e.date <= key(end)
+            if range == .day { return selected.map { e.overlaps(key($0), key($0)) } ?? false }
+            return e.overlaps(key(today), key(end))
         }.sorted { ($0.date, $0.time ?? "99:99", $0.title) < ($1.date, $1.time ?? "99:99", $1.title) }
     }
-    private var daysWithEvents: Set<String> { Set((loadedQuery == queryKey ? snapshot?.events ?? [] : []).map(\.date)) }
+    private var monthEvents: [AgendaEvent] { loadedQuery == queryKey ? snapshot?.events ?? [] : [] }
     private var grouped: [(date: String, events: [AgendaEvent])] {
-        let groups = Dictionary(grouping: visible, by: \.date)
+        let start = key(range == .day ? selected ?? today : today)
+        let groups = Dictionary(grouping: visible) { max(start, $0.date) }
         return groups.keys.sorted().map { ($0, groups[$0] ?? []) }
     }
 
@@ -167,7 +172,8 @@ struct MarketAgendaView: View {
                 ForEach(0..<days, id: \.self) { index in
                     if let date = c.date(byAdding: .day, value: index, to: month) {
                         let active = selected == date || (range != .day && date == today)
-                        let dot = daysWithEvents.contains(key(date))
+                        let day = key(date)
+                        let dot = monthEvents.contains { $0.overlaps(day, day) }
                         Button {
                             selected = date
                             range = .day
@@ -196,6 +202,9 @@ struct MarketAgendaView: View {
         )) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(event.detail).font(.subheadline)
+                if let end = event.endDate {
+                    Text("\(event.date) 至 \(end)").font(.caption).foregroundStyle(.secondary)
+                }
                 if let at = event.publishedAt {
                     Text("通稿发布：\(at)").font(.caption).foregroundStyle(.secondary)
                 }
