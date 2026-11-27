@@ -97,44 +97,26 @@ private struct TodayCompanyStock: Sendable {
     let name: String
     let symbol: String
 
-    private static let bySystem: [String: Self] = [
-        "pichai": .init(name: "Alphabet", symbol: "GOOGL"),
-        "nadella": .init(name: "微软", symbol: "MSFT"),
-        "huang": .init(name: "英伟达", symbol: "NVDA"),
-        "amodei": .init(name: "Anthropic", symbol: "ANT"),
-        "zuckerberg": .init(name: "Meta", symbol: "META"),
-        "apple": .init(name: "苹果", symbol: "AAPL"),
-        "amazon": .init(name: "亚马逊", symbol: "AMZN"),
-        "amd": .init(name: "AMD", symbol: "AMD"),
-        "world-labs": .init(name: "AMD（母公司）", symbol: "AMD"),
-        "minimax": .init(name: "MiniMax", symbol: "0100.HK"),
-        "zai": .init(name: "智谱", symbol: "2513.HK"),
-        "tencent": .init(name: "腾讯", symbol: "0700.HK"),
-        "qwen": .init(name: "阿里巴巴", symbol: "9988.HK")
+    private static let bySystem: [String: [Self]] = [
+        "pichai": [.init(name: "Alphabet", symbol: "GOOGL")],
+        "nadella": [.init(name: "微软", symbol: "MSFT")],
+        "huang": [.init(name: "英伟达", symbol: "NVDA")],
+        "amodei": [.init(name: "Anthropic", symbol: "ANT")],
+        "zuckerberg": [.init(name: "Meta", symbol: "META")],
+        "apple": [.init(name: "苹果", symbol: "AAPL")],
+        "amazon": [.init(name: "亚马逊", symbol: "AMZN")],
+        "amd": [.init(name: "AMD", symbol: "AMD")],
+        "world-labs": [.init(name: "AMD（母公司）", symbol: "AMD")],
+        "minimax": [.init(name: "MiniMax", symbol: "0100.HK")],
+        "zai": [.init(name: "智谱", symbol: "2513.HK")],
+        "tencent": [.init(name: "腾讯", symbol: "0700.HK")],
+        "qwen": [.init(name: "阿里巴巴", symbol: "9988.HK")],
+        "musk": [.init(name: "SpaceX", symbol: "SPCX"), .init(name: "特斯拉", symbol: "TSLA")]
     ]
 
-    private static let spaceXSources: Set<String> = ["spacex", "xai", "grok", "x", "gwynne-shotwell"]
-
-    static func match(systemKey: String, sourceKeys: Set<String>) -> Self? {
-        guard systemKey == "musk" else { return bySystem[systemKey] }
-        if !sourceKeys.isEmpty, sourceKeys.isSubset(of: spaceXSources) {
-            let name = sourceKeys.isSubset(of: ["spacex", "gwynne-shotwell"]) ? "SpaceX" : "SpaceX（母公司）"
-            return Self(name: name, symbol: "SPCX")
-        }
-        if sourceKeys == ["tesla"] { return Self(name: "特斯拉", symbol: "TSLA") }
-        return nil
-    }
-
-    static func match(event: TodayReadingEvent, systems: [TodayWorldFinalReportSystem]) -> Self? {
-        guard let key = event.companySystemKey else { return nil }
-        guard key == "musk" else { return match(systemKey: key, sourceKeys: []) }
-        // This report group covers several companies. Attribute only the sources cited by this card.
-        let postIDs = Set(event.postIDs)
-        let citedFacts = systems.filter { $0.systemKey == key }.flatMap(\.facts).filter {
-            !postIDs.isDisjoint(with: $0.postIDs)
-        }
-        guard !postIDs.isEmpty, postIDs.isSubset(of: Set(citedFacts.flatMap(\.postIDs))) else { return nil }
-        return match(systemKey: key, sourceKeys: Set(citedFacts.flatMap(\.sourceKeys)))
+    static func associated(with systemKey: String?) -> [Self] {
+        guard let systemKey else { return [] }
+        return bySystem[systemKey] ?? []
     }
 }
 
@@ -185,7 +167,7 @@ struct TodayBriefProjection: Sendable {
         let content: Content
         let followUps: [String]
         let section: String
-        let stock: TodayCompanyStock?
+        let stocks: [TodayCompanyStock]
         let activityPostIDs: Set<Int>
 
         var sourceLabel: String {
@@ -298,7 +280,7 @@ struct TodayBriefProjection: Sendable {
             }
             return Card(
                 id: "highlight-" + event.id, content: .event(event), followUps: followUps,
-                section: "重点", stock: TodayCompanyStock.match(event: event, systems: systems),
+                section: "重点", stocks: TodayCompanyStock.associated(with: event.companySystemKey),
                 activityPostIDs: event.companySystemKey == nil ? [] : Set(item.postIDs.filter { $0 > 0 })
             )
         }
@@ -318,7 +300,7 @@ struct TodayBriefProjection: Sendable {
                         content: .company(CompanyCard(system, fact: fact)),
                         followUps: takeFollowUps(for: key),
                         section: section.sectionName,
-                        stock: TodayCompanyStock.match(systemKey: system.systemKey, sourceKeys: Set(fact?.sourceKeys ?? [])),
+                        stocks: TodayCompanyStock.associated(with: system.systemKey),
                         activityPostIDs: Set((fact?.postIDs ?? []).filter { $0 > 0 })
                     ))
                 }
@@ -328,7 +310,7 @@ struct TodayBriefProjection: Sendable {
             let event = TodayReadingEvent.highlight(watch.item, systems: systems)
             return Card(
                 id: "watch-" + event.id, content: .event(event), followUps: [],
-                section: "后续关注", stock: TodayCompanyStock.match(event: event, systems: systems),
+                section: "后续关注", stocks: TodayCompanyStock.associated(with: event.companySystemKey),
                 activityPostIDs: event.companySystemKey == nil ? [] : Set(watch.item.postIDs.filter { $0 > 0 })
             )
         }
@@ -339,7 +321,7 @@ struct TodayBriefProjection: Sendable {
             return SectionShortcut(title: card.section, firstCardIndex: index)
         }
         var seenSymbols = Set<String>()
-        stockSymbols = cards.compactMap { $0.stock?.symbol }.filter { seenSymbols.insert($0).inserted }
+        stockSymbols = cards.flatMap(\.stocks).map(\.symbol).filter { seenSymbols.insert($0).inserted }
         sourceIDs = Set(cards.flatMap(\.postIDs)).union(cards.flatMap(\.activityPostIDs)).sorted()
         activityReportReferences = TodayActivityReportReferences(
             postIDs: sourceIDs,
@@ -668,11 +650,10 @@ private struct TodayBriefDeck: View {
         let selection = min(selectedIndex, brief.cards.count - 1)
         let card = brief.cards[selection]
         let cardHeight = summaryHeights[card.id] ?? min(350, maximumHeight)
-        let stock = card.stock
         let activityQuery = brief.activityQuery(for: card)
         let activeActivityQuery = rootTabIsActive && scenePhase == .active ? activityQuery : nil
         let stockSymbols = rootTabIsActive && scenePhase == .active ? brief.stockSymbols : []
-        let visibleStockSymbol = !stockSymbols.isEmpty && !showsOriginals ? stock?.symbol : nil
+        let visibleStockSymbols = !stockSymbols.isEmpty && !showsOriginals ? card.stocks.map(\.symbol) : []
         ZStack(alignment: .top) {
             if showsOriginals {
                 Color.clear.contentShape(Rectangle())
@@ -706,11 +687,13 @@ private struct TodayBriefDeck: View {
             guard let activeActivityQuery else { return }
             await activityStore.observe(query: activeActivityQuery, client: APIClient(baseURL: ServerConfiguration.currentURL))
         }
-        .task(id: visibleStockSymbol, priority: .utility) {
-            guard let visibleStockSymbol else { return }
+        .task(id: visibleStockSymbols, priority: .utility) {
+            guard !visibleStockSymbols.isEmpty else { return }
             do { try await Task.sleep(for: .milliseconds(250)) }
             catch { return }
-            await marketStore.preloadStockCharts(symbol: visibleStockSymbol, ranges: [.day, .week, .year])
+            for symbol in visibleStockSymbols {
+                await marketStore.preloadStockCharts(symbol: symbol, ranges: [.day, .week, .year])
+            }
         }
         .task(id: stockSymbols, priority: .utility) {
             guard !stockSymbols.isEmpty else { return }
@@ -1117,6 +1100,7 @@ private struct TodayCompanyStockPrice: View {
 
     let stock: TodayCompanyStock
     let marketStore: MarketStore
+    var showsIdentity = false
     let onOpen: () -> Void
 
     var body: some View {
@@ -1129,7 +1113,12 @@ private struct TodayCompanyStockPrice: View {
         let changeText = change.map(marketFormattedChangePercent) ?? "涨跌幅暂缺"
         let animation: Animation? = reduceMotion ? nil : .easeOut(duration: 0.28)
         Button(action: onOpen) {
-            VStack(alignment: .trailing, spacing: 2) {
+            VStack(alignment: showsIdentity ? .leading : .trailing, spacing: 2) {
+                if showsIdentity {
+                    Text("\(stock.name) · \(stock.symbol)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(TodayBriefStyle.ink)
+                }
                 if let price, let amount {
                     Text(amount)
                         .font(.body.weight(.semibold))
@@ -1154,11 +1143,19 @@ private struct TodayCompanyStockPrice: View {
                 Text(price?.label ?? status)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.trailing)
+                    .multilineTextAlignment(showsIdentity ? .leading : .trailing)
                     .lineLimit(2)
             }
             .monospacedDigit()
-            .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
+            .padding(.horizontal, showsIdentity ? 10 : 0)
+            .padding(.vertical, showsIdentity ? 8 : 0)
+            .frame(minWidth: 44, maxWidth: showsIdentity ? .infinity : nil, minHeight: 44,
+                   alignment: showsIdentity ? .leading : .trailing)
+            .background {
+                if showsIdentity {
+                    RoundedRectangle(cornerRadius: 10).fill(TodayBriefStyle.accent.opacity(0.06))
+                }
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1173,6 +1170,7 @@ private struct TodayCompanyStockPrice: View {
 }
 
 private struct TodayBriefCardFace: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var identityHeight: CGFloat = 40
     @State private var followUpHeight: CGFloat = 0
 
@@ -1215,14 +1213,28 @@ private struct TodayBriefCardFace: View {
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
-            identity
-            Spacer(minLength: 0)
-            if let stock = card.stock {
-                TodayCompanyStockPrice(stock: stock, marketStore: marketStore) {
-                    openStock(stock)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                identity
+                Spacer(minLength: 0)
+                if card.stocks.count == 1, let stock = card.stocks.first {
+                    TodayCompanyStockPrice(stock: stock, marketStore: marketStore) {
+                        openStock(stock)
+                    }
+                    .layoutPriority(1)
                 }
-                .layoutPriority(1)
+            }
+            if card.stocks.count > 1 {
+                let layout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(spacing: 8))
+                    : AnyLayout(HStackLayout(alignment: .top, spacing: 8))
+                layout {
+                    ForEach(card.stocks, id: \.symbol) { stock in
+                        TodayCompanyStockPrice(stock: stock, marketStore: marketStore, showsIdentity: true) {
+                            openStock(stock)
+                        }
+                    }
+                }
             }
         }
     }
