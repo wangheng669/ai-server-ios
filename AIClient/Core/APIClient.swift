@@ -875,8 +875,9 @@ struct NewYorkTimesArticlePhoto: Equatable {
     }
 
     private static func assetPath(for url: URL) -> String {
+        // Strip the rendition while retaining any revision of the source photo.
         url.deletingPathExtension().path.replacingOccurrences(
-            of: #"-(?:article[A-Za-z]+|master[0-9]+|thumb[A-Za-z]+|superJumbo|jumbo)$"#,
+            of: #"-(?:article[A-Za-z]+|videoLarge|master[0-9]+|thumb[A-Za-z]+|superJumbo|jumbo)(?=(?:-v[0-9]+)?$)"#,
             with: "",
             options: .regularExpression
         )
