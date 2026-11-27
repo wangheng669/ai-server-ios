@@ -44,7 +44,7 @@ struct LearningDetailView: View {
             }
         }
         .overlay(alignment: .bottomTrailing) { detailActions.padding(12) }
-        .background(LearningDetailPalette.canvas.ignoresSafeArea())
+        .background(KnowledgePagePalette.canvas.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .background(InteractivePopGestureEnabler())
         .simultaneousGesture(edgeBackGesture)
@@ -67,9 +67,9 @@ struct LearningDetailView: View {
     private func progressRule(_ progress: CGFloat) -> some View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
-                Rectangle().fill(LearningDetailPalette.stroke)
+                Rectangle().fill(KnowledgePagePalette.stroke)
                 Rectangle()
-                    .fill(LearningDetailPalette.accent)
+                    .fill(KnowledgePagePalette.accent)
                     .frame(width: geometry.size.width * progress)
             }
         }
@@ -96,18 +96,6 @@ struct LearningDetailView: View {
     }
 }
 
-private enum LearningDetailPalette {
-    static let accent = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.94, green: 0.57, blue: 0.35, alpha: 1)
-            : UIColor(red: 0.76, green: 0.29, blue: 0.12, alpha: 1)
-    })
-    static let sage = Color(red: 0.40, green: 0.48, blue: 0.39)
-    static let canvas = Color(uiColor: .systemBackground)
-    static let surface = Color(uiColor: .secondarySystemBackground)
-    static let stroke = Color.primary.opacity(0.10)
-}
-
 private struct LearningDetailPlaceholder: View {
     let topic: LearningTopic
 
@@ -117,24 +105,24 @@ private struct LearningDetailPlaceholder: View {
                 lessonLabel
 
                 Text(topic.title)
-                    .font(.system(size: 32, weight: .bold, design: .serif))
-                    .tracking(-0.35)
+                    .font(.largeTitle.weight(.bold))
+                    .accessibilityAddTraits(.isHeader)
                     .padding(.top, 13)
                     .padding(.bottom, 10)
 
                 if !topic.summary.isEmpty {
                     Text(topic.summary)
-                        .font(.system(size: 16))
+                        .font(.body)
                         .foregroundStyle(.secondary)
                         .lineSpacing(5)
                         .padding(.bottom, 22)
                 }
 
                 ContentLoadingPlaceholder(title: "正在载入本节内容", rowCount: 1)
-                    .background(LearningDetailPalette.surface, in: RoundedRectangle(cornerRadius: 14))
+                    .background(KnowledgePagePalette.surface, in: RoundedRectangle(cornerRadius: 14))
                     .overlay {
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(LearningDetailPalette.stroke, lineWidth: 0.8)
+                            .stroke(KnowledgePagePalette.stroke, lineWidth: 0.8)
                     }
 
                 ForEach(0..<4, id: \.self) { index in
@@ -145,8 +133,10 @@ private struct LearningDetailPlaceholder: View {
                         .padding(.top, index == 0 ? 30 : 16)
                 }
             }
+            .frame(maxWidth: 650, alignment: .leading)
             .padding(.horizontal, 20)
             .padding(.top, 24)
+            .frame(maxWidth: .infinity)
             .padding(.bottom, 40)
         }
         .scrollIndicators(.hidden)
@@ -156,14 +146,14 @@ private struct LearningDetailPlaceholder: View {
     private var lessonLabel: some View {
         HStack(spacing: 7) {
             Circle()
-                .fill(LearningDetailPalette.accent)
+                .fill(KnowledgePagePalette.accent)
                 .frame(width: 7, height: 7)
             Text(topic.category)
             Text("·")
             Text("正在载入")
         }
         .font(.system(size: 12, weight: .semibold))
-        .foregroundStyle(LearningDetailPalette.accent)
+        .foregroundStyle(KnowledgePagePalette.accent)
     }
 }
 
@@ -183,15 +173,15 @@ private struct LearningArticleView: View {
                 lessonLabel
 
                 Text(detail.title)
-                    .font(.system(size: 32, weight: .bold, design: .serif))
-                    .tracking(-0.35)
+                    .font(.largeTitle.weight(.bold))
+                    .accessibilityAddTraits(.isHeader)
                     .lineSpacing(2)
                     .padding(.top, 13)
                     .padding(.bottom, 11)
 
                 if !detail.subtitle.isEmpty {
                     Text(detail.subtitle)
-                        .font(.system(size: 16))
+                        .font(.body)
                         .foregroundStyle(.secondary)
                         .lineSpacing(5)
                         .padding(.bottom, 15)
@@ -238,8 +228,10 @@ private struct LearningArticleView: View {
                     .padding(.top, 18)
                     .padding(.bottom, 92)
             }
+            .frame(maxWidth: 650, alignment: .leading)
             .padding(.horizontal, 20)
             .padding(.top, 24)
+            .frame(maxWidth: .infinity)
         }
         .scrollIndicators(.hidden)
         .accessibilityIdentifier("learning-article-scroll")
@@ -251,14 +243,14 @@ private struct LearningArticleView: View {
     private var lessonLabel: some View {
         HStack(spacing: 7) {
             Circle()
-                .fill(LearningDetailPalette.accent)
+                .fill(KnowledgePagePalette.accent)
                 .frame(width: 7, height: 7)
             Text(topic.category)
             Text("·")
             Text(durationText)
         }
         .font(.system(size: 12, weight: .semibold))
-        .foregroundStyle(LearningDetailPalette.accent)
+        .foregroundStyle(KnowledgePagePalette.accent)
     }
 
     private var metadata: some View {
@@ -281,9 +273,9 @@ private struct LearningArticleView: View {
         HStack(alignment: .top, spacing: 13) {
             Image(systemName: "scope")
                 .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(LearningDetailPalette.accent)
+                .foregroundStyle(KnowledgePagePalette.accent)
                 .frame(width: 34, height: 34)
-                .background(LearningDetailPalette.accent.opacity(0.10), in: Circle())
+                .background(KnowledgePagePalette.accent.opacity(0.10), in: Circle())
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("本节目标")
@@ -297,11 +289,11 @@ private struct LearningArticleView: View {
             Spacer(minLength: 0)
         }
         .padding(15)
-        .background(LearningDetailPalette.surface)
+        .background(KnowledgePagePalette.surface)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(LearningDetailPalette.stroke, lineWidth: 0.8)
+                .stroke(KnowledgePagePalette.stroke, lineWidth: 0.8)
         }
     }
 
@@ -309,22 +301,15 @@ private struct LearningArticleView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(isCompleted ? "本节已完成" : "读完了吗？")
-                        .font(.system(size: 16, weight: .semibold))
-                    Text(
-                        isCompleted
-                            ? "完成记录已保存，可以继续学习下一节"
-                            : "确认完成后才会计入真实学习进度"
-                    )
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                    Text(isCompleted ? "本节已完成" : "学习进度")
+                        .font(.headline)
                 }
                 Spacer()
                 Image(systemName: "checkmark")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 32, height: 32)
-                    .background(LearningDetailPalette.sage, in: Circle())
+                    .background(KnowledgePagePalette.hero, in: Circle())
             }
 
             Button {
@@ -340,18 +325,18 @@ private struct LearningArticleView: View {
                 .padding(.horizontal, 16)
                 .frame(height: 48)
                 .background(
-                    LearningDetailPalette.accent,
+                    KnowledgePagePalette.hero,
                     in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                 )
             }
             .buttonStyle(.plain)
         }
         .padding(16)
-        .background(LearningDetailPalette.surface)
+        .background(KnowledgePagePalette.surface)
         .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 15, style: .continuous)
-                .stroke(LearningDetailPalette.stroke, lineWidth: 0.8)
+                .stroke(KnowledgePagePalette.stroke, lineWidth: 0.8)
         }
     }
 
@@ -427,7 +412,7 @@ private struct LearningArticleView: View {
                                   systemImage: playbackState == .failed ? "arrow.clockwise" : "play.fill")
                                 .font(.system(size: 15, weight: .semibold))
                                 .padding(14)
-                                .background(LearningDetailPalette.accent, in: Capsule())
+                                .background(KnowledgePagePalette.hero, in: Capsule())
                         }
                         .buttonStyle(.plain)
                     }
@@ -462,7 +447,7 @@ private struct LearningExternalVideoSection: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
                 Rectangle()
-                    .fill(LearningDetailPalette.accent)
+                    .fill(KnowledgePagePalette.accent)
                     .frame(width: 28, height: 2)
                 Text("换一种方式理解")
                     .font(.system(size: 18, weight: .bold, design: .serif))
@@ -482,10 +467,10 @@ private struct LearningExternalVideoSection: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(reference.creator)
                             .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(LearningDetailPalette.accent)
+                            .foregroundStyle(KnowledgePagePalette.accent)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(LearningDetailPalette.accent.opacity(0.10), in: Capsule())
+                            .background(KnowledgePagePalette.accent.opacity(0.10), in: Capsule())
 
                         Text(reference.title)
                             .font(.system(size: 15, weight: .semibold))
@@ -505,17 +490,17 @@ private struct LearningExternalVideoSection: View {
                                 .font(.system(size: 9, weight: .bold))
                         }
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(LearningDetailPalette.accent)
+                        .foregroundStyle(KnowledgePagePalette.accent)
                     }
                     .padding(13)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(height: 132)
-                .background(LearningDetailPalette.surface)
+                .background(KnowledgePagePalette.surface)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(LearningDetailPalette.accent.opacity(0.22), lineWidth: 0.9)
+                        .stroke(KnowledgePagePalette.accent.opacity(0.22), lineWidth: 0.9)
                 }
             }
             .buttonStyle(.plain)
@@ -528,7 +513,7 @@ private struct LearningExternalVideoSection: View {
                     ForEach(reference.recommendationItems, id: \.self) { item in
                         HStack(alignment: .top, spacing: 9) {
                             Circle()
-                                .fill(LearningDetailPalette.accent)
+                                .fill(KnowledgePagePalette.accent)
                                 .frame(width: 5, height: 5)
                                 .padding(.top, 6)
                             Text(item)
@@ -557,7 +542,7 @@ private struct LearningExternalVideoSection: View {
                         )
                     }
             } else {
-                LearningDetailPalette.accent.opacity(0.10)
+                KnowledgePagePalette.accent.opacity(0.10)
             }
         }
         .overlay {
@@ -580,7 +565,7 @@ private struct LearningCompanyExamplesView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
                 Rectangle()
-                    .fill(LearningDetailPalette.accent)
+                    .fill(KnowledgePagePalette.accent)
                     .frame(width: 28, height: 2)
                 Text("公司案例")
                     .font(.system(size: 18, weight: .bold, design: .serif))
@@ -596,7 +581,7 @@ private struct LearningCompanyExamplesView: View {
                             .font(.system(size: 14, weight: .bold, design: .serif))
                             .foregroundStyle(.white)
                             .frame(width: 38, height: 38)
-                            .background(LearningDetailPalette.accent, in: Circle())
+                            .background(KnowledgePagePalette.hero, in: Circle())
 
                         VStack(alignment: .leading, spacing: 3) {
                             Text(example.company)
@@ -604,7 +589,7 @@ private struct LearningCompanyExamplesView: View {
                             if let ticker = example.ticker, !ticker.isEmpty {
                                 Text(ticker)
                                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                    .foregroundStyle(LearningDetailPalette.accent)
+                                    .foregroundStyle(KnowledgePagePalette.accent)
                             }
                         }
                     }
@@ -637,7 +622,7 @@ private struct LearningCompanyExamplesView: View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(LearningDetailPalette.accent)
+                .foregroundStyle(KnowledgePagePalette.accent)
             Text(text)
                 .font(.system(size: 15))
                 .lineSpacing(5)
@@ -662,7 +647,7 @@ private struct LearningBlockView: View {
                 if let headingNumber {
                     Text(String(format: "%02d", headingNumber))
                         .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(LearningDetailPalette.accent)
+                        .foregroundStyle(KnowledgePagePalette.accent)
                 }
                 Text(block.text ?? "")
                     .font(.system(
@@ -688,9 +673,9 @@ private struct LearningBlockView: View {
                     HStack(alignment: .top, spacing: 11) {
                         Image(systemName: "checkmark")
                             .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(LearningDetailPalette.accent)
+                            .foregroundStyle(KnowledgePagePalette.accent)
                             .frame(width: 21, height: 21)
-                            .background(LearningDetailPalette.accent.opacity(0.10), in: Circle())
+                            .background(KnowledgePagePalette.accent.opacity(0.10), in: Circle())
                         Text(item)
                             .font(.system(size: 16))
                             .lineSpacing(6)
@@ -698,11 +683,11 @@ private struct LearningBlockView: View {
                 }
             }
             .padding(15)
-            .background(LearningDetailPalette.surface)
+            .background(KnowledgePagePalette.surface)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(LearningDetailPalette.stroke, lineWidth: 0.8)
+                    .stroke(KnowledgePagePalette.stroke, lineWidth: 0.8)
             }
             .padding(.bottom, 20)
 
@@ -715,7 +700,7 @@ private struct LearningBlockView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .overlay {
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(LearningDetailPalette.stroke, lineWidth: 0.8)
+                                .stroke(KnowledgePagePalette.stroke, lineWidth: 0.8)
                         }
                 } else if phase.error != nil {
                     ContentUnavailableView("图片暂不可用", systemImage: "photo")

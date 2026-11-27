@@ -155,13 +155,7 @@ final class LearningStore {
             }
         }
     }
-    private(set) var videoLibrary: LearningVideoLibrary? {
-        didSet {
-            if let cover = videoLibrary?.lessons.first?.coverURL, cover != oldValue?.lessons.first?.coverURL {
-                prepareCovers([cover], size: CGSize(width: 112, height: 74))
-            }
-        }
-    }
+    private(set) var videoLibrary: LearningVideoLibrary?
     private(set) var isLoading = false
     private(set) var isBookshelfLoading = false
     private(set) var isConceptLibraryLoading = false
