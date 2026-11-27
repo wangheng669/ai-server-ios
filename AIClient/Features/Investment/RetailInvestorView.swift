@@ -53,7 +53,7 @@ struct RetailInvestorView: View {
                     .allowsHitTesting(showsDouyin)
                     .accessibilityHidden(!showsDouyin)
 
-                XiaohongshuMoodView(isActive: !showsDouyin, load: store.xiaohongshuMood, loadNote: store.xiaohongshuNote) {
+                XiaohongshuMoodView(isActive: !showsDouyin, store: store.xiaohongshu) {
                     notesHeight = $0
                 }
                 .opacity(showsDouyin ? 0 : 1)
@@ -540,6 +540,7 @@ final class InvestorMoodStore {
     private var investorMoodLoadedAt: Date?
     private let investorMoodLoader: () async throws -> InvestorMoodBoard
     private let service: MarketService
+    let xiaohongshu: XiaohongshuMoodStore
 
     var authors: [InvestorMoodAuthor] {
         guard let investorMood, InvestorMoodFormat.isToday(investorMood.generatedAt) else { return [] }
@@ -552,6 +553,7 @@ final class InvestorMoodStore {
     ) {
         let service = MarketService(baseURL: baseURL)
         self.service = service
+        self.xiaohongshu = XiaohongshuMoodStore(service: service)
         self.investorMoodLoader = investorMoodLoader ?? { try await service.investorMood(refresh: true) }
     }
 
@@ -585,13 +587,6 @@ final class InvestorMoodStore {
         }
     }
 
-    func xiaohongshuMood() async throws -> XiaohongshuMoodBoard {
-        try await service.xiaohongshuMood()
-    }
-
-    func xiaohongshuNote(id: String) async throws -> XiaohongshuNoteDetail {
-        try await service.xiaohongshuNote(id: id)
-    }
 }
 
 private extension String {

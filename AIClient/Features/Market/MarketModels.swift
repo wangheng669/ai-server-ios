@@ -919,7 +919,7 @@ struct XiaohongshuMoodResponse: Decodable {
     let data: XiaohongshuMoodBoard
 }
 
-struct XiaohongshuMoodBoard: Decodable {
+struct XiaohongshuMoodBoard: Codable, Equatable, Sendable {
     let state: XiaohongshuCaptureState
     let reason: String?
     let stale: Bool
@@ -930,7 +930,7 @@ struct XiaohongshuMoodBoard: Decodable {
     let runs: [XiaohongshuCapture]
 }
 
-struct XiaohongshuMoodNote: Decodable, Identifiable {
+struct XiaohongshuMoodNote: Codable, Equatable, Sendable, Identifiable {
     let id: String
     let title: String
     let hasTitle: Bool
@@ -974,7 +974,7 @@ struct XiaohongshuNoteInteraction: Decodable {
     let shares: String?
 }
 
-struct XiaohongshuCapture: Decodable, Identifiable {
+struct XiaohongshuCapture: Codable, Equatable, Sendable, Identifiable {
     let startedAt: String
     let at: String
     let state: XiaohongshuCaptureState
@@ -987,7 +987,7 @@ struct XiaohongshuCapture: Decodable, Identifiable {
     var id: String { startedAt }
 }
 
-enum XiaohongshuCaptureState: String, Decodable {
+enum XiaohongshuCaptureState: String, Codable, Sendable {
     case waiting, running, paused, failed, baseline
     case overlapReached = "overlap_reached"
     case coverageGap = "coverage_gap"
