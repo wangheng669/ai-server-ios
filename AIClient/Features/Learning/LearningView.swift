@@ -127,7 +127,6 @@ struct LearningView: View {
 
     private var knowledgeHome: some View {
         VStack(alignment: .leading, spacing: 18) {
-            KnowledgePageHeading(title: "知识", icon: "books.vertical")
             if let notice = store.savedContentNotice {
                 Label(notice, systemImage: "clock.arrow.circlepath")
                     .font(.footnote)
