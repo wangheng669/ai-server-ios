@@ -1541,15 +1541,10 @@ struct Post: Codable, Identifiable, Hashable {
         return result
     }
     var weiboFollowingListContent: String {
-        let candidates = [htmlText(content), clean(title), clean(text), clean(summary)]
-            .compactMap { $0 }
-            .map {
-                $0.replacingOccurrences(of: "[图片]", with: "")
-                    .replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-            .filter { !$0.isEmpty }
-        return candidates.max(by: { $0.count < $1.count }) ?? displayContent
+        (htmlText(content) ?? "")
+            .replacingOccurrences(of: "[图片]", with: "")
+            .replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
     var hasWeiboVideoReference: Bool {
         guard isWeiboRSS else { return false }
