@@ -275,23 +275,61 @@ struct XiaohongshuMoodView: View {
             if runs.isEmpty {
                 Text("暂无采集记录").foregroundStyle(.secondary).padding(.vertical, 16)
             }
-            ForEach(runs) { run in
-                HStack(alignment: .top, spacing: 10) {
-                    rowTime(run.at)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(run.state.title(reason: run.reason)).font(.subheadline.weight(.semibold))
-                        if run.newNotes > 0 {
-                            Text("新增 \(run.newNotes) 篇").font(.caption).foregroundStyle(.secondary)
-                        } else if run.state == .overlapReached {
-                            Text("本轮无新增").font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            ForEach(CaptureRunGroup.grouped(runs)) { group in
+                if let oldest = group.earlierFailures.last {
+                    failureGroup(group, oldest: oldest)
+                } else {
+                    runRow(group.latest)
                 }
-                .padding(.vertical, 10)
                 Divider()
             }
         }
+    }
+
+    private func runRow(_ run: XiaohongshuCapture) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            rowTime(run.at)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(run.state.title(reason: run.reason)).font(.subheadline.weight(.semibold))
+                if run.newNotes > 0 {
+                    Text("新增 \(run.newNotes) 篇").font(.caption).foregroundStyle(.secondary)
+                } else if run.state == .overlapReached {
+                    Text("本轮无新增").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 10)
+    }
+
+    private func failureGroup(_ group: CaptureRunGroup, oldest: XiaohongshuCapture) -> some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach([group.latest] + group.earlierFailures) { run in
+                    HStack(spacing: 8) {
+                        rowTime(run.at)
+                        if run.newNotes > 0 {
+                            Text("已入库 \(run.newNotes) 篇")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("连续失败 \(group.earlierFailures.count + 1) 次")
+                    .font(.subheadline.weight(.semibold))
+                Text(XiaohongshuMoodTime.range(from: oldest.at, to: group.latest.at))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 10)
+        }
+        .tint(ResearchDesign.accent)
+        .accessibilityIdentifier("xiaohongshu-failed-run-group")
     }
 
     private func listCaption(_ title: String, detail: String) -> some View {
@@ -358,6 +396,25 @@ struct XiaohongshuMoodView: View {
     }
 }
 
+private struct CaptureRunGroup: Identifiable {
+    let latest: XiaohongshuCapture
+    var earlierFailures: [XiaohongshuCapture] = []
+
+    var id: String { latest.id }
+
+    static func grouped(_ runs: [XiaohongshuCapture]) -> [Self] {
+        var groups: [Self] = []
+        for run in runs {
+            if run.state == .failed, groups.last?.latest.state == .failed {
+                groups[groups.count - 1].earlierFailures.append(run)
+            } else {
+                groups.append(Self(latest: run))
+            }
+        }
+        return groups
+    }
+}
+
 private enum XiaohongshuMoodTime {
     enum Style {
         case row, dateAndTime
@@ -366,6 +423,14 @@ private enum XiaohongshuMoodTime {
     static func label(_ value: String, _ style: Style) -> String {
         guard let date = marketISODate(value) else { return "时间未知" }
         return (style == .row && calendar.isDateInToday(date) ? time : dateAndTime).string(from: date)
+    }
+
+    static func range(from earliest: String, to latest: String) -> String {
+        guard let start = marketISODate(earliest), let end = marketISODate(latest) else { return "时间未知" }
+        let sameDay = calendar.isDate(start, inSameDayAs: end)
+        let startFormat = sameDay && calendar.isDateInToday(start) ? time : dateAndTime
+        let endFormat = sameDay ? time : dateAndTime
+        return "\(startFormat.string(from: start))–\(endFormat.string(from: end))"
     }
 
     private static let calendar: Calendar = {
