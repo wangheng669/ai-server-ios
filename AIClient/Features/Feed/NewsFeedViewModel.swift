@@ -1426,8 +1426,8 @@ final class NewsFeedViewModel: ObservableObject {
             let originals = posts.prefix(10).flatMap { post -> [String] in
                 switch page {
                 case .truth:
-                    guard !post.isTruthMediaPlaceholder else { return [] }
-                    return LocalTranslatedText.chineseText(post.truthChineseContent) == nil ? [post.originalDisplayContent] : []
+                    guard case .needsTranslation(let original) = post.truthPostBody else { return [] }
+                    return [original]
                 case .rss, .youtube:
                     let title = LocalTranslatedText.chineseText(post.feedChineseTitle) == nil ? [post.feedOriginalTitle] : []
                     return page == .rss ? title + [post.rssListContent] : title
