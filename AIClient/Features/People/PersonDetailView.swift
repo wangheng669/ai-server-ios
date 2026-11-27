@@ -5,7 +5,7 @@ struct PersonDetailSheet: View {
     @Binding var selectedPerson: SpecialPerson?
     let people: [SpecialPerson]
     let onClose: () -> Void
-    @GestureState private var isHorizontalDragging = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var incomingEdge: Edge = .trailing
 
     init(
@@ -24,19 +24,24 @@ struct PersonDetailSheet: View {
                 ZStack(alignment: .bottomTrailing) {
                     KnowledgePagePalette.canvas.ignoresSafeArea()
 
-                    PersonDetailPage(person: person)
-                    .id(person.id)
-                    .transition(personTransition)
-                    .disabled(isHorizontalDragging)
+                    PersonDetailPage(person: person, movePerson: movePerson)
+                        .id(person.id)
+                        .transition(reduceMotion ? .opacity : personTransition)
 
-                    closeButton
-                        .padding(.bottom, 16)
-                        .padding(.trailing, 15)
+                    HStack(spacing: 5) {
+                        if people.count > 1 {
+                            personPageButton("上一个人物", symbol: "chevron.left", offset: -1)
+                            personPageButton("下一个人物", symbol: "chevron.right", offset: 1)
+                            Divider().frame(height: 20)
+                        }
+                        DetailSheetCloseButton(action: onClose, accessibilityLabel: "关闭人物详情")
+                    }
+                    .padding(4)
+                    .background(.regularMaterial, in: Capsule())
+                    .padding(14)
                 }
                 .clipped()
-                .contentShape(Rectangle())
-                .simultaneousGesture(personSwitchGesture)
-                .accessibilityHint("左右滑动切换人物，下滑关闭人物详情")
+
             }
         }
         .task(id: selectedPerson?.id) {
@@ -57,38 +62,27 @@ struct PersonDetailSheet: View {
         )
     }
 
-    private var personSwitchGesture: some Gesture {
-        DragGesture(minimumDistance: 24)
-            .updating($isHorizontalDragging) { value, isDragging, _ in
-                let horizontalDistance = value.translation.width
-                let verticalDistance = value.translation.height
-                guard abs(horizontalDistance) > abs(verticalDistance) * 1.15 else { return }
-                isDragging = true
-            }
-            .onEnded(switchPerson)
-    }
-
-    private var closeButton: some View {
-        DetailSheetCloseButton(action: onClose, accessibilityLabel: "关闭人物详情")
-    }
-
-    private func switchPerson(_ value: DragGesture.Value) {
-        let orderedPeople = orderedPeople
-        let horizontalDistance = value.translation.width
-        let verticalDistance = value.translation.height
-        guard orderedPeople.count > 1,
-              abs(horizontalDistance) >= 64,
-              abs(horizontalDistance) > abs(verticalDistance) * 1.25,
-              let currentPerson = selectedPerson,
-              let currentIndex = orderedPeople.firstIndex(where: { $0.id == currentPerson.id }) else {
-            return
+    private func personPageButton(_ label: String, symbol: String, offset: Int) -> some View {
+        Button {
+            movePerson(offset)
+        } label: {
+            Image(systemName: symbol)
+                .font(.subheadline.weight(.semibold))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
 
-        let indexOffset = horizontalDistance < 0 ? 1 : -1
-        let nextIndex = (currentIndex + indexOffset + orderedPeople.count) % orderedPeople.count
-        incomingEdge = horizontalDistance < 0 ? .trailing : .leading
+    private func movePerson(_ offset: Int) {
+        let orderedPeople = orderedPeople
+        guard orderedPeople.count > 1, let currentPerson = selectedPerson,
+              let currentIndex = orderedPeople.firstIndex(where: { $0.id == currentPerson.id }) else { return }
+        let nextIndex = (currentIndex + offset + orderedPeople.count) % orderedPeople.count
+        incomingEdge = offset > 0 ? .trailing : .leading
         UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-        withAnimation(.snappy(duration: 0.3)) {
+        withAnimation(reduceMotion ? nil : .snappy(duration: 0.3)) {
             selectedPerson = orderedPeople[nextIndex]
         }
     }
@@ -170,10 +164,10 @@ private struct PersonDetailPage: View {
     private static let articleSearchAnchor = "person-article-search"
 
     let person: SpecialPerson
+    let movePerson: (Int) -> Void
     @ObservedObject private var pushNotifications = PersonPushNotificationManager.shared
     @State private var store = PersonDetailStore()
     @State private var section: PersonDetailSection
-    @State private var ownContentSection = PersonOwnContentSection.posts
     @State private var selectedPost: Post?
     @State private var selectedArticle: ArticleSelection?
     @State private var articleSearchText = ""
@@ -181,8 +175,9 @@ private struct PersonDetailPage: View {
     @State private var selectedPhoto: PersonPhoto?
     @State private var presentedWikipediaEntity: WikipediaEntity?
 
-    init(person: SpecialPerson) {
+    init(person: SpecialPerson, movePerson: @escaping (Int) -> Void) {
         self.person = person
+        self.movePerson = movePerson
         _section = State(initialValue: person.topic == .history ? .profile : .posts)
     }
 
@@ -190,7 +185,13 @@ private struct PersonDetailPage: View {
         ScrollViewReader { reader in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                    personHeader
+                    personHeader.simultaneousGesture(
+                        DragGesture(minimumDistance: 32).onEnded { value in
+                            let distance = value.translation.width
+                            guard abs(distance) >= 64, abs(distance) > abs(value.translation.height) * 1.25 else { return }
+                            movePerson(distance < 0 ? 1 : -1)
+                        }
+                    )
                     if !person.photos.isEmpty {
                         CompactPersonPhotoGallery(photos: person.photos) { selectedPhoto = $0 }
                     }
@@ -215,6 +216,7 @@ private struct PersonDetailPage: View {
             }
         }
         .background(KnowledgePagePalette.canvas)
+        .knowledgeWebLinks()
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .appSheet(item: $selectedArticle) { selection in
@@ -224,20 +226,23 @@ private struct PersonDetailPage: View {
                     initialArticleID: selection.id
                 )
             }
+            .knowledgeWebLinks()
             .readingSheetPresentation()
         }
         .appSheet(item: $selectedPost) { post in
             NavigationStack {
                 PostDetailView(post: post)
             }
+            .knowledgeWebLinks()
             .readingSheetPresentation()
         }
         .appSheet(item: $selectedPhoto) { photo in
             PersonPhotoViewer(photos: person.photos, initialPhotoID: photo.id)
+                .knowledgeWebLinks()
+                .readingSheetPresentation()
         }
         .appSheet(item: $presentedWikipediaEntity) { entity in
             WikipediaReaderView(entity: entity)
-                .environment(\.wikipediaReaderChrome, .knowledge)
                 .wikipediaReaderPresentation()
         }
         .task(id: person.id) {
@@ -245,7 +250,7 @@ private struct PersonDetailPage: View {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--article-detail-preview"),
                let article = store.articles.dropFirst().first ?? store.articles.first {
-                ownContentSection = .articles
+                section = .articles
                 selectedArticle = ArticleSelection(id: article.id, articles: store.articles)
             }
 
@@ -390,75 +395,50 @@ private struct PersonDetailPage: View {
     }
 
     private var sectionPicker: some View {
-        HStack(spacing: 4) {
-            ForEach(detailSections) { item in
-                Button {
-                    section = item
-                } label: {
-                    Text(sectionTitle(item))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(section == item ? KnowledgePagePalette.accent : .secondary)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(
-                            KnowledgePagePalette.accent.opacity(section == item ? 0.10 : 0),
-                            in: .rect(cornerRadius: 10)
-                        )
+        ScrollView(.horizontal) {
+            HStack(spacing: 5) {
+                ForEach(detailSections) { item in
+                    Button {
+                        section = item
+                        articleSearchIsFocused = false
+                    } label: {
+                        Label(item == .profile && person.topic == .history ? "生平" : item.title, systemImage: item.symbol)
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 11)
+                            .frame(minHeight: 44)
+                            .foregroundStyle(section == item ? .white : KnowledgePagePalette.accent)
+                            .background(section == item ? KnowledgePagePalette.hero : .clear, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(section == item ? .isSelected : [])
                 }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(section == item ? .isSelected : [])
             }
+            .padding(.horizontal, 20)
         }
-        .padding(4)
-        .knowledgeCard(cornerRadius: 15)
-        .padding(.horizontal, 20)
-        .padding(.vertical, 7)
+        .scrollIndicators(.hidden)
+        .padding(.vertical, 8)
         .background(KnowledgePagePalette.canvas)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(KnowledgePagePalette.stroke).frame(height: 1)
+        }
     }
 
     private var detailSections: [PersonDetailSection] {
-        person.topic == .history ? [.profile, .discussions] : PersonDetailSection.allCases
-    }
-
-    private func sectionTitle(_ item: PersonDetailSection) -> String {
-        if person.topic == .history, item == .profile { return "生平" }
-        return item.title
+        if person.topic == .history {
+            return store.articles.isEmpty && store.articlesError == nil
+                ? [.profile, .discussions] : [.profile, .articles, .discussions]
+        }
+        return PersonDetailSection.allCases
     }
 
     @ViewBuilder
     private var sectionContent: some View {
-        if section == .profile {
-            PersonProfileView(person: person) {
-                presentedWikipediaEntity = $0
-            }
-        } else if section == .discussions {
-            relatedContent
-        } else if hasArticleSection {
-            ownContent
-        } else {
-            ownPostsContent
-        }
-    }
-
-    private var hasArticleSection: Bool {
-        !store.articles.isEmpty
-    }
-
-    private var ownContent: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Picker("本人内容", selection: $ownContentSection) {
-                ForEach(PersonOwnContentSection.allCases) { item in
-                    Text(item.title).tag(item)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-
-            if ownContentSection == .articles {
-                articlesContent
-            } else {
-                ownPostsContent
-            }
+        switch section {
+        case .posts: ownPostsContent
+        case .articles: articlesContent
+        case .discussions: relatedContent
+        case .profile:
+            PersonProfileView(person: person) { presentedWikipediaEntity = $0 }
         }
     }
 
@@ -477,12 +457,17 @@ private struct PersonDetailPage: View {
             )
             .padding(.top, 36)
         } else {
-            ForEach(store.ownPosts) { post in
-                let displayPost = store.postForDisplay(post)
-                PersonPostTimelineRow(post: displayPost, compact: false) { selectedPost = displayPost }
-                    .task { await store.loadMoreOwnPostsIfNeeded(current: post, person: person) }
+            LazyVStack(alignment: .leading, spacing: 10) {
+                KnowledgeSectionHeading("本人动态", detail: "\(store.ownPosts.count) 条已载入")
+                ForEach(store.ownPosts) { post in
+                    let displayPost = store.postForDisplay(post)
+                    PersonPostTimelineRow(post: displayPost) { selectedPost = displayPost }
+                        .task { await store.loadMoreOwnPostsIfNeeded(current: post, person: person) }
+                }
+                ownPostsPaginationStatus
             }
-            ownPostsPaginationStatus
+            .padding(.horizontal, 20)
+            .padding(.top, 14)
         }
     }
 
@@ -501,101 +486,52 @@ private struct PersonDetailPage: View {
             )
             .padding(.top, 30)
         } else {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 10) {
+            LazyVStack(alignment: .leading, spacing: 11) {
+                HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                    TextField("搜索文章文字", text: $articleSearchText)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                        .foregroundStyle(KnowledgePagePalette.accent)
+                        .accessibilityHidden(true)
+                    TextField("搜索标题、摘要和正文", text: $articleSearchText)
                         .focused($articleSearchIsFocused)
                         .submitLabel(.search)
-                        .onSubmit {
-                            articleSearchIsFocused = false
-                        }
+                        .onSubmit { articleSearchIsFocused = false }
                     if !articleSearchText.isEmpty {
-                        Button {
-                            articleSearchText = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.tertiary)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("清除文章搜索")
+                        Button("清除文章搜索", systemImage: "xmark.circle.fill") { articleSearchText = "" }
+                            .labelStyle(.iconOnly)
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                            .frame(minWidth: 44, minHeight: 44)
                     }
                 }
-                .padding(.horizontal, 14)
-                .frame(height: 42)
-                .background(
-                    Color(uiColor: .secondarySystemGroupedBackground),
-                    in: RoundedRectangle(cornerRadius: 12)
-                )
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 46)
+                .knowledgeCard(cornerRadius: 12)
                 .id(Self.articleSearchAnchor)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    articleSearchIsFocused = true
-                }
 
-                HStack(alignment: .firstTextBaseline) {
-                    Text(articleSearchStatus)
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Label("最新", systemImage: "chevron.down")
-                        .labelStyle(.titleAndIcon)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
-                .padding(.bottom, 14)
+                KnowledgeSectionHeading("文章", detail: articleSearchStatus)
 
                 if isArticleSearchPending {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("正在搜索文章正文…")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 42)
+                    ProgressView("正在搜索正文")
+                        .frame(maxWidth: .infinity)
+                        .padding(20)
                 } else if !normalizedArticleQuery.isEmpty, let error = store.articleSearchError {
-                    ContentUnavailableView(
-                        "搜索失败",
-                        systemImage: "wifi.exclamationmark",
-                        description: Text(error)
-                    )
-                    .padding(.vertical, 28)
+                    ContentUnavailableView("搜索失败", systemImage: "wifi.exclamationmark", description: Text(error))
                 } else if filteredArticles.isEmpty {
-                    ContentUnavailableView(
-                        "没有找到相关文章",
-                        systemImage: "doc.text.magnifyingglass",
-                        description: Text("没有包含“\(articleSearchText)”的文章，试试其他关键词")
-                    )
-                    .padding(.vertical, 32)
+                    ContentUnavailableView("没有找到相关文章", systemImage: "doc.text.magnifyingglass")
                 } else {
-                    ForEach(Array(filteredArticles.enumerated()), id: \.element.id) { index, article in
+                    ForEach(filteredArticles) { article in
                         PersonArticleRow(
                             article: article,
-                            featured: articleSearchText.isEmpty && index == 0,
-                            portraitURL: person.avatarURL(baseURL: ServerConfiguration.currentURL),
-                            portraitAssetName: person.avatarAssetName,
+                            featured: normalizedArticleQuery.isEmpty && article.id == filteredArticles.first?.id,
                             personName: person.name
                         ) {
                             selectedArticle = ArticleSelection(id: article.id, articles: filteredArticles)
                         }
-
-                        if index < filteredArticles.count - 1 {
-                            Divider()
-                                .padding(.leading, 20)
-                        }
                     }
                 }
             }
-            .padding(.bottom, 28)
+            .padding(.horizontal, 20)
+            .padding(.top, 14)
         }
     }
 
@@ -616,38 +552,26 @@ private struct PersonDetailPage: View {
 
     private var articleSearchStatus: String {
         guard !normalizedArticleQuery.isEmpty else {
-            return "文章 \(store.articles.count)"
+            return "\(store.articles.count) 篇"
         }
         if isArticleSearchPending {
-            return "正在搜索标题、摘要和正文…"
+            return "搜索中"
         }
         return "找到 \(filteredArticles.count) 篇"
     }
 
     @ViewBuilder
     private var relatedContent: some View {
-                    if store.isLoadingDiscussions && store.discussions.isEmpty {
-                        ContentLoadingPlaceholder(title: "正在查找相关动态")
-                    } else if let error = store.discussionsError, store.discussions.isEmpty {
-                        ContentUnavailableView(
-                            "载入失败",
-                            systemImage: "wifi.exclamationmark",
-                            description: Text(error)
-                        )
-                        .padding(.top, 30)
-                    } else if store.discussions.isEmpty {
-                        ContentUnavailableView(
-                            "暂无相关动态",
-                            systemImage: "bubble.left.and.bubble.right",
-                            description: Text("内容库里暂时没有提到这位人物的动态")
-                        )
-                        .padding(.top, 30)
-                    } else {
-                        discussionContent(store.discussions)
-                    }
+        if store.isLoadingDiscussions && store.discussions.isEmpty {
+            ContentLoadingPlaceholder(title: "正在查找相关动态")
+        } else if let error = store.discussionsError, store.discussions.isEmpty {
+            ContentUnavailableView("相关动态载入失败", systemImage: "wifi.exclamationmark", description: Text(error))
+        } else if store.discussions.isEmpty {
+            ContentUnavailableView("暂无相关动态", systemImage: "bubble.left.and.bubble.right")
+        } else {
+            discussionContent(store.discussions)
+        }
     }
-
-
 
     @ViewBuilder
     private var ownPostsPaginationStatus: some View {
@@ -674,25 +598,17 @@ private struct PersonDetailPage: View {
     private func discussionContent(_ posts: [Post]) -> some View {
         let today = posts.filter(\.isRecentDiscussion)
         let earlier = posts.filter { !$0.isRecentDiscussion }
-        return VStack(alignment: .leading, spacing: 0) {
-            if !today.isEmpty {
-                discussionGroup(title: "今天", countLabel: "\(posts.count) 条相关讨论", posts: today)
-            }
-            if !earlier.isEmpty {
-                discussionGroup(title: "本周", posts: earlier)
-            }
+        return LazyVStack(alignment: .leading, spacing: 13) {
+            if !today.isEmpty { discussionGroup(title: "今天", posts: today) }
+            if !earlier.isEmpty { discussionGroup(title: "本周稍早", posts: earlier) }
         }
+        .padding(.horizontal, 20)
+        .padding(.top, 14)
     }
 
-    private func discussionGroup(title: String, countLabel: String? = nil, posts: [Post]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 14) {
-                Text(title).font(.system(size: 20, weight: .bold))
-                if let countLabel {
-                    Text(countLabel).font(.system(size: 14)).foregroundStyle(.secondary)
-                }
-            }
-            .padding(.horizontal, 20).padding(.top, 15).padding(.bottom, 7)
+    private func discussionGroup(title: String, posts: [Post]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            KnowledgeSectionHeading(title, detail: "\(posts.count) 条")
             ForEach(posts) { post in
                 let displayPost = store.postForDisplay(post)
                 PersonRelatedPostRow(post: displayPost) { selectedPost = displayPost }
@@ -771,31 +687,45 @@ private struct PersonPhotoViewer: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                TabView(selection: $selectedPhotoID) {
-                    ForEach(photos) { photo in
-                        PersonPhotoPage(photo: photo)
-                            .tag(photo.id)
-                    }
+        VStack(spacing: 0) {
+            TabView(selection: $selectedPhotoID) {
+                ForEach(photos) { photo in
+                    PersonPhotoPage(photo: photo).tag(photo.id)
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
 
-                if photos.count > 1 {
-                    Text("\(selectedIndex + 1) / \(photos.count)")
-                        .font(.footnote.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 56)
-                        .accessibilityLabel("第 \(selectedIndex + 1) 张，共 \(photos.count) 张")
-                }
-            }
-            .background(KnowledgePagePalette.canvas.ignoresSafeArea())
-            .toolbar(.hidden, for: .navigationBar)
-            .overlay(alignment: .bottomTrailing) {
+            HStack(spacing: 5) {
+                photoArrow("上一张", symbol: "chevron.left", offset: -1)
+                Text("\(selectedIndex + 1) / \(photos.count)")
+                    .font(.footnote.monospacedDigit())
+                    .accessibilityLabel("第 \(selectedIndex + 1) 张，共 \(photos.count) 张")
+                photoArrow("下一张", symbol: "chevron.right", offset: 1)
+                Spacer(minLength: 0)
                 DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭人物影像")
-                    .padding(16)
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 5)
+            .background(KnowledgePagePalette.surface)
+            .overlay(alignment: .top) { Divider() }
         }
+        .background(KnowledgePagePalette.canvas.ignoresSafeArea())
+    }
+
+    private func photoArrow(_ title: String, symbol: String, offset: Int) -> some View {
+        let index = selectedIndex + offset
+        return Button {
+            guard photos.indices.contains(index) else { return }
+            selectedPhotoID = photos[index].id
+        } label: {
+            Image(systemName: symbol)
+                .font(.subheadline.weight(.semibold))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .disabled(!photos.indices.contains(index))
     }
 }
 
@@ -807,7 +737,8 @@ private struct PersonPhotoPage: View {
             VStack(alignment: .leading, spacing: 18) {
                 if let url = photo.imageURL(baseURL: ServerConfiguration.currentURL) {
                     RemoteImage(url: url, height: 340, cornerRadius: 15, contentMode: .fit)
-                        .background(KnowledgePagePalette.surface, in: .rect(cornerRadius: 15))
+                        .padding(7)
+                        .background(KnowledgePagePalette.hero, in: .rect(cornerRadius: 16))
                 } else {
                     ContentUnavailableView("暂无影像", systemImage: "photo")
                 }
@@ -840,7 +771,7 @@ private struct PersonPhotoPage: View {
             .frame(maxWidth: 650)
             .padding(.horizontal, 20)
             .padding(.top, 16)
-            .padding(.bottom, 72)
+            .padding(.bottom, 16)
             .frame(maxWidth: .infinity)
         }
     }
@@ -857,7 +788,7 @@ private struct PersonRelatedPostRow: View {
                     Label(attribution, systemImage: "arrow.2.squarepath")
                         .font(.system(size: 12.5, weight: .semibold))
                         .foregroundStyle(.secondary)
-                        .padding(.leading, 54)
+                        .padding(.bottom, 3)
                 }
 
                 HStack(alignment: .top, spacing: 12) {
@@ -907,97 +838,78 @@ private struct PersonRelatedPostRow: View {
                     }
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
+            .padding(13)
+            .knowledgeCard(cornerRadius: 14)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(post.needsXTranslation)
         .accessibilityLabel("\(post.authorName)，\(post.needsXTranslation ? "正在翻译为中文" : post.displayContent)")
-
-        Divider()
-            .padding(.leading, 74)
     }
 }
 
 
 private enum PersonDetailSection: String, CaseIterable, Identifiable {
-    case posts
-    case discussions
-    case profile
+    case posts, articles, discussions, profile
     var id: Self { self }
-    var title: String {
-        switch self {
-        case .posts: "动态"
-        case .discussions: "相关"
-        case .profile: "简介"
-        }
-    }
-}
 
-private enum PersonOwnContentSection: String, CaseIterable, Identifiable {
-    case posts
-    case articles
-
-    var id: Self { self }
     var title: String {
         switch self {
         case .posts: "动态"
         case .articles: "文章"
+        case .discussions: "相关"
+        case .profile: "简介"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .posts: "text.bubble"
+        case .articles: "doc.text"
+        case .discussions: "bubble.left.and.bubble.right"
+        case .profile: "person.text.rectangle"
         }
     }
 }
 
-
 private struct PersonArticleRow: View {
     let article: PersonArticle
     let featured: Bool
-    let portraitURL: URL?
-    let portraitAssetName: String?
     let personName: String
     let onOpen: () -> Void
 
     var body: some View {
         Button(action: onOpen) {
-            HStack(alignment: .top, spacing: 14) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(listTitle)
-                        .font(.system(size: featured ? 20 : 18, weight: .bold))
-                        .foregroundStyle(.primary)
-                        .lineSpacing(2)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-
-                    if !article.displaySummary.isEmpty {
-                        Text(article.displaySummary)
-                            .font(.system(size: 15))
-                            .foregroundStyle(Color.primary.opacity(0.72))
-                            .lineSpacing(3)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                    }
-
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
                     Text(metadataLabel)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(featured ? KnowledgePagePalette.heroTint : .secondary)
+                    Spacer(minLength: 6)
+                    Image(systemName: "arrow.up.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(featured ? .white : KnowledgePagePalette.accent)
+                        .accessibilityHidden(true)
                 }
-
-                if featured {
-                    AvatarView(
-                        url: portraitURL,
-                        name: personName,
-                        size: 84,
-                        assetName: portraitAssetName
-                    )
+                Text(listTitle)
+                    .font(featured ? .title3.weight(.bold) : .headline)
+                    .foregroundStyle(featured ? .white : .primary)
+                    .lineLimit(3)
+                if !article.displaySummary.isEmpty {
+                    Text(article.displaySummary)
+                        .font(.subheadline)
+                        .foregroundStyle(featured ? .white.opacity(0.85) : .secondary)
+                        .lineLimit(3)
                 }
             }
+            .multilineTextAlignment(.leading)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 20)
-            .padding(.vertical, featured ? 18 : 15)
-            .contentShape(Rectangle())
+            .padding(14)
+            .background(featured ? KnowledgePagePalette.hero : KnowledgePagePalette.surface, in: .rect(cornerRadius: 14))
+            .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(KnowledgePagePalette.stroke, lineWidth: 1).allowsHitTesting(false) }
         }
         .buttonStyle(.plain)
-        .accessibilityHint("在应用内打开中文文章")
+        .accessibilityHint("打开中文文章")
     }
 
     private var metadataLabel: String {
@@ -1094,71 +1006,53 @@ private struct PersonArticleDetailView: View {
     private func articleBody(_ article: PersonArticle) -> some View {
         VStack(spacing: 0) {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text(article.sourceName.uppercased())
-                        .font(.system(size: 12, weight: .bold))
-                        .tracking(1.1)
-                        .foregroundStyle(KnowledgePagePalette.accent)
-
-                    Text(displayTitle(for: article))
-                        .font(.largeTitle.weight(.bold))
-                        .accessibilityAddTraits(.isHeader)
-                        .lineSpacing(5)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    HStack(spacing: 8) {
-                        if let date = article.publishedDateLabel { Text(date) }
-                        if article.readingMinutes > 0 {
-                            Circle().fill(Color.secondary.opacity(0.4)).frame(width: 3, height: 3)
-                            Text("\(article.readingMinutes) 分钟阅读")
-                        }
-                        Circle().fill(Color.secondary.opacity(0.4)).frame(width: 3, height: 3)
-                        Text("\(currentIndex + 1) / \(articles.count)")
+                LazyVStack(alignment: .leading, spacing: 17) {
+                    VStack(alignment: .leading, spacing: 9) {
+                        Label(article.sourceName, systemImage: "doc.text")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(KnowledgePagePalette.accent)
+                        Text(displayTitle(for: article))
+                            .font(.largeTitle.weight(.bold))
+                            .lineSpacing(3)
+                            .accessibilityAddTraits(.isHeader)
+                        Text([
+                            article.publishedDateLabel,
+                            article.readingMinutes > 0 ? "\(article.readingMinutes) 分钟阅读" : nil
+                        ].compactMap { $0 }.joined(separator: " · "))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                     }
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .background(KnowledgePagePalette.accent.opacity(0.08), in: .rect(cornerRadius: 14))
 
-                }
-                .padding(.horizontal, 22)
-                .padding(.top, 18)
-                .padding(.bottom, 26)
-
-                VStack(alignment: .leading, spacing: 24) {
-                    ForEach(Array(Self.paragraphs(from: article.displayContent).enumerated()), id: \.offset) { index, paragraph in
+                    ForEach(Array(Self.paragraphs(from: article.displayContent).enumerated()), id: \.offset) { _, paragraph in
                         Text(paragraph)
-                            .font(.body.weight(index == 0 ? .medium : .regular))
-                            .foregroundStyle(Color.primary.opacity(0.9))
+                            .font(.body)
                             .lineSpacing(8)
                             .textSelection(.enabled)
                     }
 
                     if let url = article.canonicalURL {
-                        Divider().padding(.top, 8)
                         Button { openURL(url) } label: {
                             HStack {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text("英文原文")
-                                        .font(.system(size: 15, weight: .semibold))
-                                    Text(article.sourceName)
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(.secondary)
-                                }
+                                Label("英文原文", systemImage: "safari")
                                 Spacer()
-                                Image(systemName: "arrow.up.right")
+                                Image(systemName: "arrow.up.right").accessibilityHidden(true)
                             }
-                            .foregroundStyle(.primary)
-                            .padding(16)
-                            .knowledgeCard()
+                            .font(.subheadline.weight(.semibold))
+                            .padding(12)
+                            .foregroundStyle(KnowledgePagePalette.accent)
+                            .knowledgeCard(cornerRadius: 12)
                         }
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal, 22)
-                .padding(.vertical, 26)
-                .background(KnowledgePagePalette.canvas)
-            }
-            .measureReadingSheetContent(when: article.id == self.article.id, additionalHeight: 48)
+                .frame(maxWidth: 650, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 17)
+                .frame(maxWidth: .infinity)
+                .measureReadingSheetContent(when: article.id == self.article.id, additionalHeight: 55)
             }
             .accessibilityIdentifier("person-article-scroll")
 
@@ -1167,19 +1061,23 @@ private struct PersonArticleDetailView: View {
     }
 
     private var articlePager: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 5) {
             Button { changeArticle(by: -1) } label: {
-                Label("上一篇", systemImage: "chevron.left")
-                    .frame(maxWidth: .infinity, minHeight: 48)
+                Image(systemName: "chevron.left").frame(width: 44, height: 44)
             }
+            .accessibilityLabel("上一篇")
             .disabled(!canGoBack)
             .accessibilityIdentifier("person-article-previous")
+            Text("\(currentIndex + 1) / \(articles.count)")
+                .font(.footnote.monospacedDigit())
+                .accessibilityLabel("第 \(currentIndex + 1) 篇，共 \(articles.count) 篇")
             Button { changeArticle(by: 1) } label: {
-                HStack { Text("下一篇"); Image(systemName: "chevron.right") }
-                    .frame(maxWidth: .infinity, minHeight: 48)
+                Image(systemName: "chevron.right").frame(width: 44, height: 44)
             }
+            .accessibilityLabel("下一篇")
             .disabled(!canAdvance)
             .accessibilityIdentifier("person-article-next")
+            Spacer(minLength: 0)
             if let url = article.canonicalURL {
                 Menu {
                     ShareLink(item: url) { Label("分享文章", systemImage: "square.and.arrow.up") }
@@ -1194,8 +1092,9 @@ private struct PersonArticleDetailView: View {
         }
         .font(.subheadline.weight(.medium))
         .buttonStyle(.plain)
-        .padding(.horizontal, 20)
-        .background(KnowledgePagePalette.canvas)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 5)
+        .background(KnowledgePagePalette.surface)
         .overlay(alignment: .top) { Divider() }
     }
 
@@ -1279,7 +1178,6 @@ private struct PersonArticleDetailView: View {
 
 private struct PersonPostTimelineRow: View {
     let post: Post
-    let compact: Bool
     let onOpen: () -> Void
     @State private var isExpanded = false
 
@@ -1288,82 +1186,67 @@ private struct PersonPostTimelineRow: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 13) {
-            VStack(spacing: 0) {
-                Circle()
-                    .fill(Color.accentColor)
-                    .frame(width: 9, height: 9)
-                    .padding(.top, 5)
-                Rectangle()
-                    .fill(Color.secondary.opacity(0.2))
-                    .frame(width: 1)
-            }
-            .frame(width: 12)
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text([post.formattedTime, post.sourceName].compactMap { $0 }.joined(separator: " · "))
-                    .font(.system(size: 13))
+        VStack(alignment: .leading, spacing: 10) {
+            Text([post.formattedTime, post.sourceName].compactMap { $0 }.joined(separator: " · "))
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(KnowledgePagePalette.accent)
+            if let attribution = post.xRepostAttributionText {
+                Label(attribution, systemImage: "arrow.2.squarepath")
+                    .font(.system(size: 12.5, weight: .semibold))
                     .foregroundStyle(.secondary)
-                if let attribution = post.xRepostAttributionText {
-                    Label(attribution, systemImage: "arrow.2.squarepath")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                }
-                Button(action: onOpen) {
-                    Text(displayContent)
-                        .font(.system(size: compact ? 15 : 16))
-                        .lineSpacing(4)
-                        .lineLimit(isExpanded ? nil : (compact ? 4 : 8))
-                        .multilineTextAlignment(.leading)
-                        .foregroundStyle(.primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.plain)
-
-                if shouldOfferExpansion {
-                    Button(isExpanded ? "收起" : "展开全文") { isExpanded.toggle() }
-                        .font(.subheadline.weight(.medium))
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Color.accentColor)
-                }
-
-                if let reply = post.meta?.replyContext,
-                   let replyText = reply.displayText {
-                    XReplyContextCard(reply: reply, text: replyText)
-                } else if let handle = replyHandle {
-                    Label("回复 \(handle)", systemImage: "arrowshape.turn.up.left")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-
-                if let quote = post.meta?.quotedTweet {
-                    XQuotedPostCard(quote: quote)
-                }
-
-                if post.previewURL != nil || !post.videoURLs.isEmpty {
-                    XFeedMediaView(post: post)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                } else if let link = post.externalURL {
-                    Link(destination: link) {
-                        Label(link.host() ?? "打开链接", systemImage: "link")
-                            .font(.subheadline)
-                            .foregroundStyle(.blue)
-                            .padding(10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
-                    }
-                }
-
-                Divider().padding(.top, 4)
             }
+            Button(action: onOpen) {
+                Text(displayContent)
+                    .font(.body)
+                    .lineSpacing(4)
+                    .lineLimit(isExpanded ? nil : 7)
+                    .multilineTextAlignment(.leading)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+
+            if shouldOfferExpansion {
+                Button(isExpanded ? "收起" : "展开全文") { isExpanded.toggle() }
+                    .font(.subheadline.weight(.medium))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.accentColor)
+            }
+
+            if let reply = post.meta?.replyContext,
+               let replyText = reply.displayText {
+                XReplyContextCard(reply: reply, text: replyText)
+            } else if let handle = replyHandle {
+                Label("回复 \(handle)", systemImage: "arrowshape.turn.up.left")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            if let quote = post.meta?.quotedTweet {
+                XQuotedPostCard(quote: quote)
+            }
+
+            if post.previewURL != nil || !post.videoURLs.isEmpty {
+                XFeedMediaView(post: post)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            } else if let link = post.externalURL {
+                Link(destination: link) {
+                    Label(link.host() ?? "打开链接", systemImage: "link")
+                        .font(.subheadline)
+                        .foregroundStyle(.blue)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+                }
+            }
+
         }
-        .padding(.horizontal, 20)
-        .padding(.top, compact ? 14 : 18)
-        .contentShape(Rectangle())
+        .padding(14)
+        .knowledgeCard(cornerRadius: 15)
     }
 
     private var shouldOfferExpansion: Bool {
-        displayContent.count > (compact ? 150 : 280) || displayContent.filter(\.isNewline).count > 4
+        displayContent.count > 280 || displayContent.filter(\.isNewline).count > 4
     }
 
     private var replyHandle: String? {
@@ -1440,14 +1323,25 @@ private struct PersonProfileView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            profileSection("人物简介") {
-                Text(person.summary)
-                    .font(.system(size: 15))
-                    .lineSpacing(4)
-                    .foregroundStyle(.primary)
+            if !person.summary.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label(person.topic == .history ? "生平概要" : "人物简介", systemImage: "person.text.rectangle")
+                        .font(.headline)
+                        .foregroundStyle(KnowledgePagePalette.accent)
+                    Text(person.summary)
+                        .font(.body)
+                        .lineSpacing(6)
+                        .textSelection(.enabled)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+                .background(KnowledgePagePalette.accent.opacity(0.08), in: .rect(cornerRadius: 15))
+                .padding(.horizontal, 20)
+                .padding(.top, 14)
             }
 
-            profileSection(person.topic == .history ? "主要职务" : "当前身份") {
+            if !person.roles.isEmpty {
+                profileSection(person.topic == .history ? "主要职务" : "当前身份") {
                 VStack(spacing: 0) {
                     ForEach(Array(person.roles.enumerated()), id: \.offset) { index, role in
                         HStack {
@@ -1462,15 +1356,22 @@ private struct PersonProfileView: View {
                 }
             }
 
-            profileSection(person.topic == .history ? "历史主题" : "关注领域") {
-                HStack(spacing: 8) {
-                    ForEach(person.displayFocusTags, id: \.self) { tag in
-                        Text(tag)
-                            .font(.system(size: 12, weight: .medium))
-                            .padding(.horizontal, 11)
-                            .frame(height: 27)
-                            .background(Color.secondary.opacity(0.09), in: Capsule())
+            }
+
+            if !person.displayFocusTags.isEmpty {
+                profileSection(person.topic == .history ? "历史主题" : "关注领域") {
+                    ScrollView(.horizontal) {
+                        HStack(spacing: 7) {
+                            ForEach(person.displayFocusTags, id: \.self) { tag in
+                                Text(tag)
+                                    .font(.footnote.weight(.medium))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 7)
+                                    .background(KnowledgePagePalette.accent.opacity(0.08), in: Capsule())
+                            }
+                        }
                     }
+                    .scrollIndicators(.hidden)
                 }
             }
 
@@ -1490,12 +1391,15 @@ private struct PersonProfileView: View {
                     VStack(alignment: .leading, spacing: 14) {
                         ForEach(Array(presentedMilestones.enumerated()), id: \.offset) { _, milestone in
                             HStack(alignment: .firstTextBaseline, spacing: 12) {
-                                Circle().fill(Color.accentColor).frame(width: 8, height: 8)
                                 Text(milestone.year)
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 38, alignment: .leading)
-                                Text(milestone.title).font(.system(size: 14))
+                                    .font(.caption.monospacedDigit().weight(.semibold))
+                                    .foregroundStyle(KnowledgePagePalette.accent)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 4)
+                                    .background(KnowledgePagePalette.accent.opacity(0.09), in: .rect(cornerRadius: 6))
+                                Text(milestone.title)
+                                    .font(.subheadline)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
                     }

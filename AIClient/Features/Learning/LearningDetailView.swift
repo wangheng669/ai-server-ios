@@ -13,13 +13,17 @@ struct LearningDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             if let position {
-                progressRule(position.progress)
-                Text(position.text)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 12)
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(position.text, systemImage: "chart.line.uptrend.xyaxis")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(KnowledgePagePalette.accent)
+                    ProgressView(value: Double(position.progress))
+                        .tint(KnowledgePagePalette.accent)
+                        .accessibilityHidden(true)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .background(KnowledgePagePalette.surface)
             }
 
             if let loaded = repository.topic(id: topic.id), let detail = loaded.detail {
@@ -62,19 +66,6 @@ struct LearningDetailView: View {
             }
             .accessibilityLabel("查看内容来源")
         }
-    }
-
-    private func progressRule(_ progress: CGFloat) -> some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                Rectangle().fill(KnowledgePagePalette.stroke)
-                Rectangle()
-                    .fill(KnowledgePagePalette.accent)
-                    .frame(width: geometry.size.width * progress)
-            }
-        }
-        .frame(height: 2)
-        .accessibilityHidden(true)
     }
 
     private func completeLesson() {
@@ -170,24 +161,7 @@ private struct LearningArticleView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                lessonLabel
-
-                Text(detail.title)
-                    .font(.largeTitle.weight(.bold))
-                    .accessibilityAddTraits(.isHeader)
-                    .lineSpacing(2)
-                    .padding(.top, 13)
-                    .padding(.bottom, 11)
-
-                if !detail.subtitle.isEmpty {
-                    Text(detail.subtitle)
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                        .lineSpacing(5)
-                        .padding(.bottom, 15)
-                }
-
-                metadata
+                lessonMasthead
 
                 if objectiveText != detail.subtitle.trimmingCharacters(in: .whitespacesAndNewlines) {
                     lessonObjective.padding(.top, 20)
@@ -238,6 +212,26 @@ private struct LearningArticleView: View {
         .onDisappear {
             playbackState = .idle
         }
+    }
+
+    private var lessonMasthead: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            lessonLabel
+            Text(detail.title)
+                .font(.largeTitle.weight(.bold))
+                .lineSpacing(3)
+                .accessibilityAddTraits(.isHeader)
+            if !detail.subtitle.isEmpty {
+                Text(detail.subtitle)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(4)
+            }
+            metadata
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(KnowledgePagePalette.accent.opacity(0.08), in: .rect(cornerRadius: 16))
     }
 
     private var lessonLabel: some View {
@@ -650,21 +644,19 @@ private struct LearningBlockView: View {
                         .foregroundStyle(KnowledgePagePalette.accent)
                 }
                 Text(block.text ?? "")
-                    .font(.system(
-                        size: block.level == 1 ? 24 : 22,
-                        weight: .bold,
-                        design: .serif
-                    ))
+                    .font(block.level == 1 ? .title2.weight(.bold) : .title3.weight(.semibold))
                     .foregroundStyle(.primary)
+                    .accessibilityAddTraits(.isHeader)
             }
             .padding(.top, 22)
             .padding(.bottom, 14)
 
         case "paragraph":
             Text(block.text ?? "")
-                .font(.system(size: 17))
+                .font(.body)
                 .lineSpacing(8)
                 .foregroundStyle(.primary)
+                .textSelection(.enabled)
                 .padding(.bottom, 18)
 
         case "list":

@@ -178,9 +178,11 @@ struct InAppBrowserSheet: View {
     @State private var translatedTitle = ""
     @State private var translatedTitleSource = ""
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.knowledgeReading) private var knowledgeReading
 
     var body: some View {
         VStack(spacing: 0) {
+            if knowledgeReading { referenceHeader }
             if ExternalAccessPolicy.requiresServerRelay(url) {
                 ServerArticleReaderView(url: url) { title = $0 }
             } else {
@@ -198,16 +200,18 @@ struct InAppBrowserSheet: View {
                     }
                 }
             }
+            if knowledgeReading { referenceFooter }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(uiColor: .systemBackground).ignoresSafeArea())
+        .background((knowledgeReading ? KnowledgePagePalette.surface : Color(uiColor: .systemBackground)).ignoresSafeArea())
         .overlay(alignment: .bottomTrailing) {
-            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭网页详情")
-                .padding(16)
+            if !knowledgeReading {
+                DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭网页详情")
+                    .padding(16)
+            }
         }
         .overlay(alignment: .bottomLeading) {
-            translationControl
-                .padding(16)
+            if !knowledgeReading { translationControl.padding(16) }
         }
         .accessibilityIdentifier("in-app-browser")
         .accessibilityAction(.escape) { dismiss() }
@@ -215,6 +219,51 @@ struct InAppBrowserSheet: View {
             guard let englishArticle else { return }
             await translate(englishArticle)
         }
+    }
+
+    private var referenceHeader: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "link")
+                .font(.headline)
+                .foregroundStyle(KnowledgePagePalette.accent)
+                .frame(width: 36, height: 36)
+                .background(KnowledgePagePalette.accent.opacity(0.09), in: .rect(cornerRadius: 9))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title.isEmpty ? "网页" : title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2)
+                    .accessibilityAddTraits(.isHeader)
+                Text(url.host ?? url.absoluteString)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private var referenceFooter: some View {
+        HStack(spacing: 6) {
+            translationControl
+            Spacer(minLength: 0)
+            ShareLink(item: url) {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("分享网页链接")
+            DetailSheetCloseButton(action: dismiss.callAsFunction, accessibilityLabel: "关闭网页详情")
+        }
+        .tint(KnowledgePagePalette.accent)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .overlay(alignment: .top) { Divider() }
     }
 
     @ViewBuilder
@@ -415,21 +464,36 @@ private struct TranslatedWebArticleBlock: Identifiable, Equatable {
 private struct TranslatedWebArticleView: View {
     let article: TranslatedWebArticle
     let sourceURL: URL
+    @Environment(\.knowledgeReading) private var knowledgeReading
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text(article.title)
-                    .font(.system(size: 25, weight: .bold, design: .serif))
-                    .lineSpacing(4)
-                Text(sourceURL.host ?? "英文网页")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if knowledgeReading {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Label(sourceURL.host ?? "中文译文", systemImage: "character.book.closed")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(KnowledgePagePalette.accent)
+                        Text(article.title)
+                            .font(.largeTitle.weight(.bold))
+                            .accessibilityAddTraits(.isHeader)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .background(KnowledgePagePalette.accent.opacity(0.07), in: .rect(cornerRadius: 14))
+                } else {
+                    Text(article.title)
+                        .font(.system(size: 25, weight: .bold, design: .serif))
+                        .lineSpacing(4)
+                    Text(sourceURL.host ?? "英文网页")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 ForEach(article.blocks) { block in
                     if let text = block.text {
                         Text(text)
-                            .font(.system(size: 17, design: .serif))
-                            .lineSpacing(7)
+                            .font(knowledgeReading ? .body : .system(size: 17, design: .serif))
+                            .lineSpacing(knowledgeReading ? 8 : 7)
                             .textSelection(.enabled)
                     } else {
                         HStack(spacing: 10) {
@@ -442,11 +506,12 @@ private struct TranslatedWebArticleView: View {
                     }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: knowledgeReading ? 650 : .infinity, alignment: .leading)
             .padding(20)
-            .padding(.bottom, 64)
+            .padding(.bottom, knowledgeReading ? 18 : 64)
+            .frame(maxWidth: .infinity)
         }
-        .background(Color(uiColor: .systemBackground))
+        .background(knowledgeReading ? KnowledgePagePalette.surface : Color(uiColor: .systemBackground))
         .accessibilityIdentifier("translated-web-article")
     }
 }
@@ -484,6 +549,7 @@ struct ServerArticleReaderView: View {
     var titleChanged: ((String) -> Void)?
     @State private var payload: ArticlePreviewResponse.Payload?
     @State private var loadError: String?
+    @Environment(\.knowledgeReading) private var knowledgeReading
 
     init(url: URL, titleChanged: ((String) -> Void)? = nil) {
         self.url = url
@@ -495,16 +561,23 @@ struct ServerArticleReaderView: View {
             if let payload {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        Text(displayTitle(payload))
-                            .font(.system(size: 25, weight: .bold, design: .serif))
-                            .lineSpacing(4)
-
-                        HStack(spacing: 8) {
-                            Text(payload.siteName.isEmpty ? (url.host ?? "网页") : payload.siteName)
-                            if !payload.byline.isEmpty { Text("·"); Text(payload.byline) }
+                        if knowledgeReading {
+                            VStack(alignment: .leading, spacing: 8) {
+                                sourceLine(payload)
+                                Text(displayTitle(payload))
+                                    .font(.largeTitle.weight(.bold))
+                                    .accessibilityAddTraits(.isHeader)
+                                    .lineSpacing(3)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(14)
+                            .background(KnowledgePagePalette.accent.opacity(0.07), in: .rect(cornerRadius: 14))
+                        } else {
+                            Text(displayTitle(payload))
+                                .font(.system(size: 25, weight: .bold, design: .serif))
+                                .lineSpacing(4)
+                            sourceLine(payload)
                         }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
 
                         ForEach(imageURLs(payload), id: \.self) { imageURL in
                             RemoteImage(url: imageURL, height: 220, cornerRadius: 12, contentMode: .fit)
@@ -512,8 +585,8 @@ struct ServerArticleReaderView: View {
                         }
 
                         Text(displayText(payload))
-                            .font(.system(size: 17, design: .serif))
-                            .lineSpacing(7)
+                            .font(knowledgeReading ? .body : .system(size: 17, design: .serif))
+                            .lineSpacing(knowledgeReading ? 8 : 7)
                             .textSelection(.enabled)
 
                         ShareLink(item: url) {
@@ -522,8 +595,10 @@ struct ServerArticleReaderView: View {
                         }
                         .padding(.top, 8)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: knowledgeReading ? 650 : .infinity, alignment: .leading)
                     .padding(20)
+                    .padding(.bottom, knowledgeReading ? 56 : 0)
+                    .frame(maxWidth: .infinity, alignment: knowledgeReading ? .center : .leading)
                 }
             } else if let loadError {
                 ContentUnavailableView {
@@ -537,8 +612,15 @@ struct ServerArticleReaderView: View {
                 ContentLoadingPlaceholder(title: "正在载入正文", layout: .article, rowCount: 4)
             }
         }
-        .background(Color(uiColor: .systemBackground))
+        .background(knowledgeReading ? KnowledgePagePalette.surface : Color(uiColor: .systemBackground))
         .task(id: url) { await load() }
+    }
+
+    private func sourceLine(_ payload: ArticlePreviewResponse.Payload) -> some View {
+        let siteName = payload.siteName.isEmpty ? (url.host ?? "网页") : payload.siteName
+        return Text([siteName, payload.byline].filter { !$0.isEmpty }.joined(separator: " · "))
+            .font(.footnote)
+            .foregroundStyle(.secondary)
     }
 
     private func load() async {
@@ -3569,6 +3651,7 @@ private struct ImageGalleryPresentationModifier: ViewModifier {
 
 private struct ImageGalleryPresentationBridge: UIViewControllerRepresentable {
     @Binding var selection: ImageGallerySelection?
+    @Environment(\.knowledgeReading) private var knowledgeReading
 
     func makeCoordinator() -> Coordinator {
         Coordinator(selection: $selection)
@@ -3583,6 +3666,7 @@ private struct ImageGalleryPresentationBridge: UIViewControllerRepresentable {
 
     func updateUIViewController(_ controller: UIViewController, context: Context) {
         context.coordinator.selection = $selection
+        context.coordinator.knowledgeReading = knowledgeReading
         guard let selection else {
             context.coordinator.dismiss(animated: false)
             return
@@ -3600,6 +3684,7 @@ private struct ImageGalleryPresentationBridge: UIViewControllerRepresentable {
     @MainActor
     final class Coordinator {
         var selection: Binding<ImageGallerySelection?>
+        var knowledgeReading = false
         private var hostingController: UIViewController?
         private var presentedSelectionID: UUID?
         private var pendingSelectionID: UUID?
@@ -3628,7 +3713,8 @@ private struct ImageGalleryPresentationBridge: UIViewControllerRepresentable {
             presentedSelectionID = selection.id
             let gallery = ImageGalleryView(
                 urls: selection.urls,
-                initialIndex: selection.initialIndex
+                initialIndex: selection.initialIndex,
+                knowledgeReading: knowledgeReading
             ) { [weak self] in
                 self?.dismiss(animated: true)
             }
@@ -3667,12 +3753,14 @@ private struct ImageGalleryPresentationBridge: UIViewControllerRepresentable {
 struct ImageGalleryView: View {
     let urls: [URL]
     private let onDismiss: (() -> Void)?
+    private let knowledgeReading: Bool
     @Environment(\.dismiss) private var environmentDismiss
     @State private var selectedIndex: Int
 
     init(
         urls: [URL],
         initialIndex: Int = 0,
+        knowledgeReading: Bool = false,
         onDismiss: (() -> Void)? = nil
     ) {
         let requestedURL = urls.indices.contains(initialIndex) ? urls[initialIndex] : urls.first
@@ -3680,6 +3768,7 @@ struct ImageGalleryView: View {
         let uniqueURLs = urls.filter { seen.insert($0).inserted }
         self.urls = uniqueURLs
         self.onDismiss = onDismiss
+        self.knowledgeReading = knowledgeReading
         _selectedIndex = State(
             initialValue: requestedURL.flatMap(uniqueURLs.firstIndex(of:)) ?? 0
         )
@@ -3712,7 +3801,7 @@ struct ImageGalleryView: View {
                 .tabViewStyle(.page(indexDisplayMode: .never))
             }
 
-            if urls.count > 1 {
+            if urls.count > 1 && !knowledgeReading {
                 Text("\(selectedIndex + 1) / \(urls.count)")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.white)
@@ -3724,20 +3813,59 @@ struct ImageGalleryView: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            Button(action: requestDismiss) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
+            if knowledgeReading {
+                galleryToolbar
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+            } else {
+                galleryControl("关闭图片", symbol: "xmark", action: requestDismiss)
                     .background(.black.opacity(0.56), in: Circle())
+                    .padding(16)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("关闭图片")
-            .padding(16)
         }
         .statusBarHidden()
         .interactiveDismissDisabled()
         .accessibilityAction(.escape, requestDismiss)
+    }
+
+    private var galleryToolbar: some View {
+        HStack(spacing: 5) {
+            if !urls.isEmpty {
+                galleryControl("上一张", symbol: "chevron.left") { selectedIndex -= 1 }
+                    .disabled(selectedIndex <= 0)
+                Text("\(selectedIndex + 1) / \(urls.count)")
+                    .font(.subheadline.monospacedDigit())
+                    .accessibilityLabel("第 \(selectedIndex + 1) 张，共 \(urls.count) 张")
+                galleryControl("下一张", symbol: "chevron.right") { selectedIndex += 1 }
+                    .disabled(selectedIndex + 1 >= urls.count)
+            }
+            Spacer(minLength: 4)
+            if urls.indices.contains(selectedIndex) {
+                ShareLink(item: urls[selectedIndex]) {
+                    Image(systemName: "square.and.arrow.up")
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("分享图片链接")
+            }
+            galleryControl("关闭图片", symbol: "xmark", action: requestDismiss)
+        }
+        .foregroundStyle(.white)
+        .padding(4)
+        .background(Color(red: 0.12, green: 0.15, blue: 0.20), in: .rect(cornerRadius: 16))
+        .frame(maxWidth: 530)
+        .frame(maxWidth: .infinity)
+    }
+
+    private func galleryControl(_ label: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.subheadline.weight(.semibold))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.white)
+        .accessibilityLabel(label)
     }
 
     private func requestDismiss() {
