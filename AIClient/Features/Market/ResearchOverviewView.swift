@@ -113,7 +113,7 @@ struct ResearchHomeView: View {
         .background(InvestmentDesign.surface)
         .accessibilityIdentifier("research-overview")
         .appSheet(item: $presentedTopic) { topic in
-            ResearchTopicSheet(closeLabel: "关闭\(topic.title)", onClose: { presentedTopic = nil }) {
+            ResearchTopicSheet(closeLabel: "关闭\(topic.title)", showsFloatingClose: topic != .agenda, onClose: { presentedTopic = nil }) {
                 switch topic {
                 case .company:
                     CompanyResearchView(store: companyStore)
@@ -124,7 +124,7 @@ struct ResearchHomeView: View {
                 case .macro:
                     ChinaMacroView()
                 case .agenda:
-                    MarketAgendaView()
+                    MarketAgendaView(onClose: { presentedTopic = nil })
                 case .viewpoints:
                     NavigationStack { InstitutionResearchView(store: researchStore) }
                 case .sentiment:
@@ -954,6 +954,7 @@ extension MarketQuote {
 
 private struct ResearchTopicSheet<Content: View>: View {
     let closeLabel: String
+    let showsFloatingClose: Bool
     let onClose: () -> Void
     @ViewBuilder let content: Content
 
@@ -961,7 +962,7 @@ private struct ResearchTopicSheet<Content: View>: View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .background(InvestmentDesign.surface)
-            .floatingSheetClose(closeLabel, action: onClose)
+            .floatingSheetClose(closeLabel, isVisible: showsFloatingClose, action: onClose)
             .accessibilityAction(.escape) { onClose() }
     }
 }
