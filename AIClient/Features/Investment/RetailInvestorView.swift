@@ -53,7 +53,7 @@ struct RetailInvestorView: View {
                     .allowsHitTesting(showsDouyin)
                     .accessibilityHidden(!showsDouyin)
 
-                XiaohongshuMoodView(isActive: !showsDouyin, load: store.xiaohongshuMood) {
+                XiaohongshuMoodView(isActive: !showsDouyin, load: store.xiaohongshuMood, loadNote: store.xiaohongshuNote) {
                     notesHeight = $0
                 }
                 .opacity(showsDouyin ? 0 : 1)
@@ -587,6 +587,10 @@ final class InvestorMoodStore {
 
     func xiaohongshuMood() async throws -> XiaohongshuMoodBoard {
         try await service.xiaohongshuMood()
+    }
+
+    func xiaohongshuNote(id: String) async throws -> XiaohongshuNoteDetail {
+        try await service.xiaohongshuNote(id: id)
     }
 }
 

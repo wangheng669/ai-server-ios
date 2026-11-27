@@ -941,12 +941,48 @@ struct XiaohongshuMoodNote: Decodable, Identifiable {
     let collectedAt: String
 }
 
+struct XiaohongshuNoteResponse: Decodable {
+    let data: XiaohongshuNoteDetail
+}
+
+struct XiaohongshuNoteDetail: Decodable {
+    let text: String
+    let url: URL
+    let details: XiaohongshuNoteMedia?
+}
+
+struct XiaohongshuNoteMedia: Decodable {
+    let capturedAt: String
+    let kind: String
+    let authorName: String?
+    let images: [XiaohongshuNoteImage]
+    let videoURL: URL?
+    let interaction: XiaohongshuNoteInteraction
+    let comments: [String]?
+}
+
+struct XiaohongshuNoteImage: Decodable {
+    let url: URL
+    let width: Int
+    let height: Int
+}
+
+struct XiaohongshuNoteInteraction: Decodable {
+    let likes: String?
+    let saves: String?
+    let comments: String?
+    let shares: String?
+}
+
 struct XiaohongshuCapture: Decodable, Identifiable {
     let startedAt: String
     let at: String
     let state: XiaohongshuCaptureState
     let reason: String?
     let newNotes: Int
+    let refreshed: Int
+    let backfill: Bool
+    let oldestAt: String?
 
     var id: String { startedAt }
 }
