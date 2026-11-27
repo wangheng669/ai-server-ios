@@ -2,9 +2,16 @@ import AVKit
 import SwiftUI
 
 struct XiaohongshuMoodView: View {
-    private enum Section: String, CaseIterable {
-        case notes = "采集笔记"
-        case runs = "采集记录"
+    private enum Destination: Identifiable {
+        case note(XiaohongshuMoodNote)
+        case history
+
+        var id: String {
+            switch self {
+            case .note(let note): note.id
+            case .history: "capture-history"
+            }
+        }
     }
 
     let isActive: Bool
@@ -12,34 +19,31 @@ struct XiaohongshuMoodView: View {
     let loadNote: (String) async throws -> XiaohongshuNoteDetail
     let onHeightChange: (CGFloat) -> Void
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var board: XiaohongshuMoodBoard?
     @State private var errorMessage: String?
     @State private var retry = 0
-    @State private var section: Section = .notes
-    @State private var expandedNote: XiaohongshuMoodNote.ID?
-    @State private var showAll = false
-
-    private static let previewCount = 4
+    @State private var destination: Destination?
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 if let errorMessage {
                     retryRow(errorMessage)
                 }
                 if let board {
-                    overview(board)
-                    if let status = notice(board) {
-                        Label(status, systemImage: "info.circle")
-                            .font(.footnote)
+                    summary(board)
+                    if board.notes.isEmpty {
+                        Text("暂无已入库笔记")
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.vertical, 24)
                     }
-                    sectionPicker
-                    switch section {
-                    case .notes: notesList(board.notes)
-                    case .runs: runsList(board.runs)
+                    ForEach(XiaohongshuNoteDay.grouped(board.notes)) { day in
+                        dayHeading(day)
+                        ForEach(day.notes) { note in
+                            noteRow(note)
+                            Divider()
+                        }
                     }
                 } else if errorMessage == nil {
                     ProgressView("正在读取小红书样本")
@@ -50,7 +54,7 @@ struct XiaohongshuMoodView: View {
             }
             .frame(maxWidth: TodayBriefStyle.maximumCardWidth, alignment: .leading)
             .padding(.horizontal, TodayBriefStyle.horizontalInset)
-            .padding(.top, 16)
+            .padding(.top, 6)
             .padding(.bottom, RetailInvestorView.closeClearance)
             .frame(maxWidth: .infinity)
             .onGeometryChange(for: CGFloat.self, of: { $0.size.height.rounded(.up) }, action: onHeightChange)
@@ -58,224 +62,241 @@ struct XiaohongshuMoodView: View {
         .scrollIndicators(.hidden)
         .scrollBounceBehavior(.basedOnSize)
         .accessibilityIdentifier("xiaohongshu-mood-content")
+        .appSheet(item: $destination) { selected in
+            switch selected {
+            case .note(let note):
+                XiaohongshuNoteReader(note: note, load: { try await loadNote(note.id) }) {
+                    destination = nil
+                }
+                .readingSheetPresentation()
+            case .history:
+                if let board {
+                    XiaohongshuCaptureHistory(board: board) {
+                        destination = nil
+                    }
+                }
+            }
+        }
         .task(id: LoadTrigger(isActive: isActive, phase: scenePhase, retry: retry)) {
             guard isActive, scenePhase == .active else { return }
             await refreshWhileVisible()
         }
     }
 
-    private func overview(_ board: XiaohongshuMoodBoard) -> some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-            : AnyLayout(HStackLayout(alignment: .top, spacing: 10))
+    private func summary(_ board: XiaohongshuMoodBoard) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                sampleStatus(board)
+                Spacer(minLength: 0)
+                historyButton
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                sampleStatus(board)
+                historyButton
+            }
+        }
+        .padding(.bottom, 2)
+    }
 
-        return VStack(alignment: .leading, spacing: 13) {
-            layout {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("A 股散户情绪")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(ResearchDesign.accent)
-                        .accessibilityAddTraits(.isHeader)
-                    Text("样本积累中")
-                        .font(.title2.weight(.semibold))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                Label("过热信号待计算", systemImage: "circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Divider()
-            layout {
-                metric("采集笔记", value: board.notes.count, unit: "篇")
-                metric("不同作者", value: board.authors, unit: "位")
-            }
-            if !board.notes.isEmpty {
-                composition(board)
-            }
-            if let updatedAt = board.updatedAt {
-                Text("\(XiaohongshuMoodTime.label(updatedAt, .dateAndTime)) 入库")
+    private func sampleStatus(_ board: XiaohongshuMoodBoard) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("\(board.notes.count.formatted()) 篇笔记 · \(board.authors.formatted()) 位作者")
+                .font(.caption.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(.primary)
+            if let notice = board.captureNotice {
+                Label(notice, systemImage: "info.circle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(16)
-        .researchPanel(fill: ResearchDesign.selection.opacity(0.45))
+        .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func metric(_ title: String, value: Int, unit: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(value.formatted())
-                    .font(.title2.weight(.semibold).monospacedDigit())
-                Text(unit).font(.caption).foregroundStyle(.secondary)
-            }
+    private var historyButton: some View {
+        Button {
+            destination = .history
+        } label: {
+            Label("采集记录", systemImage: "clock")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(ResearchDesign.accent)
+                .frame(minHeight: 44)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("xiaohongshu-capture-history")
     }
 
-    private func composition(_ board: XiaohongshuMoodBoard) -> some View {
-        let empty = board.notes.count { $0.excerpt.isEmpty }
-        let total = board.notes.count
-        let withoutText = board.onlyTopics + empty
-        let otherText = total - withoutText
-        let label = empty == 0 ? "仅标签" : "仅标签或空正文"
-        return VStack(alignment: .leading, spacing: 6) {
-            GeometryReader { geometry in
-                Capsule()
-                    .fill(ResearchDesign.accent.opacity(0.16))
-                    .overlay(alignment: .leading) {
-                        Capsule()
-                            .fill(ResearchDesign.accent.opacity(0.72))
-                            .frame(width: geometry.size.width * CGFloat(otherText) / CGFloat(total))
-                    }
-            }
-            .frame(height: 6)
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) {
-                    legend("含其他文字", count: otherText, strength: 0.72)
-                    Spacer(minLength: 4)
-                    legend(label, count: withoutText, strength: 0.16)
-                }
-                VStack(alignment: .leading, spacing: 5) {
-                    legend("含其他文字", count: otherText, strength: 0.72)
-                    legend(label, count: withoutText, strength: 0.16)
-                }
-            }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("含其他文字 \(otherText) 篇，\(label) \(withoutText) 篇")
-    }
-
-    private func legend(_ title: String, count: Int, strength: Double) -> some View {
-        HStack(spacing: 5) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(ResearchDesign.accent.opacity(strength))
-                .frame(width: 7, height: 7)
-            Text(title).foregroundStyle(.secondary)
-            Text(count.formatted()).fontWeight(.semibold)
-        }
-        .font(.caption)
-        .fixedSize(horizontal: true, vertical: false)
-    }
-
-    private var sectionPicker: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 6) {
-                ForEach(Section.allCases, id: \.self) { item in
-                    let selected = section == item
-                    Button {
-                        section = item
-                    } label: {
-                        Text(item.rawValue)
-                            .font(.subheadline.weight(selected ? .semibold : .medium))
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .foregroundStyle(selected ? ResearchDesign.accent : .secondary)
-                            .background(selected ? ResearchDesign.selection : .clear, in: RoundedRectangle(cornerRadius: 10))
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selected ? .isSelected : [])
-                }
-            }
-            Divider()
-        }
-    }
-
-    private func notesList(_ notes: [XiaohongshuMoodNote]) -> some View {
-        let visible = showAll ? notes[...] : notes.prefix(Self.previewCount)
-        return VStack(alignment: .leading, spacing: 0) {
-            listCaption("最近样本", detail: "按发布时间")
-            if notes.isEmpty {
-                Text("暂无已入库笔记").foregroundStyle(.secondary).padding(.vertical, 16)
-            }
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(visible, id: \.id) { note in
-                    noteRow(note)
-                    Divider()
-                }
-            }
-            if notes.count > Self.previewCount {
-                Button {
-                    showAll.toggle()
-                    if !showAll, !notes.prefix(Self.previewCount).contains(where: { $0.id == expandedNote }) {
-                        expandedNote = nil
-                    }
-                } label: {
-                    Label(showAll ? "收起笔记" : "查看全部 \(notes.count) 篇",
-                          systemImage: showAll ? "chevron.up" : "chevron.down")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(ResearchDesign.accent)
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("xiaohongshu-mood-show-all")
-            }
-        }
+    private func dayHeading(_ day: XiaohongshuNoteDay) -> some View {
+        Text(XiaohongshuMoodTime.dayLabel(day.date))
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.top, 12)
+            .padding(.bottom, 5)
+            .accessibilityAddTraits(.isHeader)
     }
 
     private func noteRow(_ note: XiaohongshuMoodNote) -> some View {
-        let expanded = expandedNote == note.id
-        let title = note.title.isEmpty ? "无标题笔记" : note.title
-        let labels = [
-            note.excerpt.isEmpty ? "无正文" : (note.onlyTopics ? "仅标签" : "含其他文字"),
-            note.hasTitle ? nil : "原帖无标题",
-            note.repeated ? "同作者重复内容" : nil
-        ].compactMap { $0 }
-
-        return VStack(alignment: .leading, spacing: 0) {
-            Button {
-                expandedNote = expanded ? nil : note.id
-            } label: {
-                HStack(alignment: .top, spacing: 10) {
-                    rowTime(note.publishedAt)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(title).font(.subheadline.weight(.semibold))
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(labels.joined(separator: " · "))
+        Button {
+            destination = .note(note)
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(XiaohongshuMoodTime.clock(note.publishedAt))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(note.title.isEmpty ? "无标题笔记" : note.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let subtitle = note.listSubtitle {
+                        Text(subtitle)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(2)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                        .padding(.top, 4)
-                        .accessibilityHidden(true)
                 }
-                .padding(.vertical, 9)
-                .frame(minHeight: 48, alignment: .leading)
-                .contentShape(Rectangle())
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
             }
-            .buttonStyle(.plain)
-            .accessibilityValue(expanded ? "已展开" : "已收起")
-            if expanded, isActive {
-                XiaohongshuExpandedNote(note: note) { try await loadNote(note.id) }
-                    .padding(.bottom, 12)
+            .padding(.vertical, 11)
+            .frame(minHeight: 52)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("xiaohongshu-note-\(note.id)")
+    }
+
+    private func retryRow(_ message: String) -> some View {
+        Button {
+            retry += 1
+        } label: {
+            Label("\(message) · 重试", systemImage: "arrow.clockwise")
+                .font(.footnote)
+                .foregroundStyle(ResearchDesign.accent)
+                .frame(minHeight: 44, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func refreshWhileVisible() async {
+        while !Task.isCancelled {
+            do {
+                let result = try await load()
+                try Task.checkCancellation()
+                board = result
+                errorMessage = nil
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled else { return }
+                errorMessage = NetworkErrorPresentation.message(for: error)
             }
+            do { try await Task.sleep(for: .seconds(60)) }
+            catch { return }
         }
     }
 
-    private func runsList(_ runs: [XiaohongshuCapture]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            listCaption("近期采集", detail: "北京时间")
-            if runs.isEmpty {
-                Text("暂无采集记录").foregroundStyle(.secondary).padding(.vertical, 16)
-            }
-            ForEach(CaptureRunGroup.grouped(runs)) { group in
-                if let oldest = group.earlierFailures.last {
-                    failureGroup(group, oldest: oldest)
-                } else {
-                    runRow(group.latest)
-                }
-                Divider()
-            }
+    private struct LoadTrigger: Equatable {
+        let isActive: Bool
+        let phase: ScenePhase
+        let retry: Int
+    }
+}
+
+private extension XiaohongshuMoodBoard {
+    var captureNotice: String? {
+        switch state {
+        case .waiting, .running, .paused, .failed, .coverageGap:
+            state.title(reason: reason)
+        default:
+            stale ? "采集状态超过两小时未更新" : nil
         }
+    }
+}
+
+private extension XiaohongshuMoodNote {
+    var listSubtitle: String? {
+        if repeated { return "同作者重复内容" }
+        if onlyTopics { return "仅话题标签" }
+        if excerpt.isEmpty { return "无正文" }
+        guard hasTitle else { return nil }
+        let snippet = excerpt
+            .replacingOccurrences(of: "#[^#\\n]+\\[话题\\]#", with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return snippet.isEmpty ? nil : snippet
+    }
+}
+
+private struct XiaohongshuNoteDay: Identifiable {
+    let date: Date
+    let notes: [XiaohongshuMoodNote]
+    var id: Date { date }
+
+    static func grouped(_ notes: [XiaohongshuMoodNote]) -> [Self] {
+        Dictionary(grouping: notes) { XiaohongshuMoodTime.day(for: $0.publishedAt) }
+            .sorted { $0.key > $1.key }
+            .map { Self(date: $0.key, notes: $0.value) }
+    }
+}
+
+private struct XiaohongshuCaptureHistory: View {
+    let board: XiaohongshuMoodBoard
+    let onClose: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("采集记录")
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                if let updatedAt = board.updatedAt {
+                    Text("最近入库 \(XiaohongshuMoodTime.label(updatedAt, .dateAndTime)) · 北京时间")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 5)
+                }
+                if let notice = board.captureNotice {
+                    Label(notice, systemImage: "info.circle")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 8)
+                }
+                let withText = board.notes.count - board.onlyTopics - board.notes.count { $0.excerpt.isEmpty }
+                Text("\(withText) 篇含正文 · \(board.notes.count - withText) 篇仅标签或无正文")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 10)
+                Divider()
+                if board.runs.isEmpty {
+                    Text("暂无采集记录")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 16)
+                }
+                ForEach(CaptureRunGroup.grouped(board.runs)) { group in
+                    if let oldest = group.earlierFailures.last {
+                        failureGroup(group, oldest: oldest)
+                    } else {
+                        runRow(group.latest)
+                    }
+                    Divider()
+                }
+            }
+            .frame(maxWidth: TodayBriefStyle.maximumCardWidth, alignment: .leading)
+            .padding(.horizontal, TodayBriefStyle.horizontalInset)
+            .padding(.top, 22)
+            .padding(.bottom, RetailInvestorView.closeClearance)
+            .frame(maxWidth: .infinity)
+            .measureReadingSheetContent(when: true)
+        }
+        .background(InvestmentDesign.surface)
+        .floatingSheetClose("关闭采集记录", action: onClose)
+        .accessibilityAction(.escape) { onClose() }
+        .readingSheetPresentation()
     }
 
     private func runRow(_ run: XiaohongshuCapture) -> some View {
@@ -334,129 +355,62 @@ struct XiaohongshuMoodView: View {
         .accessibilityIdentifier("xiaohongshu-failed-run-group")
     }
 
-    private func listCaption(_ title: String, detail: String) -> some View {
-        HStack {
-            Text(title)
-            Spacer(minLength: 8)
-            Text(detail)
-        }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .padding(.bottom, 4)
-    }
-
     private func rowTime(_ value: String) -> some View {
         Text(XiaohongshuMoodTime.label(value, .row))
             .font(.caption.monospacedDigit())
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: true, vertical: false)
     }
-
-    private func retryRow(_ message: String) -> some View {
-        Button {
-            retry += 1
-        } label: {
-            Label("\(message) · 重试", systemImage: "arrow.clockwise")
-                .font(.footnote)
-                .foregroundStyle(ResearchDesign.accent)
-                .frame(minHeight: 44, alignment: .leading)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func notice(_ board: XiaohongshuMoodBoard) -> String? {
-        switch board.state {
-        case .waiting, .paused, .failed, .coverageGap:
-            board.state.title(reason: board.reason)
-        default:
-            board.stale ? "采集状态超过两小时未更新" : nil
-        }
-    }
-
-    private func refreshWhileVisible() async {
-        while !Task.isCancelled {
-            do {
-                let result = try await load()
-                try Task.checkCancellation()
-                board = result
-                errorMessage = nil
-            } catch is CancellationError {
-                return
-            } catch {
-                guard !Task.isCancelled else { return }
-                errorMessage = NetworkErrorPresentation.message(for: error)
-            }
-            do { try await Task.sleep(for: .seconds(60)) }
-            catch { return }
-        }
-    }
-
-    private struct LoadTrigger: Equatable {
-        let isActive: Bool
-        let phase: ScenePhase
-        let retry: Int
-    }
 }
 
-private struct XiaohongshuExpandedNote: View {
+private struct XiaohongshuNoteReader: View {
     let note: XiaohongshuMoodNote
     let load: () async throws -> XiaohongshuNoteDetail
+    let onClose: () -> Void
 
     @State private var detail: XiaohongshuNoteDetail?
     @State private var failed = false
     @State private var openFailed = false
     @State private var retry = 0
+    @State private var contentHeight: CGFloat = 230
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let detail {
-                if let name = detail.details?.authorName {
-                    Text(name)
-                        .font(.subheadline.weight(.medium))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if note.hasTitle {
+                    Text(note.title)
+                        .font(.title2.weight(.semibold))
+                        .accessibilityAddTraits(.isHeader)
                 }
-                if !detail.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(verbatim: detail.text)
-                        .font(.subheadline)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("xiaohongshu-note-full-text")
-                }
-                if let media = detail.details {
-                    XiaohongshuNoteAttachments(media: media)
-                } else {
-                    Text("图片、视频和互动信息待补采")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Text("采集于 \(XiaohongshuMoodTime.label(note.collectedAt, .dateAndTime))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Button {
-                    Task {
-                        let opened = await UIApplication.shared.open(detail.url, options: [.universalLinksOnly: true])
-                        openFailed = !opened
+                if let detail {
+                    article(detail)
+                } else if failed {
+                    Button {
+                        failed = false
+                        retry += 1
+                    } label: {
+                        Label("详情加载失败，重试", systemImage: "arrow.clockwise")
+                            .font(.subheadline)
+                            .frame(minHeight: 44)
                     }
-                } label: {
-                    Label("打开小红书原帖", systemImage: "arrow.up.right")
-                        .font(.subheadline.weight(.medium))
-                        .frame(minHeight: 44)
+                } else {
+                    ProgressView("正在读取笔记详情")
+                        .font(.subheadline)
                 }
-                .accessibilityIdentifier("xiaohongshu-note-open-original")
-            } else if failed {
-                Button {
-                    failed = false
-                    retry += 1
-                } label: {
-                    Label("详情加载失败，重试", systemImage: "arrow.clockwise")
-                        .font(.footnote)
-                        .frame(minHeight: 44)
-                }
-            } else {
-                ProgressView("正在读取笔记详情")
-                    .font(.footnote)
+            }
+            .frame(maxWidth: TodayBriefStyle.maximumCardWidth, alignment: .leading)
+            .padding(.horizontal, TodayBriefStyle.horizontalInset)
+            .padding(.top, 24)
+            .padding(.bottom, 80)
+            .frame(maxWidth: .infinity)
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.height.rounded(.up) }) { height in
+                contentHeight = max(230, height)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(InvestmentDesign.surface)
+        .appPresentationContentHeight(contentHeight)
+        .overlay(alignment: .bottom) { controls }
+        .accessibilityAction(.escape) { onClose() }
         .alert("无法打开小红书原帖", isPresented: $openFailed) {
             Button("好", role: .cancel) {}
         } message: {
@@ -474,105 +428,204 @@ private struct XiaohongshuExpandedNote: View {
             }
         }
     }
-}
 
-private struct XiaohongshuNoteAttachments: View {
-    let media: XiaohongshuNoteMedia
-
-    var body: some View {
-        if media.kind == "video" {
-            if let url = media.videoURL {
-                XiaohongshuNoteVideo(url: url)
-                    .id(url)
+    private func article(_ detail: XiaohongshuNoteDetail) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            let published = XiaohongshuMoodTime.label(note.publishedAt, .dateAndTime)
+            Text(detail.details?.authorName.map { "\($0) · \(published)" } ?? published)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            if let media = detail.details, media.kind == "video" {
+                if let url = media.videoURL {
+                    XiaohongshuNoteVideo(url: url, cover: media.images.first?.url)
+                } else {
+                    Label("视频暂不可播放", systemImage: "play.slash")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if !detail.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(verbatim: detail.text)
+                    .font(.body)
+                    .lineSpacing(4)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("xiaohongshu-note-full-text")
+            }
+            if let media = detail.details {
+                let images = media.videoURL != nil ? Array(media.images.dropFirst()) : media.images
+                if !images.isEmpty {
+                    XiaohongshuNotePhotos(images: images)
+                }
+                XiaohongshuNoteEngagement(media: media)
             } else {
-                Text("视频暂不可播放，可打开原帖查看")
+                Text("图片、视频和互动信息待补采")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Text("采集于 \(XiaohongshuMoodTime.label(note.collectedAt, .dateAndTime))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
-        if !media.images.isEmpty {
-            ScrollView(.horizontal) {
-                LazyHStack(spacing: 8) {
-                    ForEach(Array(media.images.enumerated()), id: \.offset) { index, image in
-                        AsyncImage(url: image.url) { phase in
-                            switch phase {
-                            case .success(let photo):
-                                photo.resizable().scaledToFit()
-                            case .failure:
-                                Label("图片暂不可用", systemImage: "photo")
-                                    .font(.caption)
-                            default:
-                                ProgressView()
-                            }
+    }
+
+    private var controls: some View {
+        HStack(spacing: 12) {
+            if let detail {
+                Button {
+                    Task {
+                        let opened = await UIApplication.shared.open(detail.url, options: [.universalLinksOnly: true])
+                        openFailed = !opened
+                    }
+                } label: {
+                    Label("打开小红书原帖", systemImage: "arrow.up.right")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(ResearchDesign.accent)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 44)
+                        .background(.regularMaterial, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("xiaohongshu-note-open-original")
+            }
+            Spacer(minLength: 0)
+            DetailSheetCloseButton(action: onClose, accessibilityLabel: "关闭笔记")
+                .accessibilityIdentifier("xiaohongshu-note-close")
+        }
+        .padding(16)
+    }
+}
+
+private struct XiaohongshuNotePhotos: View {
+    let images: [XiaohongshuNoteImage]
+    @State private var selection: ImageGallerySelection?
+
+    var body: some View {
+        Group {
+            if images.count == 1, let image = images.first {
+                photo(image, at: 0)
+                    .frame(maxWidth: .infinity)
+            } else {
+                ScrollView(.horizontal) {
+                    LazyHStack(spacing: 8) {
+                        ForEach(Array(images.enumerated()), id: \.offset) { index, image in
+                            photo(image, at: index)
+                                .frame(width: imageWidth(image))
                         }
-                        .frame(width: imageWidth(image), height: 180)
-                        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .accessibilityLabel("笔记图片 \(index + 1)")
                     }
                 }
+                .scrollIndicators(.hidden)
             }
-            .scrollIndicators(.hidden)
         }
+        .imageGallery(item: $selection)
+    }
+
+    private func photo(_ image: XiaohongshuNoteImage, at index: Int) -> some View {
+        Button {
+            selection = ImageGallerySelection(urls: images.map(\.url), initialIndex: index)
+        } label: {
+            AsyncImage(url: image.url) { phase in
+                switch phase {
+                case .success(let photo):
+                    photo.resizable().scaledToFit()
+                case .failure:
+                    Label("图片暂不可用", systemImage: "photo")
+                        .font(.caption)
+                default:
+                    ProgressView()
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: images.count == 1 ? 254 : 184)
+            .background(InvestmentDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("查看笔记图片 \(index + 1)")
+    }
+
+    private func imageWidth(_ image: XiaohongshuNoteImage) -> CGFloat {
+        guard image.width > 0, image.height > 0 else { return 184 }
+        return min(276, max(120, 184 * CGFloat(image.width) / CGFloat(image.height)))
+    }
+}
+
+private struct XiaohongshuNoteEngagement: View {
+    let media: XiaohongshuNoteMedia
+
+    var body: some View {
         let counts = [
             media.interaction.likes.map { "赞 \($0)" },
             media.interaction.saves.map { "收藏 \($0)" },
             media.interaction.comments.map { "评论 \($0)" },
             media.interaction.shares.map { "分享 \($0)" }
         ].compactMap { $0 }
-        if !counts.isEmpty {
-            Text(counts.joined(separator: " · "))
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-            Text("互动采集于 \(XiaohongshuMoodTime.label(media.capturedAt, .dateAndTime))")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        if let comments = media.comments, !comments.isEmpty {
-            DisclosureGroup("已采集评论（\(comments.count) 条）") {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(Array(comments.enumerated()), id: \.offset) { _, comment in
-                        Text(verbatim: comment)
-                            .font(.footnote)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+        if !counts.isEmpty || media.comments?.isEmpty == false {
+            VStack(alignment: .leading, spacing: 8) {
+                Divider()
+                if !counts.isEmpty {
+                    Text(counts.joined(separator: " · "))
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(.secondary)
                 }
-                .padding(.top, 6)
+                if let comments = media.comments, !comments.isEmpty {
+                    DisclosureGroup("已采集评论（\(comments.count) 条）") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(Array(comments.enumerated()), id: \.offset) { _, comment in
+                                Text(verbatim: comment)
+                                    .font(.footnote)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        .padding(.top, 6)
+                    }
+                    .font(.footnote)
+                }
+                Text("互动采集于 \(XiaohongshuMoodTime.label(media.capturedAt, .dateAndTime))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            .font(.footnote)
         }
-    }
-
-    private func imageWidth(_ image: XiaohongshuNoteImage) -> CGFloat {
-        guard image.width > 0, image.height > 0 else { return 180 }
-        let fittedWidth = 180 * CGFloat(image.width) / CGFloat(image.height)
-        return min(280, max(120, fittedWidth))
     }
 }
 
 private struct XiaohongshuNoteVideo: View {
     let url: URL
+    let cover: URL?
     @State private var player: AVPlayer?
 
     var body: some View {
         Group {
             if let player {
                 VideoPlayer(player: player)
-                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
                 Button {
                     let video = AVPlayer(url: url)
                     player = video
                     video.play()
                 } label: {
-                    Label("播放视频", systemImage: "play.circle")
-                        .font(.subheadline.weight(.medium))
-                        .frame(minHeight: 44)
+                    ZStack {
+                        Color.black
+                        AsyncImage(url: cover) { image in
+                            image.resizable().scaledToFit()
+                        } placeholder: {
+                            Color.clear
+                        }
+                        Image(systemName: "play.fill")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 54, height: 54)
+                            .background(.black.opacity(0.72), in: Circle())
+                    }
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("播放视频")
+                .accessibilityIdentifier("xiaohongshu-note-play-video")
             }
         }
+        .aspectRatio(4.0 / 3.0, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
         .onDisappear { player?.pause() }
     }
 }
@@ -601,6 +654,22 @@ private enum XiaohongshuMoodTime {
         case row, dateAndTime
     }
 
+    static func day(for value: String) -> Date {
+        marketISODate(value).map { calendar.startOfDay(for: $0) } ?? .distantPast
+    }
+
+    static func dayLabel(_ date: Date) -> String {
+        if date == .distantPast { return "时间未知" }
+        if calendar.isDateInToday(date) { return "今天" }
+        if calendar.isDateInYesterday(date) { return "昨天" }
+        let format = calendar.isDate(date, equalTo: Date(), toGranularity: .year) ? dayOnly : dayWithYear
+        return format.string(from: date)
+    }
+
+    static func clock(_ value: String) -> String {
+        marketISODate(value).map { time.string(from: $0) } ?? "—"
+    }
+
     static func label(_ value: String, _ style: Style) -> String {
         guard let date = marketISODate(value) else { return "时间未知" }
         return (style == .row && calendar.isDateInToday(date) ? time : dateAndTime).string(from: date)
@@ -621,6 +690,8 @@ private enum XiaohongshuMoodTime {
     }()
 
     private static let time = formatter("HH:mm")
+    private static let dayOnly = formatter("M月d日")
+    private static let dayWithYear = formatter("yyyy年M月d日")
     private static let dateAndTime = formatter("MM/dd HH:mm")
 
     private static func formatter(_ format: String) -> DateFormatter {
