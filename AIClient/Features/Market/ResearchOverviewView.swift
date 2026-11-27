@@ -3,10 +3,11 @@ import SwiftUI
 private enum ResearchTopic: String, Identifiable {
     case company = "公司", industry = "行业", macro = "宏观", viewpoints = "机构观点", sentiment = "市场情绪"
 
+    case agenda = "大事日历"
     case industryQuotes = "全部行业"
     case chinaMarketStructure = "中国市场结构"
 
-    static let shortcuts: [Self] = [.company, .industry, .macro, .viewpoints]
+    static let shortcuts: [Self] = [.company, .industry, .macro, .viewpoints, .agenda]
 
     var id: Self { self }
 
@@ -16,6 +17,7 @@ private enum ResearchTopic: String, Identifiable {
         case .industry: "行业全景"
         case .industryQuotes: "A 股行业排行"
         case .macro: "宏观指标"
+        case .agenda: "大事日历"
         case .viewpoints: "机构观点"
         case .sentiment: "CNN 恐慌与贪婪指数"
         case .chinaMarketStructure: "资金与杠杆信号"
@@ -28,6 +30,7 @@ private enum ResearchTopic: String, Identifiable {
         case .industry: "square.grid.2x2"
         case .industryQuotes: "chart.bar.xaxis"
         case .macro: "chart.line.uptrend.xyaxis"
+        case .agenda: "calendar"
         case .viewpoints: "text.bubble"
         case .sentiment: "gauge.with.dots.needle.50percent"
         case .chinaMarketStructure: "chart.pie"
@@ -120,6 +123,8 @@ struct ResearchHomeView: View {
                     ResearchIndustryRanking(store: store)
                 case .macro:
                     ChinaMacroView()
+                case .agenda:
+                    MarketAgendaView()
                 case .viewpoints:
                     NavigationStack { InstitutionResearchView(store: researchStore) }
                 case .sentiment:
