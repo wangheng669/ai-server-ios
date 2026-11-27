@@ -163,7 +163,8 @@ struct MarketView: View {
             guard rootTabIsActive, scenePhase == .active else { return }
             async let companies: Void = detailStores.companies.loadIfNeeded()
             async let holdings: Void = holdingsStore.load()
-            _ = await (companies, holdings)
+            async let xiaohongshu: Void = investorMoodStore.xiaohongshu.refresh()
+            _ = await (companies, holdings, xiaohongshu)
         }
         .task(id: rootTabIsActive && scenePhase == .active) {
             guard rootTabIsActive, scenePhase == .active else { return }

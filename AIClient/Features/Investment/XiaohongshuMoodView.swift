@@ -1,4 +1,5 @@
 import AVKit
+import Observation
 import SwiftUI
 
 struct XiaohongshuMoodView: View {
@@ -15,37 +16,33 @@ struct XiaohongshuMoodView: View {
     }
 
     let isActive: Bool
-    let load: () async throws -> XiaohongshuMoodBoard
-    let loadNote: (String) async throws -> XiaohongshuNoteDetail
+    let store: XiaohongshuMoodStore
     let onHeightChange: (CGFloat) -> Void
     @Environment(\.scenePhase) private var scenePhase
-    @State private var board: XiaohongshuMoodBoard?
-    @State private var errorMessage: String?
-    @State private var retry = 0
     @State private var destination: Destination?
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                if let errorMessage {
+                if let errorMessage = store.errorMessage {
                     retryRow(errorMessage)
                 }
-                if let board {
-                    summary(board)
-                    if board.notes.isEmpty {
+                if let page = store.page {
+                    summary(page.board)
+                    if page.board.notes.isEmpty {
                         Text("暂无已入库笔记")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .padding(.vertical, 24)
                     }
-                    ForEach(XiaohongshuNoteDay.grouped(board.notes)) { day in
+                    ForEach(page.days) { day in
                         dayHeading(day)
                         ForEach(day.notes) { note in
                             noteRow(note)
                             Divider()
                         }
                     }
-                } else if errorMessage == nil {
+                } else if store.errorMessage == nil {
                     ProgressView("正在读取小红书样本")
                         .font(.subheadline)
                         .frame(maxWidth: .infinity)
@@ -65,19 +62,23 @@ struct XiaohongshuMoodView: View {
         .appSheet(item: $destination) { selected in
             switch selected {
             case .note(let note):
-                XiaohongshuNoteReader(note: note, load: { try await loadNote(note.id) }) {
+                XiaohongshuNoteReader(
+                    note: note,
+                    initialDetail: store.cachedNote(id: note.id),
+                    load: { try await store.note(id: note.id) }
+                ) {
                     destination = nil
                 }
                 .readingSheetPresentation()
             case .history:
-                if let board {
+                if let board = store.page?.board {
                     XiaohongshuCaptureHistory(board: board) {
                         destination = nil
                     }
                 }
             }
         }
-        .task(id: LoadTrigger(isActive: isActive, phase: scenePhase, retry: retry)) {
+        .task(id: isActive && scenePhase == .active) {
             guard isActive, scenePhase == .active else { return }
             await refreshWhileVisible()
         }
@@ -104,7 +105,7 @@ struct XiaohongshuMoodView: View {
                 .font(.caption.weight(.semibold))
                 .monospacedDigit()
                 .foregroundStyle(.primary)
-            if let notice = board.captureNotice {
+            if let notice = board.captureNotice ?? (store.isShowingCachedPage ? "上次读取的样本" : nil) {
                 Label(notice, systemImage: "info.circle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -137,6 +138,7 @@ struct XiaohongshuMoodView: View {
 
     private func noteRow(_ note: XiaohongshuMoodNote) -> some View {
         Button {
+            Task { _ = try? await store.note(id: note.id) }
             destination = .note(note)
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -172,7 +174,7 @@ struct XiaohongshuMoodView: View {
 
     private func retryRow(_ message: String) -> some View {
         Button {
-            retry += 1
+            Task { await store.refresh(force: true) }
         } label: {
             Label("\(message) · 重试", systemImage: "arrow.clockwise")
                 .font(.footnote)
@@ -184,26 +186,117 @@ struct XiaohongshuMoodView: View {
 
     private func refreshWhileVisible() async {
         while !Task.isCancelled {
-            do {
-                let result = try await load()
-                try Task.checkCancellation()
-                board = result
-                errorMessage = nil
-            } catch is CancellationError {
-                return
-            } catch {
-                guard !Task.isCancelled else { return }
-                errorMessage = NetworkErrorPresentation.message(for: error)
-            }
+            await store.refresh()
             do { try await Task.sleep(for: .seconds(60)) }
             catch { return }
         }
     }
+}
 
-    private struct LoadTrigger: Equatable {
-        let isActive: Bool
-        let phase: ScenePhase
-        let retry: Int
+@MainActor
+@Observable
+final class XiaohongshuMoodStore {
+    fileprivate struct Page {
+        let board: XiaohongshuMoodBoard
+        let days: [XiaohongshuNoteDay]
+
+        init(board: XiaohongshuMoodBoard) {
+            self.board = board
+            self.days = XiaohongshuNoteDay.grouped(board.notes)
+        }
+    }
+
+    private struct CachedNote {
+        let detail: XiaohongshuNoteDetail
+        let loadedAt: Date
+    }
+
+    fileprivate private(set) var page: Page?
+    private(set) var errorMessage: String?
+    private(set) var isShowingCachedPage = false
+
+    private let service: MarketService
+    private let cacheKey: String
+    @ObservationIgnored private var checkedLocalPage = false
+    @ObservationIgnored private var refreshedAt: Date?
+    @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    @ObservationIgnored private var noteTasks: [String: Task<XiaohongshuNoteDetail, Error>] = [:]
+    @ObservationIgnored private var notes: [String: CachedNote] = [:]
+
+    init(service: MarketService) {
+        self.service = service
+        self.cacheKey = "xiaohongshu-mood|\(service.baseURL.absoluteString)"
+    }
+
+    func refresh(force: Bool = false) async {
+        if let refreshTask {
+            await refreshTask.value
+            return
+        }
+        if !force, let refreshedAt, Date().timeIntervalSince(refreshedAt) < 60 { return }
+
+        let task = Task { await fetchPage() }
+        refreshTask = task
+        await task.value
+    }
+
+    private func fetchPage() async {
+        defer { refreshTask = nil }
+        async let response = service.xiaohongshuMood()
+        if !checkedLocalPage {
+            checkedLocalPage = true
+            if let saved = await DisplaySnapshotCache.pages.load(
+                XiaohongshuMoodBoard.self, key: cacheKey, maximumAge: 86_400
+            ) {
+                page = Page(board: saved.value)
+                isShowingCachedPage = true
+                prewarmNotes(saved.value)
+            }
+        }
+        do {
+            let fresh = try await response
+            let now = Date()
+            if page?.board != fresh { page = Page(board: fresh) }
+            refreshedAt = now
+            errorMessage = nil
+            isShowingCachedPage = false
+            prewarmNotes(fresh)
+            await DisplaySnapshotCache.pages.save(fresh, key: cacheKey, at: now)
+        } catch is CancellationError {
+            return
+        } catch {
+            errorMessage = NetworkErrorPresentation.message(for: error)
+        }
+    }
+
+    func cachedNote(id: String) -> XiaohongshuNoteDetail? {
+        guard let cached = notes[id] else { return nil }
+        let lifetime: TimeInterval = cached.detail.details == nil ? 30 : 120
+        return Date().timeIntervalSince(cached.loadedAt) < lifetime ? cached.detail : nil
+    }
+
+    func note(id: String) async throws -> XiaohongshuNoteDetail {
+        if let cached = cachedNote(id: id) { return cached }
+        if let task = noteTasks[id] { return try await task.value }
+
+        let task = Task { try await service.xiaohongshuNote(id: id) }
+        noteTasks[id] = task
+        defer { noteTasks[id] = nil }
+        let detail = try await task.value
+        if notes.count >= 24, let oldest = notes.min(by: { $0.value.loadedAt < $1.value.loadedAt }) {
+            notes[oldest.key] = nil
+        }
+        notes[id] = CachedNote(detail: detail, loadedAt: Date())
+        return detail
+    }
+
+    private func prewarmNotes(_ board: XiaohongshuMoodBoard) {
+        let ids = board.notes.prefix(3).map(\.id)
+        Task(priority: .utility) {
+            await runWithLimitedConcurrency(ids, maximumConcurrentRequests: 2) { [weak self] id in
+                _ = try? await self?.note(id: id)
+            }
+        }
     }
 }
 
@@ -365,14 +458,17 @@ private struct XiaohongshuCaptureHistory: View {
 
 private struct XiaohongshuNoteReader: View {
     let note: XiaohongshuMoodNote
+    let initialDetail: XiaohongshuNoteDetail?
     let load: () async throws -> XiaohongshuNoteDetail
     let onClose: () -> Void
 
-    @State private var detail: XiaohongshuNoteDetail?
+    @State private var loadedDetail: XiaohongshuNoteDetail?
     @State private var failed = false
     @State private var openFailed = false
     @State private var retry = 0
     @State private var contentHeight: CGFloat = 230
+
+    private var detail: XiaohongshuNoteDetail? { loadedDetail ?? initialDetail }
 
     var body: some View {
         ScrollView {
@@ -394,7 +490,12 @@ private struct XiaohongshuNoteReader: View {
                             .frame(minHeight: 44)
                     }
                 } else {
-                    ProgressView("正在读取笔记详情")
+                    if !note.excerpt.isEmpty {
+                        Text(verbatim: note.excerpt)
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                    }
+                    ProgressView("正在加载全文")
                         .font(.subheadline)
                 }
             }
@@ -420,7 +521,7 @@ private struct XiaohongshuNoteReader: View {
             do {
                 let result = try await load()
                 try Task.checkCancellation()
-                detail = result
+                loadedDetail = result
             } catch is CancellationError {
                 return
             } catch {
@@ -524,21 +625,14 @@ private struct XiaohongshuNotePhotos: View {
         Button {
             selection = ImageGallerySelection(urls: images.map(\.url), initialIndex: index)
         } label: {
-            AsyncImage(url: image.url) { phase in
-                switch phase {
-                case .success(let photo):
-                    photo.resizable().scaledToFit()
-                case .failure:
-                    Label("图片暂不可用", systemImage: "photo")
-                        .font(.caption)
-                default:
-                    ProgressView()
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: images.count == 1 ? 254 : 184)
+            RemoteImage(
+                url: image.url,
+                targetWidth: images.count == 1 ? nil : imageWidth(image),
+                height: images.count == 1 ? 254 : 184,
+                cornerRadius: 12,
+                contentMode: .fit
+            )
             .background(InvestmentDesign.secondarySurface, in: RoundedRectangle(cornerRadius: 12))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("查看笔记图片 \(index + 1)")
@@ -607,10 +701,8 @@ private struct XiaohongshuNoteVideo: View {
                 } label: {
                     ZStack {
                         Color.black
-                        AsyncImage(url: cover) { image in
-                            image.resizable().scaledToFit()
-                        } placeholder: {
-                            Color.clear
+                        if let cover {
+                            RemoteImage(url: cover, contentMode: .fit)
                         }
                         Image(systemName: "play.fill")
                             .font(.title3.weight(.semibold))
