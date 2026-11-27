@@ -988,6 +988,7 @@ struct Post: Codable, Identifiable, Hashable {
             .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
         return ["in this article", "comments", "comment"].contains(normalized)
     }
+    var truthOriginalBody: String? { htmlText(content) ?? clean(text) ?? clean(summary) }
     var truthChineseContent: String? { htmlText(contentZH) }
     var truthPublicationDate: Date? {
         guard let articlePostAt else { return nil }
@@ -1002,19 +1003,10 @@ struct Post: Codable, Identifiable, Hashable {
     }
     var isTruthMediaPlaceholder: Bool {
         guard !(images ?? []).isEmpty || !(videos ?? []).isEmpty else { return false }
-        guard let body = htmlText(content) ?? clean(text) ?? clean(summary) else { return true }
+        guard let body = truthOriginalBody else { return true }
         return body.wholeMatch(
             of: #/\[(?:图片帖子: [1-9][0-9]*张图片|视频帖子: [1-9][0-9]*个视频|媒体帖子(?:: [1-9][0-9]*张图片, [1-9][0-9]*个视频)?)\]/#
         ) != nil || body.wholeMatch(of: #/(?i:RT:\s+)?https?:\/\/\S+/#) != nil
-    }
-    var truthFeedContent: String {
-        guard let translated = truthChineseContent else { return originalDisplayContent }
-        let markers = ["https://", "http://", "https：//", "http：//"]
-        let firstLink = markers.compactMap { translated.range(of: $0, options: .caseInsensitive) }.min { $0.lowerBound < $1.lowerBound }
-        guard let firstLink else { return translated }
-        let text = String(translated[..<firstLink.lowerBound])
-            .trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: ":：")))
-        return text.isEmpty ? "分享了一则链接" : text
     }
     var truthRelevanceLabel: String? {
         guard let score else { return nil }

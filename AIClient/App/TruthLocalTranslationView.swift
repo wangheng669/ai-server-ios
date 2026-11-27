@@ -361,21 +361,43 @@ final class FeedTranslationCache {
     }
 }
 
+enum TruthPostBody {
+    case noText
+    case text(String)
+    case needsTranslation(String)
+}
+
+extension Post {
+    var truthPostBody: TruthPostBody {
+        guard !isTruthMediaPlaceholder, let original = truthOriginalBody else { return .noText }
+        let referencesOnly = original.wholeMatch(
+            of: #/(?i:(?:RT:?\s+)?(?:https?:\/\/\S+|@[a-z0-9_.]+)(?:\s+(?:https?:\/\/\S+|@[a-z0-9_.]+))*)/#
+        ) != nil
+        guard !referencesOnly, LocalTranslatedText.sourceLanguage(original) != nil else {
+            return .text(original)
+        }
+        if let chinese = LocalTranslatedText.validTranslation(truthChineseContent ?? "", original: original) {
+            return .text(chinese)
+        }
+        return .needsTranslation(original)
+    }
+}
+
 struct TruthLocalTranslationView: View {
     let post: Post
     var openOriginal: (() -> Void)?
     var showsOriginalText = false
 
     var body: some View {
-        if post.isTruthMediaPlaceholder {
+        switch post.truthPostBody {
+        case .noText:
             FeedTranslationText(text: Text("此帖没有正文"), openOriginal: openOriginal)
                 .foregroundStyle(.secondary)
-        } else if let chinese = LocalTranslatedText.chineseText(post.truthChineseContent)
-                    ?? LocalTranslatedText.chineseText(post.originalDisplayContent) {
-            FeedTranslationText(text: Text(chinese), openOriginal: openOriginal)
-        } else {
+        case .text(let text):
+            FeedTranslationText(text: Text(text), openOriginal: openOriginal)
+        case .needsTranslation(let original):
             LocalTranslatedText(
-                original: post.originalDisplayContent, detail: true,
+                original: original, detail: true,
                 translationOnly: !showsOriginalText, field: .body, openOriginal: openOriginal,
                 preservesOriginal: showsOriginalText
             )
