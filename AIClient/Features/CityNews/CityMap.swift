@@ -1,14 +1,12 @@
+import Foundation
 import SwiftUI
 
 private struct CityMapFeatureCollection: Decodable { let features: [CityMapFeature] }
 
 struct CityMapFeature: Decodable, Identifiable {
     struct Properties: Decodable {
-        struct Parent: Decodable { let adcode: Int }
         let adcode: Int
         let name: String
-        let level: String
-        let parent: Parent?
         let center: [Double]?
         let centroid: [Double]?
     }
@@ -51,54 +49,77 @@ struct CityMapFeature: Decodable, Identifiable {
     let properties: Properties
     let geometry: Geometry
     var id: Int { properties.adcode }
-    var parentAdcode: Int? { properties.parent?.adcode }
     var labelCoordinate: [Double]? { properties.centroid ?? properties.center ?? geometry.firstCoordinate }
 }
 
-struct CityMapRepository {
-    static let shared = CityMapRepository()
-    private let features: [CityMapFeature]
+struct CityObservationService {
+    private let baseURL = ServerConfiguration.currentURL
+        .appending(path: "api/ios/v1/learning/city-observation")
 
-    init(bundle: Bundle = .main) {
-        guard let url = bundle.url(forResource: "CityMapRegions", withExtension: "geojson"),
-              let data = try? Data(contentsOf: url),
-              let collection = try? JSONDecoder().decode(CityMapFeatureCollection.self, from: data)
-        else { features = []; return }
-        features = collection.features
+    func catalog() async throws -> CityRegion {
+        struct Catalog: Decodable { let root: CityRegion }
+        let response: Catalog = try await fetch("catalog")
+        return response.root
     }
 
-    func rootRegion() -> CityRegion {
-        let byParent = Dictionary(grouping: features, by: \.parentAdcode)
-        func region(for feature: CityMapFeature) -> CityRegion? {
-            let level: CityRegionLevel
-            switch feature.properties.level {
-            case "province": level = .province
-            case "city": level = .city
-            case "district": level = .district
-            default: return nil
-            }
-            return CityRegion(
-                adcode: feature.id,
-                parentAdcode: feature.parentAdcode,
-                name: feature.properties.name,
-                level: level,
-                children: (byParent[feature.id] ?? []).compactMap(region(for:))
-            )
+    func boundaries(for adcode: Int) async throws -> [CityMapFeature] {
+        let response: CityMapFeatureCollection = try await fetch("boundaries", adcode: adcode)
+        return response.features
+    }
+
+    func statistics(for adcode: Int) async throws -> CityObservationStatistics {
+        let result: CityObservationStatistics = try await fetch("statistics", adcode: adcode)
+        guard result.adcode == adcode else { throw URLError(.cannotParseResponse) }
+        return result
+    }
+
+    private func fetch<Value: Decodable>(_ endpoint: String, adcode: Int? = nil) async throws -> Value {
+        var components = URLComponents(url: baseURL.appending(path: endpoint), resolvingAgainstBaseURL: false)
+        if let adcode {
+            components?.queryItems = [.init(name: "adcode", value: String(adcode))]
         }
-        return CityRegion(
-            adcode: 100000,
-            parentAdcode: nil,
-            name: "全国",
-            level: .country,
-            children: (byParent[100000] ?? []).compactMap(region(for:))
-        )
+        guard let url = components?.url else { throw URLError(.badURL) }
+        var request = URLRequest(url: url, timeoutInterval: 45)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let response = response as? HTTPURLResponse, response.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        return try JSONDecoder().decode(LearningResponse<Value>.self, from: data).data
+    }
+}
+
+struct CityObservationStatistics: Decodable {
+    enum Status: String, Decodable { case available; case notCovered = "not_covered" }
+
+    struct Source: Decodable {
+        let title: String
+        let publisher: String
+        let url: URL
     }
 
-    func features(for region: CityRegion) -> [CityMapFeature] {
-        let codes = Set(region.children.map(\.adcode))
-        return features.filter { codes.contains($0.id) }
+    struct Metric: Decodable, Identifiable {
+        var id: String { key }
+        let key: String
+        let label: String
+        let value: String
+        let unit: String
+        let group: String
+        let year: Int
+        let source: Source?
     }
 
+    struct Section: Decodable {
+        let title: String
+        let paragraphs: [String]
+    }
+
+    let adcode: Int
+    let status: Status
+    let metrics: [Metric]
+    let sections: [Section]
+    let notes: [String]
+    let source: Source?
 }
 
 struct CityMapProjection {

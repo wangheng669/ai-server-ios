@@ -18,7 +18,6 @@
 		F13F00000000000000000001 /* Sec13FNotificationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F13F00000000000000000002 /* Sec13FNotificationView.swift */; };
 		C17A00000000000000000001 /* CityNewsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C17A00000000000000000002 /* CityNewsView.swift */; };
 		A4B804000000000000000001 /* CityMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4B804000000000000000002 /* CityMap.swift */; };
-		C17A00000000000000000006 /* CityMapRegions.geojson in Resources */ = {isa = PBXBuildFile; fileRef = C17A00000000000000000007 /* CityMapRegions.geojson */; };
 		AA1000000000000000000001 /* GoogleSignalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000002 /* GoogleSignalView.swift */; };
 		00964D188729A223382D77B6 /* AIServerClientApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E0A2CF0E9F20AA431B17A59 /* AIServerClientApp.swift */; };
 		0310C5B2F83B870E8FA03AB9 /* MarketView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33DF2FE619F731E7105C5F23 /* MarketView.swift */; };
@@ -125,7 +124,6 @@
 		F13F00000000000000000002 /* Sec13FNotificationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sec13FNotificationView.swift; sourceTree = "<group>"; };
 		C17A00000000000000000002 /* CityNewsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CityNewsView.swift; sourceTree = "<group>"; };
 		A4B804000000000000000002 /* CityMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CityMap.swift; sourceTree = "<group>"; };
-		C17A00000000000000000007 /* CityMapRegions.geojson */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = CityMaps/CityMapRegions.geojson; sourceTree = "<group>"; };
 		AA1000000000000000000002 /* GoogleSignalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleSignalView.swift; sourceTree = "<group>"; };
 		041A88D0726A910552794148 /* FamousHoldingPositions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamousHoldingPositions.swift; sourceTree = "<group>"; };
 		07CD0E8186D0B14FE290474A /* LearningDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningDetailView.swift; sourceTree = "<group>"; };
@@ -225,7 +223,6 @@
 			children = (
 				AE5900000000000000000002 /* LobeIcons-LICENSE.txt */,
 				137FDCB7037445C35ED02C74 /* Assets.xcassets */,
-				C17A00000000000000000007 /* CityMapRegions.geojson */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -534,7 +531,6 @@
 			files = (
 				D861C048F423A45336AE551F /* Assets.xcassets in Resources */,
 				AE5900000000000000000001 /* LobeIcons-LICENSE.txt in Resources */,
-				C17A00000000000000000006 /* CityMapRegions.geojson in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

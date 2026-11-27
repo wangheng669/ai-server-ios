@@ -189,3 +189,146 @@ struct KnowledgeConceptDeck: View {
         .clipShape(.rect(cornerRadius: 17))
     }
 }
+
+struct KnowledgeConceptDetailView: View {
+    let concept: KnowledgeConceptCard
+    @Environment(\.dismiss) private var dismiss
+    @State private var path: [String] = []
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            KnowledgeConceptDetailPage(id: concept.id, initialCard: concept)
+                .navigationTitle("概念卡片")
+                .navigationDestination(for: String.self) { id in
+                    KnowledgeConceptDetailPage(id: id)
+                        .navigationTitle("概念卡片")
+                }
+        }
+        .floatingSheetClose("关闭概念详情", action: dismiss.callAsFunction)
+    }
+}
+
+private struct KnowledgeConceptDetailPage: View {
+    let id: String
+    var initialCard: KnowledgeConceptCard?
+    @State private var detail: KnowledgeConceptDetail?
+    @State private var failed = false
+    @State private var retry = 0
+    @State private var reference: WikipediaEntity?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                if let card = detail?.card ?? initialCard {
+                    header(card)
+                }
+                if let detail {
+                    section("背景", lines: [detail.content.background])
+                    timeline(detail.content.timeline)
+                    section("要点", lines: detail.content.keyPoints)
+                    section("相关人物", lines: detail.content.keyPeople)
+                    if !detail.related.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            heading("相关概念")
+                            ForEach(detail.related) { related in
+                                NavigationLink(value: related.id) {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(related.title).font(.subheadline.weight(.semibold))
+                                        Text(related.subtitle).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                }
+                            }
+                        }
+                    }
+                } else if failed {
+                    ContentUnavailableView {
+                        Label("概念详情载入失败", systemImage: "wifi.exclamationmark")
+                    } actions: {
+                        Button("重试") { retry += 1 }
+                    }
+                } else {
+                    ProgressView("正在载入概念详情")
+                }
+                if let card = detail?.card ?? initialCard, let url = card.wikipediaURL {
+                    Button {
+                        reference = WikipediaEntity(
+                            id: card.id, term: card.wikipediaTitle, title: card.wikipediaTitle,
+                            summary: card.summary, url: url
+                        )
+                    } label: {
+                        Label("维基百科原文", systemImage: "doc.text.magnifyingglass")
+                    }
+                    .frame(minHeight: 44)
+                }
+            }
+            .frame(maxWidth: 640, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 84)
+            .frame(maxWidth: .infinity)
+        }
+        .background(KnowledgePagePalette.canvas.ignoresSafeArea())
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: retry) {
+            guard detail == nil else { return }
+            failed = false
+            do {
+                let loaded = try await LearningService().fetchConcept(id: id)
+                try Task.checkCancellation()
+                detail = loaded
+            } catch {
+                if !Task.isCancelled { failed = true }
+            }
+        }
+        .appSheet(item: $reference) { entity in
+            WikipediaReaderView(entity: entity)
+                .environment(\.wikipediaReaderChrome, .knowledge)
+                .wikipediaReaderPresentation()
+        }
+    }
+
+    private func header(_ card: KnowledgeConceptCard) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(card.subtitle).font(.subheadline).foregroundStyle(.secondary)
+            Text(card.title).font(.largeTitle.weight(.bold)).accessibilityAddTraits(.isHeader)
+            Text(card.summary)
+            if !card.importance.isEmpty {
+                Text(card.importance).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func section(_ title: String, lines: [String]) -> some View {
+        let content = lines.filter { !$0.isEmpty }
+        if !content.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                heading(title)
+                ForEach(Array(content.enumerated()), id: \.offset) { _, line in
+                    Text(line).font(.subheadline)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func timeline(_ points: [KnowledgeConceptDetail.TimelinePoint]) -> some View {
+        if !points.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                heading("时间线")
+                ForEach(Array(points.enumerated()), id: \.offset) { _, point in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(point.date).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                        Text(point.title).font(.subheadline.weight(.semibold))
+                        Text(point.description).font(.subheadline)
+                    }
+                }
+            }
+        }
+    }
+
+    private func heading(_ text: String) -> some View {
+        Text(text).font(.headline).accessibilityAddTraits(.isHeader)
+    }
+}

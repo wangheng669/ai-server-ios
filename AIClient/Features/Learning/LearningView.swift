@@ -380,19 +380,8 @@ struct LearningView: View {
                 conceptsContent
             }
             .appSheet(item: $selectedConcept) { concept in
-                if let url = concept.wikipediaURL {
-                    WikipediaReaderView(
-                        entity: WikipediaEntity(
-                            id: concept.id,
-                            term: concept.wikipediaTitle,
-                            title: concept.wikipediaTitle,
-                            summary: concept.summary,
-                            url: url
-                        )
-                    )
-                    .environment(\.wikipediaReaderChrome, .knowledge)
-                    .wikipediaReaderPresentation()
-                }
+                KnowledgeConceptDetailView(concept: concept)
+                    .readingSheetPresentation()
             }
             #if DEBUG
             .onChange(of: store.conceptLibrary?.concepts, initial: true) { _, concepts in
@@ -480,7 +469,7 @@ struct LearningView: View {
         }
         videoLessons
         if let catalog = store.catalog {
-            savedTopics(in: catalog, excluding: Set(milestones.map(\.topic.id)))
+            learningDirectory(catalog)
         }
     }
 
@@ -488,7 +477,7 @@ struct LearningView: View {
     private var videoLessons: some View {
         if let lessons = store.videoLibrary?.lessons, !lessons.isEmpty {
             VStack(alignment: .leading, spacing: 11) {
-                KnowledgeSectionHeading("小Lin说 · 投资视频课", detail: knowledgeStatus(
+                KnowledgeSectionHeading("投资视频课", detail: knowledgeStatus(
                     count: lessons.count,
                     unit: "期",
                     error: store.videoLibraryErrorMessage
@@ -577,35 +566,48 @@ struct LearningView: View {
         }
     }
 
-    @ViewBuilder
-    private func savedTopics(in catalog: LearningCatalog, excluding excludedIDs: Set<String>) -> some View {
-        let topics = Array(
-            catalog.sections
-                .flatMap(\.topics)
-                .filter { !excludedIDs.contains($0.id) }
-                .prefix(2)
-        )
-        if topics.isEmpty {
-            EmptyView()
-        } else {
-            KnowledgeSectionHeading("稍后阅读")
-                .padding(.horizontal, 20)
+    private func learningDirectory(_ catalog: LearningCatalog) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            KnowledgeSectionHeading("课程与资料", detail: "\(catalog.topicCount) 篇")
 
-            VStack(spacing: 0) {
-                ForEach(topics) { topic in
-                    Button {
-                        selectedRoute = .topic(topic)
-                    } label: {
-                        LearningTopicRow(topic: topic)
+            ForEach(catalog.sections) { section in
+                DisclosureGroup {
+                    LazyVStack(spacing: 0) {
+                        ForEach(section.topics) { topic in
+                            Button {
+                                selectedRoute = .topic(topic)
+                            } label: {
+                                LearningTopicRow(topic: topic)
+                            }
+                            .buttonStyle(LearningPressStyle())
+                            .accessibilityIdentifier("knowledge-topic-\(topic.id)")
+
+                            if topic.id != section.topics.last?.id {
+                                Divider().padding(.leading, 112)
+                            }
+                        }
                     }
-                    .buttonStyle(LearningPressStyle())
-                    if topic.id != topics.last?.id {
-                        Divider().padding(.leading, 112)
+                    .padding(.vertical, 4)
+                } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(section.name)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        Spacer(minLength: 4)
+                        Text(section.topics.count.formatted())
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
                     }
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
                 }
+                .padding(.horizontal, 12)
+                .knowledgeCard()
+                .accessibilityIdentifier("knowledge-learning-section-\(section.id)")
             }
-            .padding(.horizontal, 20)
         }
+        .padding(.horizontal, 20)
+        .padding(.top, 24)
     }
 
     @ViewBuilder
@@ -1324,10 +1326,15 @@ private struct LearningVideoLessonCard: View {
     }
 }
 
+private enum VideoLessonDetailState {
+    case loading, loaded, failed
+}
+
 private struct LearningVideoLessonDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var lesson: LearningVideoLesson
-    @State private var isLoadingDetail = false
+    @State private var detailState: VideoLessonDetailState = .loading
+    @State private var detailRetry = 0
     @State private var player: AVPlayer?
     @State private var playbackState: LearningVideoPlaybackState = .idle
     @State private var playbackTask: Task<Void, Never>?
@@ -1359,6 +1366,15 @@ private struct LearningVideoLessonDetailView: View {
                         watchPoints
                         chapters
                         relatedTopics
+                        if detailState == .failed {
+                            Button {
+                                detailRetry += 1
+                            } label: {
+                                Label("重试载入视频资料", systemImage: "arrow.clockwise")
+                                    .frame(minHeight: 44)
+                            }
+                            .padding(.horizontal, 20)
+                        }
                         sourceNote
                     }
                     .padding(.bottom, 80)
@@ -1400,12 +1416,15 @@ private struct LearningVideoLessonDetailView: View {
                 AppOrientationController.shared.setVideoFullscreen(false)
             }
         }
-        .task(id: lesson.id) {
-            guard lesson.chapters.isEmpty else { return }
-            isLoadingDetail = true
-            defer { isLoadingDetail = false }
-            if let detail = try? await LearningService().fetchVideoLesson(id: lesson.id) {
+        .task(id: detailRetry) {
+            detailState = .loading
+            do {
+                let detail = try await LearningService().fetchVideoLesson(id: lesson.id)
+                try Task.checkCancellation()
                 lesson = detail
+                detailState = .loaded
+            } catch {
+                if !Task.isCancelled { detailState = .failed }
             }
         }
         .task(id: lesson.coverURL) {
@@ -1686,7 +1705,7 @@ private struct LearningVideoLessonDetailView: View {
             HStack {
                 sectionTitle("章节")
                 Spacer()
-                if isLoadingDetail { ProgressView().controlSize(.small) }
+                if detailState == .loading { ProgressView().controlSize(.small) }
             }
 
             if !lesson.chapters.isEmpty {
@@ -2291,7 +2310,7 @@ private struct RecentKnowledgeBookRow: View {
         }
         .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(book.title)，作者\(book.author)，\(book.displayReadingProgress.map { "阅读进度\($0)%" } ?? (book.isFinished ? "已读完" : "阅读中"))")
+        .accessibilityLabel("\(book.title)，作者\(book.author)，\(book.displayReadingProgress.map { "阅读进度\($0)%" } ?? "进度未同步")")
         .accessibilityHint("在微信读书打开")
     }
 }
@@ -2301,7 +2320,8 @@ private struct BookMetadataLine: View {
     var compact = false
 
     private var items: [String] {
-        [book.category?.replacingOccurrences(of: "-", with: " / "), book.lastReadText, book.estimatedRemainingText]
+        [book.category?.replacingOccurrences(of: "-", with: " / "), book.lastReadText,
+         book.readingDurationText, book.estimatedRemainingText]
             .compactMap { value in
                 guard let value, !value.isEmpty else { return nil }
                 return value
@@ -2313,8 +2333,7 @@ private struct BookMetadataLine: View {
             Text(items.joined(separator: " · "))
                 .font(.system(size: compact ? 10 : 11, weight: .medium))
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.78)
+                .lineLimit(2)
         }
     }
 }
@@ -2443,9 +2462,9 @@ private struct BooksReadingSummaryCard: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                metric(title: "今日阅读", value: bookshelf.todayReadingSeconds == nil ? "暂无数据" : bookshelf.todayReadingText)
+                metric(title: "今日阅读", value: bookshelf.todayReadingText)
                 Divider().frame(height: 34).padding(.horizontal, 10)
-                metric(title: "昨日阅读", value: bookshelf.yesterdayReadingSeconds == nil ? "暂无数据" : bookshelf.yesterdayReadingText)
+                metric(title: "昨日阅读", value: bookshelf.yesterdayReadingText)
                 Divider().frame(height: 34).padding(.horizontal, 10)
                 metric(title: "当前书籍", value: remainingText)
             }
@@ -2520,9 +2539,9 @@ private struct BookReadingProgressView: View {
                     .accessibilityValue("\(progress)%")
             }
         } else {
-            Text(book.isFinished ? "已读完" : "阅读中")
+            Text("进度未同步")
                 .font(.system(size: compact ? 10 : 12, weight: .semibold))
-                .foregroundStyle(book.isFinished ? Color.secondary : KnowledgePagePalette.accent)
+                .foregroundStyle(.secondary)
         }
     }
 }

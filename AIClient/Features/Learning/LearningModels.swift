@@ -358,15 +358,17 @@ struct LearningBookshelf: Decodable, Equatable {
     }
 
     var todayReadingText: String {
-        Self.durationText(seconds: todayReadingSeconds ?? 0, empty: "今天还没开始")
+        Self.durationText(seconds: todayReadingSeconds, empty: "今天还没开始")
     }
 
     var yesterdayReadingText: String {
-        Self.durationText(seconds: yesterdayReadingSeconds ?? 0, empty: "昨日未阅读")
+        Self.durationText(seconds: yesterdayReadingSeconds, empty: "昨日未阅读")
     }
 
-    private static func durationText(seconds: Int64, empty: String) -> String {
-        guard seconds >= 60 else { return empty }
+    private static func durationText(seconds: Int64?, empty: String) -> String {
+        guard let seconds else { return "未同步" }
+        guard seconds > 0 else { return empty }
+        if seconds < 60 { return "\(seconds) 秒" }
         let minutes = seconds / 60
         if minutes < 60 { return "\(minutes) 分钟" }
         let hours = minutes / 60
@@ -413,7 +415,8 @@ struct KnowledgeBook: Identifiable, Decodable, Hashable {
     }
 
     var readingDurationText: String? {
-        guard let seconds = recordReadingSeconds, seconds >= 60 else { return nil }
+        guard let seconds = recordReadingSeconds, seconds > 0 else { return nil }
+        if seconds < 60 { return "累计阅读 \(seconds) 秒" }
         let minutes = seconds / 60
         if minutes >= 60 {
             let hours = minutes / 60
@@ -496,6 +499,47 @@ struct KnowledgeConceptCard: Identifiable, Decodable, Hashable {
     }
 
     var wikipediaURL: URL? { URL(string: wikipediaURLValue) }
+}
+
+struct KnowledgeConceptDetail: Decodable {
+    struct Content: Decodable {
+        let background: String
+        let timeline: [TimelinePoint]
+        let keyPoints: [String]
+        let keyPeople: [String]
+
+        enum CodingKeys: String, CodingKey {
+            case background, timeline
+            case keyPoints = "key_points"
+            case keyPeople = "key_people"
+        }
+    }
+
+    struct TimelinePoint: Decodable {
+        let date: String
+        let title: String
+        let description: String
+    }
+
+    struct RelatedConcept: Decodable, Identifiable {
+        let id: String
+        let kind: KnowledgeConceptKind
+        let title: String
+        let subtitle: String
+    }
+
+    let card: KnowledgeConceptCard
+    let content: Content
+    let related: [RelatedConcept]
+
+    private enum CodingKeys: String, CodingKey { case content, related }
+
+    init(from decoder: Decoder) throws {
+        card = try KnowledgeConceptCard(from: decoder)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        content = try container.decode(Content.self, forKey: .content)
+        related = try container.decode([RelatedConcept].self, forKey: .related)
+    }
 }
 
 enum KnowledgeConceptImageURL {

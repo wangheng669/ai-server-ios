@@ -1,38 +1,57 @@
 import SwiftUI
 
-enum CityRegionLevel: String, Hashable {
-    case country = "全国", province = "省份", city = "城市", district = "区县"
+enum CityRegionLevel: String, Decodable, Hashable {
+    case country, province, city, district
 
-    var childTitle: String? {
+    var title: String {
         switch self {
-        case .country: "选择省份"
-        case .province: "下辖城市"
-        case .city: "下辖区县"
-        case .district: nil
+        case .country: "全国"
+        case .province: "省级"
+        case .city: "地市级"
+        case .district: "区县级"
         }
     }
 }
 
-struct CityRegion: Identifiable, Hashable {
+struct CityRegion: Decodable, Identifiable, Hashable {
     var id: String { String(adcode) }
     let adcode: Int
-    let parentAdcode: Int?
     let name: String
     let level: CityRegionLevel
     let children: [CityRegion]
+
+    var childTitle: String {
+        if children.first?.level == .district { return "下辖区县" }
+        switch level {
+        case .country: return "选择省份"
+        case .province: return "下辖地区"
+        case .city, .district: return "区域地图"
+        }
+    }
+
+    func path(to adcode: Int) -> [CityRegion]? {
+        if self.adcode == adcode { return [] }
+        for child in children {
+            if let path = child.path(to: adcode) { return [child] + path }
+        }
+        return nil
+    }
 }
 
 struct CityRegionJourney: Equatable {
+    let root: CityRegion
     private(set) var path: [CityRegion]
 
-    init(path: [CityRegion] = []) { self.path = path }
+    init(root: CityRegion, startingAdcode: Int) {
+        self.root = root
+        self.path = root.path(to: startingAdcode) ?? []
+    }
 
-    var current: CityRegion { path.last ?? CityRegions.root }
+    var current: CityRegion { path.last ?? root }
     var parent: CityRegion? {
         guard !path.isEmpty else { return nil }
-        return path.dropLast().last ?? CityRegions.root
+        return path.dropLast().last ?? root
     }
-    var canGoBack: Bool { !path.isEmpty }
     var mapScope: CityRegion {
         let current = current
         if current.children.isEmpty {
@@ -65,20 +84,39 @@ struct CityRegionJourney: Equatable {
     }
 }
 
-enum CityRegions {
-    static let root = CityMapRepository.shared.rootRegion()
+private enum CityDashboardTab: String, CaseIterable, Identifiable {
+    case map = "地图", data = "数据", industry = "产业", transport = "交通", culture = "文旅"
+    var id: String { rawValue }
+    var showsMap: Bool { self == .map }
 
-    static func path(to adcode: Int) -> [CityRegion] {
-        findPath(in: root, to: adcode) ?? []
-    }
-
-    private static func findPath(in region: CityRegion, to adcode: Int) -> [CityRegion]? {
-        for child in region.children {
-            if child.adcode == adcode { return [child] }
-            if let suffix = findPath(in: child, to: adcode) { return [child] + suffix }
+    func showsSection(_ section: CityObservationStatistics.Section) -> Bool {
+        let keywords: [String]
+        switch self {
+        case .map: return false
+        case .data: return true
+        case .industry: keywords = ["农业", "工业", "产业", "建筑业", "服务业", "投资"]
+        case .transport: keywords = ["交通", "运输", "邮电"]
+        case .culture: keywords = ["文化", "旅游", "文旅", "体育"]
         }
-        return nil
+        let title = section.title.filter { !$0.isWhitespace }
+        return keywords.contains(where: title.contains)
     }
+
+    func includes(_ metric: CityObservationStatistics.Metric) -> Bool {
+        switch self {
+        case .map: false
+        case .data: true
+        case .industry: ["industry", "agriculture", "investment"].contains(metric.group)
+        case .transport: metric.group == "transport"
+        case .culture: metric.group == "culture"
+        }
+    }
+}
+
+private enum CityContentLoad<Value> {
+    case loading
+    case loaded(Value)
+    case failed
 }
 
 private enum CityMapNavigationDirection {
@@ -89,27 +127,59 @@ private enum CityMapNavigationDirection {
 
 struct CityNewsView: View {
     @Environment(\.dismiss) private var dismiss
+    @State private var catalog: CityContentLoad<CityRegion> = .loading
+    @State private var catalogRetry = 0
+
+    var body: some View {
+        Group {
+            switch catalog {
+            case .loading:
+                ProgressView("正在载入城市目录")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .failed:
+                CityLoadFailure(title: "城市目录载入失败") { catalogRetry += 1 }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            case let .loaded(root):
+                CityObservationView(root: root)
+            }
+        }
+        .floatingSheetClose("关闭城市观察", action: dismiss.callAsFunction)
+        .task(id: catalogRetry) {
+            catalog = .loading
+            do {
+                let root = try await CityObservationService().catalog()
+                try Task.checkCancellation()
+                catalog = .loaded(root)
+            } catch {
+                if !Task.isCancelled { catalog = .failed }
+            }
+        }
+    }
+}
+
+private struct CityObservationView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var journey: CityRegionJourney
     @State private var selectedID: String?
+    @State private var selectedTab: CityDashboardTab = .map
     @State private var showsList = false
     @State private var showsMap = false
     @State private var mapNavigationDirection: CityMapNavigationDirection = .forward
+    @State private var mapRetry = 0
+    @State private var mapState: (scope: Int, result: CityContentLoad<[CityMapFeature]>)?
+    private let service = CityObservationService()
 
-    init() {
-        let journey: CityRegionJourney
+    init(root: CityRegion) {
+        var startingAdcode = 440000
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
         if arguments.contains("--city-district-preview") {
-            journey = CityRegionJourney(path: CityRegions.path(to: 440305))
+            startingAdcode = 440305
         } else if arguments.contains("--city-city-preview") {
-            journey = CityRegionJourney(path: CityRegions.path(to: 440300))
-        } else {
-            journey = CityRegionJourney(path: CityRegions.path(to: 440000))
+            startingAdcode = 440300
         }
-        #else
-        journey = CityRegionJourney(path: CityRegions.path(to: 440000))
         #endif
+        let journey = CityRegionJourney(root: root, startingAdcode: startingAdcode)
         _journey = State(initialValue: journey)
         _selectedID = State(initialValue: Self.defaultSelection(for: journey))
     }
@@ -123,7 +193,13 @@ struct CityNewsView: View {
             VStack(alignment: .leading, spacing: 16) {
                 KnowledgePageHeading(title: "城市观察", icon: "map", tint: CityDesign.accent)
                 header(region)
-                mapSection(scope: scope, selected: selected)
+                observationPicker
+                if selectedTab.showsMap {
+                    mapSection(scope: scope, selected: selected)
+                } else {
+                    CityStatisticsView(adcode: region.adcode, tab: selectedTab, service: service)
+                        .id(region.adcode)
+                }
             }
             .frame(maxWidth: 650)
             .padding(.horizontal, 20)
@@ -133,11 +209,21 @@ struct CityNewsView: View {
         }
         .scrollIndicators(.hidden)
         .background(KnowledgePagePalette.canvas.ignoresSafeArea())
-        .floatingSheetClose("关闭城市观察", action: dismiss.callAsFunction)
         .tint(CityDesign.accent)
         .sensoryFeedback(.selection, trigger: selectedID)
         .sensoryFeedback(.impact(weight: .light), trigger: journey.current.id)
         .accessibilityIdentifier("city-region-screen")
+        .task(id: MapRequest(adcode: scope.adcode, retry: mapRetry)) {
+            let adcode = scope.adcode
+            mapState = (adcode, .loading)
+            do {
+                let features = try await service.boundaries(for: adcode)
+                try Task.checkCancellation()
+                mapState = (adcode, .loaded(features))
+            } catch {
+                if !Task.isCancelled { mapState = (adcode, .failed) }
+            }
+        }
         .appSheet(isPresented: $showsList) {
             CityRegionList(
                 scope: scope,
@@ -149,8 +235,39 @@ struct CityNewsView: View {
             )
         }
         .appFullScreenCover(isPresented: $showsMap) {
-            CityFullScreenMap(scope: scope, selection: $selectedID)
+            if let mapState, mapState.scope == scope.adcode, case let .loaded(features) = mapState.result {
+                CityFullScreenMap(scope: scope, features: features, selection: $selectedID)
+            }
         }
+    }
+
+    private struct MapRequest: Equatable {
+        let adcode: Int
+        let retry: Int
+    }
+
+    private var observationPicker: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 6) {
+                ForEach(CityDashboardTab.allCases) { tab in
+                    Button {
+                        selectedTab = tab
+                    } label: {
+                        Text(tab.rawValue)
+                            .font(.subheadline.weight(selectedTab == tab ? .semibold : .medium))
+                            .padding(.horizontal, 12)
+                            .frame(minHeight: 44)
+                            .foregroundStyle(selectedTab == tab ? CityDesign.accent : .secondary)
+                            .background(selectedTab == tab ? CityDesign.accent.opacity(0.10) : .clear, in: Capsule())
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
+                }
+            }
+        }
+        .scrollIndicators(.hidden)
+        .accessibilityLabel("城市资料栏目")
     }
 
     private static func defaultSelection(for journey: CityRegionJourney) -> String? {
@@ -240,8 +357,8 @@ struct CityNewsView: View {
                 .accessibilityIdentifier("city-current-title")
 
             Text(region.children.isEmpty
-                 ? region.level.rawValue
-                 : "\(region.level.rawValue) · \(region.children.count) 个下级地区")
+                 ? region.level.title
+                 : "\(region.level.title) · \(region.children.count) 个下级地区")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -255,7 +372,7 @@ struct CityNewsView: View {
     private func mapSection(scope: CityRegion, selected: CityRegion?) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 8) {
-                KnowledgeSectionHeading(scope.level.childTitle ?? "区域地图")
+                KnowledgeSectionHeading(scope.childTitle)
                 if !scope.children.isEmpty {
                     Button { showsList = true } label: {
                         Label("全部 \(scope.children.count) 个", systemImage: "list.bullet")
@@ -271,20 +388,10 @@ struct CityNewsView: View {
             VStack(spacing: 0) {
                 ZStack(alignment: .bottomTrailing) {
                     CityDesign.mapBackground
-                    CityAdministrativeMap(scope: scope, selectedRegionID: selected?.id, onSelect: select)
+                    mapContent(scope: scope, selected: selected)
                         .id(scope.id)
                         .transition(mapTransition)
                         .padding(10)
-                    Button { showsMap = true } label: {
-                        Image(systemName: "arrow.up.left.and.arrow.down.right")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(CityDesign.accent)
-                            .frame(width: 44, height: 44)
-                            .knowledgeCard(cornerRadius: 12)
-                    }
-                    .buttonStyle(CityPressStyle())
-                    .accessibilityLabel("全屏地图")
-                    .padding(10)
                 }
                 .frame(height: 260)
                 .clipped()
@@ -296,6 +403,33 @@ struct CityNewsView: View {
                 }
             }
             .knowledgeCard(cornerRadius: 18)
+        }
+    }
+
+    @ViewBuilder
+    private func mapContent(scope: CityRegion, selected: CityRegion?) -> some View {
+        let result = mapState.flatMap { $0.scope == scope.adcode ? $0.result : nil } ?? .loading
+        switch result {
+        case .loading:
+            ProgressView("正在载入地区地图")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .failed:
+            CityLoadFailure(title: "地区地图载入失败") { mapRetry += 1 }
+        case let .loaded(features):
+            ZStack(alignment: .bottomTrailing) {
+                CityAdministrativeMap(scope: scope, features: features, selectedRegionID: selected?.id, onSelect: select)
+                if !features.isEmpty {
+                    Button { showsMap = true } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(CityDesign.accent)
+                            .frame(width: 44, height: 44)
+                            .knowledgeCard(cornerRadius: 12)
+                    }
+                    .buttonStyle(CityPressStyle())
+                    .accessibilityLabel("全屏地图")
+                }
+            }
         }
     }
 
@@ -321,7 +455,7 @@ struct CityNewsView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(region.name)
                     .font(.headline)
-                Text(region.id == journey.current.id ? "当前地区" : region.level.rawValue)
+                Text(region.id == journey.current.id ? "当前地区" : region.level.title)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -355,6 +489,128 @@ struct CityNewsView: View {
 
 }
 
+private struct CityLoadFailure: View {
+    let title: String
+    let retry: () -> Void
+
+    var body: some View {
+        ContentUnavailableView {
+            Label(title, systemImage: "wifi.exclamationmark")
+        } actions: {
+            Button("重试", action: retry)
+        }
+    }
+}
+
+private struct CityStatisticsView: View {
+    let adcode: Int
+    let tab: CityDashboardTab
+    let service: CityObservationService
+    @State private var state: CityContentLoad<CityObservationStatistics> = .loading
+    @State private var retry = 0
+
+    var body: some View {
+        Group {
+            switch state {
+            case .loading:
+                ProgressView("正在载入统计资料")
+                    .frame(maxWidth: .infinity, minHeight: 150)
+            case .failed:
+                CityLoadFailure(title: "统计资料载入失败") { retry += 1 }
+            case let .loaded(statistics):
+                content(statistics)
+            }
+        }
+        .task(id: retry) {
+            state = .loading
+            do {
+                let statistics = try await service.statistics(for: adcode)
+                try Task.checkCancellation()
+                state = .loaded(statistics)
+            } catch {
+                if !Task.isCancelled { state = .failed }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func content(_ statistics: CityObservationStatistics) -> some View {
+        let metrics = statistics.metrics.filter(tab.includes)
+        let sections = statistics.sections.filter(tab.showsSection)
+        if statistics.status == .notCovered {
+            ContentUnavailableView("来源尚未收录该地区", systemImage: "chart.bar.xaxis")
+        } else {
+            VStack(alignment: .leading, spacing: 16) {
+                if metrics.isEmpty {
+                    if sections.isEmpty {
+                        ContentUnavailableView("暂无\(tab.rawValue)资料", systemImage: "chart.bar.xaxis")
+                    }
+                } else {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(metrics) { metric in
+                            metricRow(metric)
+                            if metric.id != metrics.last?.id { Divider() }
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .knowledgeCard()
+                }
+
+                if tab == .data {
+                    ForEach(Array(statistics.notes.enumerated()), id: \.offset) { _, note in
+                        Text(note).font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+
+                if !sections.isEmpty {
+                    Text("统计公报").font(.headline).accessibilityAddTraits(.isHeader)
+                    ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
+                        DisclosureGroup(section.title) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                ForEach(Array(section.paragraphs.enumerated()), id: \.offset) { _, paragraph in
+                                    Text(paragraph).font(.subheadline).textSelection(.enabled)
+                                }
+                            }
+                            .padding(.vertical, 10)
+                        }
+                    }
+                }
+
+                if let source = statistics.source {
+                    Link(destination: source.url) {
+                        Label(source.title, systemImage: "arrow.up.right.square")
+                            .font(.footnote)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func metricRow(_ metric: CityObservationStatistics.Metric) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(metric.label).font(.subheadline)
+                Spacer(minLength: 4)
+                Text([metric.value, metric.unit].filter { !$0.isEmpty }.joined(separator: " "))
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
+            }
+            HStack(spacing: 8) {
+                if metric.year > 0 {
+                    Text("\(metric.year.formatted(.number.grouping(.never))) 年")
+                }
+                if let source = metric.source {
+                    Link(source.publisher.isEmpty ? source.title : source.publisher, destination: source.url)
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 10)
+    }
+}
+
 private enum CityDesign {
     static let accent = KnowledgePagePalette.atlas
     static let mapBackground = KnowledgePagePalette.adaptive(light: 0xE5EEE8, dark: 0x203730)
@@ -380,7 +636,7 @@ private struct CityRegionList: View {
     let onSelect: (CityRegion) -> Void
 
     var body: some View {
-        let title = scope.level.childTitle ?? "区域列表"
+        let title = scope.childTitle
         ScrollView {
             VStack(alignment: .leading, spacing: 13) {
                 KnowledgePageHeading(title: title, icon: "list.bullet", tint: CityDesign.accent)
@@ -429,6 +685,7 @@ private struct CityRegionList: View {
 private struct CityFullScreenMap: View {
     @Environment(\.dismiss) private var dismiss
     let scope: CityRegion
+    let features: [CityMapFeature]
     @Binding var selection: String?
 
     var body: some View {
@@ -439,7 +696,7 @@ private struct CityFullScreenMap: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(CityDesign.accent)
             }
-            CityAdministrativeMap(scope: scope, selectedRegionID: selection) { selection = $0.id }
+            CityAdministrativeMap(scope: scope, features: features, selectedRegionID: selection) { selection = $0.id }
                 .padding(8)
                 .background(CityDesign.mapBackground, in: .rect(cornerRadius: 18))
         }
@@ -454,11 +711,11 @@ private struct CityFullScreenMap: View {
 private struct CityAdministrativeMap: View {
     @ScaledMetric(relativeTo: .caption2) private var labelSize: CGFloat = 9
     let scope: CityRegion
+    let features: [CityMapFeature]
     let selectedRegionID: String?
     let onSelect: (CityRegion) -> Void
 
     var body: some View {
-        let features = CityMapRepository.shared.features(for: scope)
         let regionByAdcode = Dictionary(uniqueKeysWithValues: scope.children.map { ($0.adcode, $0) })
         let selectedAdcode = scope.children.first { $0.id == selectedRegionID }?.adcode
         GeometryReader { geometry in
