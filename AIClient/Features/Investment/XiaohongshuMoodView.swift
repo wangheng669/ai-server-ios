@@ -1,13 +1,14 @@
 import SwiftUI
 
-struct XiaohongshuMoodSheet: View {
+struct XiaohongshuMoodView: View {
     private enum Section: String, CaseIterable {
         case notes = "采集笔记"
         case runs = "采集记录"
     }
 
+    let isActive: Bool
     let load: () async throws -> XiaohongshuMoodBoard
-    @Environment(\.dismiss) private var dismiss
+    let onHeightChange: (CGFloat) -> Void
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var board: XiaohongshuMoodBoard?
@@ -22,7 +23,6 @@ struct XiaohongshuMoodSheet: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                sourceHeader
                 if let errorMessage {
                     retryRow(errorMessage)
                 }
@@ -47,57 +47,18 @@ struct XiaohongshuMoodSheet: View {
                 }
             }
             .frame(maxWidth: TodayBriefStyle.maximumCardWidth, alignment: .leading)
-            .padding(.horizontal, ResearchDesign.inset)
+            .padding(.horizontal, TodayBriefStyle.horizontalInset)
             .padding(.top, 16)
-            .padding(.bottom, 76)
+            .padding(.bottom, RetailInvestorView.closeClearance)
             .frame(maxWidth: .infinity)
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.height.rounded(.up) }, action: onHeightChange)
         }
         .scrollIndicators(.hidden)
         .scrollBounceBehavior(.basedOnSize)
-        .background(InvestmentDesign.surface)
-        .floatingSheetClose("关闭小红书", identifier: "xiaohongshu-mood-close", action: dismiss.callAsFunction)
-        .accessibilityAction(.escape) { dismiss() }
-        .accessibilityIdentifier("xiaohongshu-mood-sheet")
-        .task(id: LoadTrigger(phase: scenePhase, retry: retry)) {
-            guard scenePhase == .active else { return }
+        .accessibilityIdentifier("xiaohongshu-mood-content")
+        .task(id: LoadTrigger(isActive: isActive, phase: scenePhase, retry: retry)) {
+            guard isActive, scenePhase == .active else { return }
             await refreshWhileVisible()
-        }
-    }
-
-    private var sourceHeader: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack {
-                sourceLabel
-                Spacer(minLength: 8)
-                updateLabel
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                sourceLabel
-                updateLabel
-            }
-        }
-    }
-
-    private var sourceLabel: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "bubble.left.and.bubble.right")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(ResearchDesign.accent)
-                .frame(width: 30, height: 30)
-                .background(ResearchDesign.selection, in: RoundedRectangle(cornerRadius: 8))
-                .accessibilityHidden(true)
-            Text("\(Text("小红书").fontWeight(.semibold))\(Text(" · A 股").foregroundStyle(.secondary))")
-                .font(.subheadline)
-        }
-        .fixedSize(horizontal: true, vertical: false)
-    }
-
-    @ViewBuilder
-    private var updateLabel: some View {
-        if let date = board?.updatedAt {
-            Text("\(XiaohongshuMoodTime.label(date, .dateAndTime)) 入库")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
     }
 
@@ -130,6 +91,11 @@ struct XiaohongshuMoodSheet: View {
             }
             if !board.notes.isEmpty {
                 composition(board)
+            }
+            if let updatedAt = board.updatedAt {
+                Text("\(XiaohongshuMoodTime.label(updatedAt, .dateAndTime)) 入库")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(16)
@@ -386,6 +352,7 @@ struct XiaohongshuMoodSheet: View {
     }
 
     private struct LoadTrigger: Equatable {
+        let isActive: Bool
         let phase: ScenePhase
         let retry: Int
     }

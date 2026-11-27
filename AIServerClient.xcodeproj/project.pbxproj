@@ -50,7 +50,7 @@
 		5543ADDBFA9B940978410DD8 /* CountryGDPRankingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C6756677ADA82073372908E /* CountryGDPRankingView.swift */; };
 		5BD0A8A5E55F738CE9F9EE81 /* LearningView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 888F04206EE0876BD874BBAF /* LearningView.swift */; };
 		617480D9D30D6A38B04EA755 /* RetailInvestorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D5C78B11625D59970AF947C /* RetailInvestorView.swift */; };
-		92ED3A6DF5BB427892108F0B /* XiaohongshuMoodSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67274454EF2C44B4B219F4B1 /* XiaohongshuMoodSheet.swift */; };
+		92ED3A6DF5BB427892108F0B /* XiaohongshuMoodView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67274454EF2C44B4B219F4B1 /* XiaohongshuMoodView.swift */; };
 		681EF7E93F4BE35044B2149C /* MarketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0964D64008AE6D9891C78345 /* MarketService.swift */; };
 		70916F86F3EB28B10FB8EB3C /* PostDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47F7ED7E08363D8510FC627D /* PostDetailView.swift */; };
 		70A27F86F3EB28B10FB8EB3C /* YouTubeVideoDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47A27D7E08363D8510FC627D /* YouTubeVideoDetailView.swift */; };
@@ -145,7 +145,7 @@
 		3686E2A6A6443140E186A435 /* WikipediaArticleSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikipediaArticleSupport.swift; sourceTree = "<group>"; };
 		3B4D5F60718293A4B5C6D7E8 /* PersonPushNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonPushNotificationManager.swift; sourceTree = "<group>"; };
 		3D5C78B11625D59970AF947C /* RetailInvestorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetailInvestorView.swift; sourceTree = "<group>"; };
-		67274454EF2C44B4B219F4B1 /* XiaohongshuMoodSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XiaohongshuMoodSheet.swift; sourceTree = "<group>"; };
+		67274454EF2C44B4B219F4B1 /* XiaohongshuMoodView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XiaohongshuMoodView.swift; sourceTree = "<group>"; };
 		40244177985ED17E7717147A /* FamousHoldingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamousHoldingsStore.swift; sourceTree = "<group>"; };
 		47F7ED7E08363D8510FC627D /* PostDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostDetailView.swift; sourceTree = "<group>"; };
 		47A27D7E08363D8510FC627D /* YouTubeVideoDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouTubeVideoDetailView.swift; sourceTree = "<group>"; };
@@ -404,7 +404,7 @@
 				75D84CF1869965892028891E /* IndustryPanoramaView.swift */,
 				C5FF3634D4DF69CCE8DB1B32 /* InvestmentDesign.swift */,
 				3D5C78B11625D59970AF947C /* RetailInvestorView.swift */,
-				67274454EF2C44B4B219F4B1 /* XiaohongshuMoodSheet.swift */,
+				67274454EF2C44B4B219F4B1 /* XiaohongshuMoodView.swift */,
 			);
 			path = Investment;
 			sourceTree = "<group>";
@@ -621,7 +621,7 @@
 				70A27F86F3EB28B10FB8EB3C /* YouTubeVideoDetailView.swift in Sources */,
 				10D34066B133EC9CD153A5B9 /* RealtimeFeedClient.swift in Sources */,
 				617480D9D30D6A38B04EA755 /* RetailInvestorView.swift in Sources */,
-				92ED3A6DF5BB427892108F0B /* XiaohongshuMoodSheet.swift in Sources */,
+				92ED3A6DF5BB427892108F0B /* XiaohongshuMoodView.swift in Sources */,
 				EC73C344C05CAB07C8B39CFB /* ServerConfiguration.swift in Sources */,
 				8F922EC1F4F62D3B56B74D1D /* ServerSetupView.swift in Sources */,
 				BCE08613AAF3FE8AE92F8724 /* WikipediaArticleSupport.swift in Sources */,
