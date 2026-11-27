@@ -744,6 +744,11 @@ struct Post: Codable, Identifiable, Hashable {
             return (scheme == "https" || scheme == "http") && url.host() != nil
         }
     }
+    var xBodyHasNoLanguageText: Bool {
+        guard source == "x" else { return false }
+        let sample = LocalTranslatedText.languageSample(xStoredOriginalContent)
+        return !sample.unicodeScalars.contains(where: CharacterSet.letters.contains)
+    }
     var isChineseXSource: Bool {
         sourceName == "X" && meta?.lang?.lowercased().hasPrefix("zh") == true
     }
